@@ -1,0 +1,1128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How GRETVault works</title>
+<style>
+  @page { size: A4; margin: 22mm 20mm 22mm 20mm; @bottom-center { content: counter(page); font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 9pt; color: #888; } }
+  @page :first { @bottom-center { content: none; } }
+  * { box-sizing: border-box; }
+  body { font-family: Georgia, "Times New Roman", serif; font-size: 11pt; line-height: 1.55; color: #1d1d1f; margin: 0; }
+  h1, h2, h3, .cover, .toc, th, .label, figcaption, code, .eyebrow { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  .cover { height: 245mm; display: flex; flex-direction: column; justify-content: center; break-after: page; }
+  .cover .eyebrow { font-size: 10pt; letter-spacing: 1.5pt; text-transform: uppercase; color: #3b5bdb; margin-bottom: 10pt; }
+  .cover h1 { font-size: 36pt; line-height: 1.1; margin: 0 0 14pt; letter-spacing: -0.5pt; }
+  .cover .lead { font-family: Georgia, serif; font-size: 14pt; color: #444; max-width: 140mm; margin: 0 0 30pt; }
+  .cover .meta { font-size: 10pt; color: #666; line-height: 1.7; }
+  .toc { break-after: page; }
+  .toc h2 { border: none; margin-top: 0; }
+  .toc ol { list-style: none; padding: 0; margin: 0; font-size: 11pt; }
+  .toc > ol { columns: 2; column-gap: 14mm; }
+  .toc > ol > li { margin: 0 0 7pt; font-weight: 600; break-inside: avoid; font-size: 10.5pt; }
+  .toc ol ol { font-weight: 400; font-size: 9pt; color: #444; margin: 2pt 0 0 22pt; line-height: 1.35; }
+  .toc ol ol li { margin: 0; }
+  .toc .num { display: inline-block; width: 22pt; color: #3b5bdb; }
+  .chapter { break-before: page; }
+  .chapter-num { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 10pt; letter-spacing: 1.5pt; text-transform: uppercase; color: #3b5bdb; margin: 0 0 4pt; }
+  h2 { font-size: 22pt; margin: 0 0 6pt; letter-spacing: -0.3pt; line-height: 1.15; }
+  .intro { font-size: 12pt; color: #444; margin: 0 0 16pt; padding-bottom: 10pt; border-bottom: 1pt solid #ddd; }
+  h3 { font-size: 13pt; margin: 18pt 0 5pt; break-after: avoid; }
+  h3 .n { color: #3b5bdb; margin-right: 6pt; }
+  p { margin: 0 0 8pt; }
+  ul, ol { margin: 0 0 9pt; padding-left: 18pt; }
+  li { margin-bottom: 3pt; }
+  code { font-size: 9pt; background: #f2f2f4; padding: 0 3pt; border-radius: 3pt; }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0 12pt; font-size: 9.5pt; font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  tr { break-inside: avoid; }
+  tr.group { break-after: avoid; }
+  tr.group td { padding-top: 8pt; }
+  th, td { text-align: left; vertical-align: top; padding: 4pt 6pt; border-bottom: 0.6pt solid #d0d0d6; }
+  th { background: #f2f2f4; font-weight: 600; border-bottom: 1pt solid #888; }
+  .box { border: 1pt solid #c9c9d1; border-radius: 6pt; padding: 9pt 11pt; margin: 9pt 0 12pt; background: #fafafb; break-inside: avoid; }
+  .box.example { border-left: 4pt solid #3b5bdb; }
+  .box.warn { border-color: #d9a441; background: #fff8ea; }
+  .box.ok { border-color: #5a9e6f; background: #f1f8f3; }
+  .box.no { border-color: #c96a5a; background: #fcf2f0; }
+  .box p:last-child, .box ul:last-child, .box ol:last-child { margin-bottom: 0; }
+  .label { font-weight: 600; }
+  .box .label:first-child { display: block; margin-bottom: 3pt; }
+  figure { margin: 10pt 0 14pt; break-inside: avoid; }
+  figcaption { font-size: 9pt; color: #555; margin-top: 4pt; }
+  .two { display: flex; gap: 10pt; }
+  .two > div { flex: 1; }
+  .small { font-size: 9.5pt; color: #555; }
+  td code, th code { font-size: 8.5pt; }
+  .page-start { break-before: page; }
+  .id { white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="eyebrow">Global Reserve Token</div>
+  <h1>How GRETVault works</h1>
+  <p class="lead">A plain-language guide to the vault contract: how GRET is minted and redeemed, how the basket changes, what governance and the rebalancer can and cannot do, and what happens in an emergency.</p>
+  <div class="meta">
+    October 26, 2026<br>
+    Covers GRETVault and ChainlinkPriceGuard, and every accepted risk<br>
+    Not yet deployed · not independently audited
+  </div>
+</section>
+
+<section class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><span class="num">1</span>The big picture
+      <ol><li>One contract, one token</li><li>Who does what</li><li>The contracts and how they connect</li><li>Three ideas to keep in mind</li></ol></li>
+    <li><span class="num">2</span>Minting GRET
+      <ol><li>How much you deposit</li><li>The first mint</li><li>Step by step</li><li>Protections and limits</li></ol></li>
+    <li><span class="num">3</span>Redeeming GRET
+      <ol><li>Who can redeem</li><li>How much you receive</li><li>The 1 GRET floor</li><li>All or nothing, and the emergency exit</li></ol></li>
+    <li><span class="num">4</span>Fees
+      <ol><li>The mint fee</li><li>The redemption fee</li><li>Limits and changes</li><li>Side effects</li></ol></li>
+    <li><span class="num">5</span>The basket and its reserves
+      <ol><li>Components</li><li>Reserve, balance and surplus</li><li>Losses</li><li>Surpluses: sync and rescue</li></ol></li>
+    <li><span class="num">6</span>Governance
+      <ol><li>What governance can and cannot do</li><li>How a change works: wait, then a window</li><li>Adding a token</li><li>Removing a token</li><li>Writing off a broken token</li><li>Appointing the rebalancer</li><li>Setting fees</li><li>Pausing the mint</li><li>Handing over governance</li><li>From a wallet to a vote</li></ol></li>
+    <li><span class="num">7</span>The rebalancer and swaps
+      <ol><li>Why nobody sets "how much to deposit"</li><li>What a swap does</li><li>Trust and its limits</li><li>The price guard</li><li>Funding a swap</li></ol></li>
+    <li><span class="num">8</span>Liquidation
+      <ol><li>Starting it</li><li>Exiting token by token</li><li>When a token falls short or fails</li></ol></li>
+    <li><span class="num">9</span>A year in the life of the vault
+      <ol><li>Deployment</li><li>The first mint</li><li>Alice joins</li><li>A new token joins</li><li>A fee is turned on</li><li>An issuer freezes the vault</li><li>The issuer lifts the freeze</li><li>A notice that expires</li><li>The year at a glance</li></ol></li>
+    <li><span class="num">10</span>Governance in practice
+      <ol><li>Four stages</li><li>Stage 2: a multisig</li><li>Stage 3: a timelock</li><li>Stage 4: the voting token</li><li>A proposal from start to finish</li><li>Settings to choose</li><li>Who holds what at stage 4</li><li>Example: adding a token by vote</li><li>What can go wrong</li><li>Tools</li></ol></li>
+    <li><span class="num">11</span>Safety
+      <ol><li>What the code guarantees</li><li>What it does not</li><li>The pilot</li><li>Accepted risks, one by one</li><li>What governance commits to</li></ol></li>
+    <li><span class="num">12</span>Questions and answers</li>
+    <li><span class="num">13</span>Reference
+      <ol><li>Functions</li><li>Fixed numbers</li><li>Glossary</li><li>Still open</li></ol></li>
+  </ol>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 1</p>
+<h2>The big picture</h2>
+<p class="intro">GRET is a share of a basket of tokenized assets. One contract issues the shares and holds the basket, and it enforces every rule on its own.</p>
+
+<h3><span class="n">1.1</span>One contract, one token</h3>
+<p><code>GRETVault</code> is two things at once. It is the GRET token, a standard ERC-20 that wallets such as MetaMask can show and that can be transferred freely. And it is the vault that holds the basket: today 11 tokens, from ITOTon and SPYx to PAXG and cbBTC. The token's address is the vault's address.</p>
+<p>Holding GRET means owning a proportional part of everything in the vault. If 100 GRET exist, each one represents 1% of every token the vault holds. Minting and redeeming use no prices and no stored value per GRET: the contract only counts tokens. Prices appear in one place only, to limit what a swap can lose (chapter 7).</p>
+
+<h3><span class="n">1.2</span>Who does what</h3>
+<figure>
+<svg viewBox="0 0 680 250" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#555"/></marker></defs>
+  <rect x="250" y="80" width="180" height="90" rx="8" fill="#eef2fb" stroke="#3b5bdb" stroke-width="2"/>
+  <text x="340" y="108" text-anchor="middle" font-weight="600" font-size="13">GRETVault</text>
+  <text x="340" y="126" text-anchor="middle">GRET token + vault</text>
+  <text x="340" y="142" text-anchor="middle">holds the reserves</text>
+  <text x="340" y="158" text-anchor="middle" fill="#555" font-size="11">enforces every rule</text>
+  <rect x="20" y="95" width="150" height="60" rx="8" fill="none" stroke="#555"/>
+  <text x="95" y="120" text-anchor="middle" font-weight="600">Holders</text>
+  <text x="95" y="138" text-anchor="middle" font-size="11" fill="#555">whoever holds GRET</text>
+  <path d="M170 113H250" stroke="#555" fill="none" marker-end="url(#a)"/>
+  <path d="M250 137H170" stroke="#555" fill="none" marker-end="url(#a)"/>
+  <text x="210" y="106" text-anchor="middle" font-size="10.5" fill="#555">mint</text>
+  <text x="210" y="152" text-anchor="middle" font-size="10.5" fill="#555">redeem</text>
+  <rect x="510" y="20" width="150" height="60" rx="8" fill="none" stroke="#555"/>
+  <text x="585" y="45" text-anchor="middle" font-weight="600">Governance</text>
+  <text x="585" y="63" text-anchor="middle" font-size="11" fill="#555">today: the pilot wallet</text>
+  <path d="M510 60H430" stroke="#555" fill="none" marker-end="url(#a)"/>
+  <text x="470" y="52" text-anchor="middle" font-size="10.5" fill="#555">decides</text>
+  <rect x="510" y="170" width="150" height="60" rx="8" fill="none" stroke="#555"/>
+  <text x="585" y="195" text-anchor="middle" font-weight="600">Rebalancer</text>
+  <text x="585" y="213" text-anchor="middle" font-size="11" fill="#555">at deployment: none</text>
+  <path d="M585 80V170" stroke="#555" stroke-dasharray="4 3" fill="none" marker-end="url(#a)"/>
+  <text x="592" y="122" font-size="10.5" fill="#555">appoints it</text>
+  <text x="592" y="136" font-size="10.5" fill="#555">(waits 7 days)</text>
+  <path d="M510 200H470V160H430" stroke="#555" fill="none" marker-end="url(#a)"/>
+  <text x="470" y="216" text-anchor="middle" font-size="10.5" fill="#555">swap</text>
+</svg>
+<figcaption>Holders enter and exit through the vault. Governance decides changes and appoints the rebalancer, the only address that can swap one token for another, within the limits of a price guard.</figcaption>
+</figure>
+<table>
+  <tr><th style="width:20%">Role</th><th>What it does</th><th style="width:26%">Today</th></tr>
+  <tr><td>Holders</td><td>Mint GRET by depositing the basket and redeem it for the basket. Anyone can hold GRET; only wallets that minted can redeem it normally.</td><td>—</td></tr>
+  <tr><td>Governance</td><td>Changes the basket, sets fees, pauses minting, appoints the rebalancer, the price guard and its own successor, decides on surpluses, and can start a liquidation. Every important change waits 7 days.</td><td>The pilot wallet (0xe03E…b7fd)</td></tr>
+  <tr><td>Rebalancer</td><td>Exchanges one basket token for another (a swap). It is the only role that moves reserves at a price it chooses.</td><td>None at deployment</td></tr>
+  <tr><td>Price guard</td><td>A contract with no owner that prices every swap with Chainlink and refuses the ones that lose too much.</td><td>None at deployment</td></tr>
+  <tr><td>Fee recipient</td><td>Receives the mint and redemption fees, paid in GRET.</td><td>Fees are 0</td></tr>
+  <tr><td>Issuers</td><td>Ondo, Backed, Paxos and Coinbase control their own tokens: they can pause, freeze or upgrade them. The vault cannot stop that.</td><td>—</td></tr>
+</table>
+
+<h3 class="page-start"><span class="n">1.3</span>The contracts and how they connect</h3>
+<figure>
+<svg viewBox="0 0 680 790" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11">
+  <defs><marker id="arch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#555"/></marker></defs>
+
+  <!-- Governance -->
+  <rect x="10" y="8" width="660" height="142" rx="10" fill="#fafafb" stroke="#c9c9d1"/>
+  <text x="24" y="31" font-weight="600" font-size="13">Governance</text>
+  <text x="24" y="47" fill="#555" font-size="10.5">One address in the vault. Who stands behind it can change, each time through the vault's 7-day handover.</text>
+  <rect x="24" y="60" width="140" height="76" rx="7" fill="#fff" stroke="#777" stroke-width="1.2"/>
+  <text x="94" y="82" text-anchor="middle" font-weight="600" font-size="12.5">Pilot wallet</text>
+  <text x="94" y="100" text-anchor="middle" fill="#555" font-size="10.5">a wallet (EOA)</text>
+  <text x="94" y="122" text-anchor="middle" fill="#3b5bdb" font-size="10.5">stage 1 · today</text>
+  <rect x="188" y="60" width="140" height="76" rx="7" fill="#fff" stroke="#777" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="258" y="82" text-anchor="middle" font-weight="600" font-size="12.5">Safe</text>
+  <text x="258" y="100" text-anchor="middle" fill="#555" font-size="10.5">multisig, e.g. 2 of 3</text>
+  <text x="258" y="122" text-anchor="middle" fill="#3b5bdb" font-size="10.5">stage 2</text>
+  <rect x="352" y="60" width="140" height="76" rx="7" fill="#fff" stroke="#777" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="422" y="82" text-anchor="middle" font-weight="600" font-size="12.5">TimelockController</text>
+  <text x="422" y="100" text-anchor="middle" fill="#555" font-size="10.5">public delay, Safe proposes</text>
+  <text x="422" y="122" text-anchor="middle" fill="#3b5bdb" font-size="10.5">stage 3</text>
+  <rect x="516" y="60" width="140" height="76" rx="7" fill="#fff" stroke="#777" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="586" y="82" text-anchor="middle" font-weight="600" font-size="12.5">Governor + VORA</text>
+  <text x="586" y="100" text-anchor="middle" fill="#555" font-size="10.5">VORA holders vote</text>
+  <text x="586" y="122" text-anchor="middle" fill="#3b5bdb" font-size="10.5">stage 4 · via the timelock</text>
+  <path d="M164 98H188" stroke="#555" marker-end="url(#arch)"/>
+  <path d="M328 98H352" stroke="#555" marker-end="url(#arch)"/>
+  <path d="M492 98H516" stroke="#555" marker-end="url(#arch)"/>
+
+  <!-- Governance to vault -->
+  <path d="M340 150V200" stroke="#555" marker-end="url(#arch)"/>
+  <text x="348" y="171" fill="#555" font-size="10.5">basket, fees, pause, sync, rescue, liquidation;</text>
+  <text x="348" y="185" fill="#555" font-size="10.5">appoints the rebalancer and the price guard</text>
+
+  <!-- Vault -->
+  <rect x="200" y="200" width="280" height="230" rx="10" fill="#eef2fb" stroke="#3b5bdb" stroke-width="2"/>
+  <text x="340" y="225" text-anchor="middle" font-weight="600" font-size="15">GRETVault</text>
+  <text x="340" y="243" text-anchor="middle" fill="#555" font-size="10.5">the GRET token (ERC-20) and the vault</text>
+  <g font-size="11.5">
+    <text x="218" y="267">• mint, redeem, redeemSkipping</text>
+    <text x="218" y="284">• holds the reserves of every token</text>
+    <text x="218" y="301">• swap, only for the rebalancer</text>
+    <text x="218" y="318">• basket changes, each after 7 days</text>
+    <text x="218" y="335">• fees, mint pause, sync and rescue</text>
+    <text x="218" y="352">• liquidation and claims</text>
+  </g>
+  <path d="M218 367H462" stroke="#b7c3ec"/>
+  <text x="218" y="385" fill="#555" font-size="10.5">Keeps the addresses of governance, the</text>
+  <text x="218" y="400" fill="#555" font-size="10.5">rebalancer, the price guard and the fee</text>
+  <text x="218" y="415" fill="#555" font-size="10.5">recipient. No owner; cannot be upgraded.</text>
+
+  <!-- Holders -->
+  <rect x="10" y="212" width="120" height="70" rx="7" fill="#fff" stroke="#777" stroke-width="1.2"/>
+  <text x="70" y="235" text-anchor="middle" font-weight="600" font-size="12.5">Holders</text>
+  <text x="70" y="253" text-anchor="middle" fill="#555" font-size="10.5">wallets or contracts</text>
+  <text x="70" y="269" text-anchor="middle" fill="#555" font-size="10.5">mint, redeem, claim</text>
+  <path d="M130 247H200" stroke="#555" marker-start="url(#arch)" marker-end="url(#arch)"/>
+
+  <!-- Fee recipient -->
+  <rect x="10" y="330" width="120" height="70" rx="7" fill="#fff" stroke="#777" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="70" y="353" text-anchor="middle" font-weight="600" font-size="12.5">Fee recipient</text>
+  <text x="70" y="371" text-anchor="middle" fill="#555" font-size="10.5">an address, set</text>
+  <text x="70" y="387" text-anchor="middle" fill="#555" font-size="10.5">when fees start</text>
+  <path d="M200 365H130" stroke="#555" marker-end="url(#arch)"/>
+  <text x="165" y="358" text-anchor="middle" fill="#555" font-size="10">fees in GRET</text>
+
+  <!-- Rebalancer -->
+  <rect x="530" y="212" width="140" height="108" rx="7" fill="#fff" stroke="#777" stroke-width="1.2" stroke-dasharray="5 3"/>
+  <text x="600" y="235" text-anchor="middle" font-weight="600" font-size="12.5">Rebalancer</text>
+  <text x="600" y="253" text-anchor="middle" fill="#555" font-size="10.5">none at deployment</text>
+  <text x="600" y="270" text-anchor="middle" fill="#555" font-size="10.5">pilot: the pilot wallet</text>
+  <text x="600" y="287" text-anchor="middle" fill="#555" font-size="10.5">later: a bot or an</text>
+  <text x="600" y="303" text-anchor="middle" fill="#555" font-size="10.5">auction contract</text>
+  <path d="M530 262H480" stroke="#555" marker-end="url(#arch)"/>
+  <text x="505" y="255" text-anchor="middle" fill="#555" font-size="10">swap</text>
+
+  <!-- Vault to tokens -->
+  <path d="M230 430V490" stroke="#555" marker-end="url(#arch)"/>
+  <text x="222" y="452" text-anchor="end" fill="#555" font-size="10">transfer,</text>
+  <text x="222" y="465" text-anchor="end" fill="#555" font-size="10">transferFrom,</text>
+  <text x="222" y="478" text-anchor="end" fill="#555" font-size="10">balanceOf</text>
+
+  <!-- Vault and guard -->
+  <path d="M400 430V490" stroke="#555" marker-end="url(#arch)"/>
+  <text x="393" y="458" text-anchor="end" fill="#555" font-size="10">checkSwap,</text>
+  <text x="393" y="471" text-anchor="end" fill="#555" font-size="10">on every swap</text>
+  <path d="M450 490V430" stroke="#555" marker-end="url(#arch)"/>
+  <text x="458" y="458" fill="#555" font-size="10">reads components</text>
+  <text x="458" y="471" fill="#555" font-size="10">and reserves</text>
+
+  <!-- Tokens -->
+  <rect x="10" y="490" width="330" height="158" rx="8" fill="#fff" stroke="#777" stroke-width="1.2"/>
+  <text x="26" y="514" font-weight="600" font-size="13">11 component tokens</text>
+  <text x="26" y="531" fill="#555" font-size="10.5">ERC-20, upgradeable, each controlled by its issuer</text>
+  <g font-size="11">
+    <text x="26" y="556" font-weight="600">Ondo ×7</text><text x="120" y="556">ITOTon, EFAon, IEMGon, SGOVon,</text>
+    <text x="120" y="572">BILon, VNQon, DBCon</text>
+    <text x="26" y="593" font-weight="600">Backed ×2</text><text x="120" y="593">SPYx, JAAAx (xStocks)</text>
+    <text x="26" y="613" font-weight="600">Paxos</text><text x="120" y="613">PAXG</text>
+    <text x="26" y="633" font-weight="600">Coinbase</text><text x="120" y="633">cbBTC</text>
+  </g>
+
+  <!-- Guard -->
+  <rect x="360" y="490" width="310" height="130" rx="8" fill="#eef2fb" stroke="#3b5bdb" stroke-width="1.6" stroke-dasharray="5 3"/>
+  <text x="515" y="514" text-anchor="middle" font-weight="600" font-size="13">ChainlinkPriceGuard</text>
+  <text x="515" y="531" text-anchor="middle" fill="#555" font-size="10.5">implements IPriceGuard · no owner</text>
+  <g font-size="11">
+    <text x="376" y="554">• values both sides of a swap in US dollars</text>
+    <text x="376" y="570">• refuses a swap that loses more than 2%</text>
+    <text x="376" y="586">• caps the week's losses at 2% of the vault</text>
+    <text x="376" y="602">• nothing to change; only the vault calls it</text>
+  </g>
+
+  <!-- Guard to feeds -->
+  <path d="M515 620V670" stroke="#555" marker-end="url(#arch)"/>
+  <text x="523" y="649" fill="#555" font-size="10">latestRoundData</text>
+
+  <!-- Feeds -->
+  <rect x="360" y="670" width="310" height="106" rx="8" fill="#fff" stroke="#777" stroke-width="1.2"/>
+  <text x="376" y="694" font-weight="600" font-size="13">Chainlink price feeds ×5</text>
+  <text x="376" y="711" fill="#555" font-size="10.5">operated by Chainlink</text>
+  <g font-size="11">
+    <text x="376" y="733">SPY-USD (for SPYx) · SGOVon · BILon</text>
+    <text x="376" y="749">PAXG / USD · cbBTC / USD</text>
+  </g>
+  <text x="376" y="766" fill="#555" font-size="10.5">the other six tokens have no feed yet</text>
+
+  <!-- Legend -->
+  <g font-size="10.5" fill="#333">
+    <rect x="14" y="684" width="24" height="14" rx="3" fill="#eef2fb" stroke="#3b5bdb" stroke-width="1.6"/>
+    <text x="46" y="695">Our code, in this repository</text>
+    <rect x="14" y="708" width="24" height="14" rx="3" fill="#fff" stroke="#777" stroke-width="1.2"/>
+    <text x="46" y="719">Third-party contracts, tokens and wallets</text>
+    <rect x="14" y="732" width="24" height="14" rx="3" fill="#fff" stroke="#777" stroke-width="1.2" stroke-dasharray="5 3"/>
+    <text x="46" y="743">Not there at deployment; added later</text>
+    <path d="M14 763H38" stroke="#555" marker-end="url(#arch)"/>
+    <text x="46" y="767">Calls, or tokens moving</text>
+  </g>
+</svg>
+<figcaption>Every contract around the vault. Only GRETVault holds funds. The price guard can only refuse a swap; it never moves tokens. Governance and the rebalancer are just addresses to the vault, so what stands behind them can change without touching the vault.</figcaption>
+</figure>
+
+<table class="page-start">
+  <tr><th style="width:23%">Contract</th><th>What it does</th><th style="width:24%">At deployment</th></tr>
+  <tr class="group"><td colspan="3"><span class="label">In this repository</span></td></tr>
+  <tr><td><code>GRETVault</code></td><td>The GRET token and the vault in one contract. It takes the basket in and issues GRET, pays the basket out for GRET, keeps the reserves and their accounting, and runs the rebalancer's swaps, the basket changes with their 7-day waits, fees, the mint pause, sync and rescue, and liquidation. It enforces every limit on its own. No owner, no upgrades.</td><td>Deployed by the pilot wallet, which makes the first mint</td></tr>
+  <tr><td><code>IPriceGuard</code></td><td>Not a deployed contract but an interface: the one question the vault asks before every swap, <code>checkSwap(sell, sellAmount, buy, received)</code>. Any contract that answers it can be appointed as the guard; if it says no, the swap reverts.</td><td>—</td></tr>
+  <tr><td><code>ChainlinkPriceGuard</code></td><td>The first price guard. It values what the vault gives and what it gets in US dollars with Chainlink feeds, and refuses a swap that loses more than 2%, one that would take the week's losses above 2% of the vault, and one with a token without a fresh price. It holds no funds and has no owner: its feeds and limits are fixed for good, and only the vault can call it.</td><td>Not deployed. When a rebalance is needed: deployed with the five feeds and appointed with the 7-day wait</td></tr>
+  <tr class="group"><td colspan="3"><span class="label">Governance: one address, which can change (chapter 10)</span></td></tr>
+  <tr><td>Pilot wallet<br><span class="small">a wallet (EOA), not a contract</span></td><td>Deploys the vault, makes the first mint and is the first governance: one signature, at once. If the pilot needs a rebalance, it also becomes the rebalancer.</td><td>Governance</td></tr>
+  <tr><td>Safe<br><span class="small">by Safe</span></td><td>A multisig wallet: several signers must approve each transaction, so losing or stealing one key no longer loses or takes governance.</td><td>Planned, stage 2</td></tr>
+  <tr><td><code>TimelockController</code><br><span class="small">by OpenZeppelin</span></td><td>Queues every governance action and runs it only after a public delay, so holders see it coming. It becomes the vault's governance; the Safe is its only proposer and executor.</td><td>Planned, stage 3</td></tr>
+  <tr><td><code>Governor</code><br><span class="small">by OpenZeppelin</span></td><td>Runs VORA votes: proposals, voting, counting, and queueing what passes in the timelock, which stays the vault's governance.</td><td>Planned, stage 4</td></tr>
+  <tr><td>VORA<br><span class="small">the project's voting token</span></td><td>Gives voting power in the Governor; it must be built on OpenZeppelin's <code>ERC20Votes</code>. It is not in this repository, and GRET itself never votes.</td><td>Planned, stage 4</td></tr>
+  <tr class="group"><td colspan="3"><span class="label">Other roles, each held by one address</span></td></tr>
+  <tr><td>Rebalancer</td><td>The only address that can call <code>swap</code>: it delivers one basket token and takes another, at a price it chooses within the guard's limits. It can be a wallet, or a contract that funds swaps with a flash loan or runs an auction (section 7.5).</td><td>None. Appointed with the 7-day wait when needed</td></tr>
+  <tr><td>Fee recipient</td><td>Receives the mint and redemption fees, in GRET. Governance sets it at once; it can never be the vault.</td><td>None while fees are zero; in the pilot, the pilot wallet</td></tr>
+  <tr class="group"><td colspan="3"><span class="label">Third parties the vault depends on</span></td></tr>
+  <tr><td>Component tokens<br><span class="small">Ondo, Backed, Paxos, Coinbase</span></td><td>The 11 ERC-20 tokens the vault holds. All are upgradeable: their issuers can pause, freeze or change them, and the vault cannot stop that.</td><td>The basket of 11</td></tr>
+  <tr><td>Chainlink price feeds<br><span class="small">by Chainlink</span></td><td>Publish the US-dollar prices the guard reads: SPY (for SPYx), SGOVon, BILon, PAXG and cbBTC. The guard refuses a price older than 25 hours, so swaps of the stock tokens stop on weekends.</td><td>Read only by the guard</td></tr>
+</table>
+<p class="small">The repository also has test-only contracts in <code>contracts/mocks/</code> (<code>MockERC20</code>, <code>MockFaultyERC20</code>, <code>MockNoReturnERC20</code>, <code>MockAggregator</code>, <code>MockPriceGuard</code>). They stand in for tokens, feeds and a guard in the tests and are never deployed.</p>
+
+<h3><span class="n">1.4</span>Three ideas to keep in mind</h3>
+<ol>
+  <li><span class="label">The rules live in the vault.</span> The contract's code cannot change after deployment. Governance decides what to do, but always inside limits the vault enforces: waits, caps and what can never be touched.</li>
+  <li><span class="label">Nobody takes reserves for free.</span> Tokens leave the vault only when someone burns GRET (a redemption or a liquidation claim) or when the rebalancer delivers another basket token in exchange.</li>
+  <li><span class="label">Big changes are announced.</span> A new token, a new rebalancer, a new governance, a write-off or a fee raise waits 7 days, visible on the blockchain, and then must be carried out within the next 7 days or it expires.</li>
+</ol>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 2</p>
+<h2>Minting GRET</h2>
+<p class="intro">To get new GRET you deposit a little of every token in the basket, in the same proportions the vault already holds. Anyone can mint.</p>
+
+<h3><span class="n">2.1</span>How much you deposit</h3>
+<p>The amount of each token behind 1 GRET is that token's reserve divided by the GRET in circulation. This number is not stored anywhere: the vault computes it on every operation from what it actually holds. To mint, you deposit exactly that proportion of every token.</p>
+<div class="box example">
+<span class="label">Example</span>
+<p>The vault holds 10 PAXG and 100 GRET are in circulation, so each GRET stands for 0.1 PAXG. To mint 1 GRET you deposit 0.1 PAXG, plus the matching part of each other token. If the vault also holds 0.5 cbBTC, you deposit 0.005 cbBTC too.</p>
+</div>
+<p>A token with no reserve (just added, sold off, lost or written off) is not asked for at all. <code>previewMint(shares)</code> tells you the exact amounts before you mint.</p>
+
+<h3><span class="n">2.2</span>The first mint</h3>
+<p>When no GRET is in circulation there are no proportions to copy, so the first mint uses the <em>initial basket</em>, a fixed list of amounts. It must ask for exactly 1 GRET and it issues exactly 1 GRET. In the pilot, the initial basket is worth about USD 100. The same happens again if every holder leaves and the supply returns to zero. Governance can change the initial basket with <code>setInitialAmounts</code>, which only matters at zero supply.</p>
+
+<h3><span class="n">2.3</span>Step by step</h3>
+<ol>
+  <li>You approve the vault to take each token, then call <code>mint(shares, maxAmountsIn, minShares, version)</code>.</li>
+  <li>The vault first records any loss (if it holds less of a token than it recorded, see chapter 5), so you never pay for someone else's loss.</li>
+  <li>It computes what to ask for, rounding <em>up</em>, and pulls each token from your wallet.</li>
+  <li>It measures what actually arrived and issues GRET for that, rounding <em>down</em>.</li>
+  <li>If there is a mint fee, part of the new GRET goes to the fee recipient (chapter 4). The rest goes to you.</li>
+  <li>Your wallet is marked as having minted, which allows it to redeem from then on.</li>
+</ol>
+
+<div class="box example">
+<span class="label">Example: a mint with a new token and an xStock</span>
+<p>The vault holds 10 PAXG, 100 SPYx and no cbBTC yet (it was just added), and 100 GRET are in circulation. You ask for 1 GRET.</p>
+<ol>
+  <li>The vault asks for 0.1 PAXG and 1 SPYx, and nothing of cbBTC, which has no reserve.</li>
+  <li>PAXG arrives exactly. SPYx is an xStock and arrives 2 base units short: 0.999999999999999998 SPYx.</li>
+  <li>For each token, the vault works out how much GRET what arrived is worth, and issues the smallest: 0.999999999999999998 GRET, that is, 1 GRET minus 2 wei. You absorb the 2 missing units; nobody else does.</li>
+</ol>
+</div>
+
+<h3><span class="n">2.4</span>Protections and limits</h3>
+<ul>
+  <li><span class="label">Rounding favors everyone else.</span> You pay a hair more and receive a hair less, so minting never lowers the value behind other holders' GRET.</li>
+  <li><span class="label">You set your own limits.</span> <code>maxAmountsIn</code> caps what you pay for each token, and <code>minShares</code> is the least GRET you accept after the fee. If either is crossed, nothing happens.</li>
+  <li><span class="label">Your limits stay on the right tokens.</span> <code>maxAmountsIn</code> follows the order of <code>components()</code>, and <code>version</code> is the <code>basketVersion()</code> you read with it. If a token is added or removed before your transaction lands, the version no longer matches and the mint reverts, instead of applying your limits to another token.</li>
+  <li><span class="label">Tokens that round.</span> xStocks (SPYx, JAAAx) lose 2 or 3 base units per transfer. The vault tolerates up to 10 base units short and simply issues GRET for what arrived. A bigger shortfall, such as a transfer fee, makes the mint revert.</li>
+  <li><span class="label">When minting is closed.</span> While governance has paused it (section 6.8), during a liquidation, and if every reserve has been lost (the vault refuses to issue GRET backed by nothing).</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 3</p>
+<h2>Redeeming GRET</h2>
+<p class="intro">Redeeming is minting in reverse: you hand in GRET and receive your proportional part of every token in the basket.</p>
+
+<h3><span class="n">3.1</span>Who can redeem</h3>
+<p>Only wallets that have minted at least once can redeem normally. Once a wallet has minted, it can also redeem GRET it bought or received later. A wallet that only ever bought GRET on the market has to mint once first, which it cannot do while governance has minting paused (section 6.8) or while a frozen token still has a reserve, since that mint must deposit it. This rule does not apply in a liquidation, where every holder can exit (chapter 8).</p>
+
+<h3><span class="n">3.2</span>How much you receive</h3>
+<p>Call <code>redeem(shares, minAmountsOut, version)</code>. If there is a redemption fee, its part of your GRET goes to the fee recipient and only the rest is burned. For each token you receive <em>burned GRET ÷ GRET in circulation × that token's reserve</em>, rounded down. <code>minAmountsOut</code> sets the least you accept of each token, and <code>previewRedeem(shares)</code> shows the amounts in advance, after the fee. As in a mint, <code>version</code> ties your minimums to the basket you saw.</p>
+<div class="box example">
+<span class="label">Example</span>
+<p>The vault holds 10 PAXG and 4 cbBTC, and 100 GRET are in circulation. You redeem 5 GRET with no fee: you receive 5% of each reserve, 0.5 PAXG and 0.2 cbBTC, and the supply drops to 95 GRET.</p>
+</div>
+
+<h3><span class="n">3.3</span>The 1 GRET floor</h3>
+<p>A redemption cannot leave between 0 and 1 GRET in circulation: either everyone leaves, or at least 1 GRET remains. Without this floor, tiny leftovers could distort the basket and make minting unusable. A consequence: if someone keeps a tiny amount of GRET, the last large holder cannot redeem their final bit normally; it can be recovered through liquidation or by gathering the GRET in one wallet.</p>
+
+<h3><span class="n">3.4</span>All or nothing, and the emergency exit</h3>
+<p>A normal redemption sends every token in one operation. If a single token cannot be sent (its issuer froze the vault, for example), the whole redemption reverts and you keep your GRET.</p>
+<p>That is why there is a second way out: <code>redeemSkipping(shares, minAmountsOut, skipped, version)</code>. It is the same redemption, but it leaves out the tokens you list. The vault does not even call them, so no token can block it, however it misbehaves. You give up your part of the skipped tokens: it stays in the vault for the other holders (or, if you were the last holder, it becomes surplus). Set the minimum of a skipped token to 0.</p>
+<div class="box example">
+<span class="label">Example: leaving while a token is frozen</span>
+<p>The vault holds 10 PAXG, 4 cbBTC and 100 SPYx, and 100 GRET are in circulation. SPYx's issuer freezes the vault, so a plain redemption reverts. You hold 10 GRET and call <code>redeemSkipping</code> listing SPYx:</p>
+<ul>
+  <li>you receive 10% of the PAXG and cbBTC: 1 PAXG and 0.4 cbBTC;</li>
+  <li>your 10 SPYx stay in the vault, so the remaining 90 GRET now share 100 SPYx, about 1.11 per GRET instead of 1.</li>
+</ul>
+<p>If SPYx recovers, those who stayed keep your part. That is the price of leaving early.</p>
+</div>
+<div class="box warn">
+<span class="label">Why the emergency exit matters</span>
+<p>Your protection against a malicious rebalancer is the 7-day notice: you can leave before it takes over. Without <code>redeemSkipping</code>, a captured governance could make one token fail on purpose and trap everyone during those 7 days. With it, whoever minted can always leave with every token that still works. Holders who never minted are not covered: governance can pause minting so that they cannot qualify (section 6.8).</p>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 4</p>
+<h2>Fees</h2>
+<p class="intro">Governance can charge a fee on mints and on redemptions. Both start at zero, are paid in GRET and can never exceed 5%.</p>
+
+<h3><span class="n">4.1</span>The mint fee</h3>
+<p>You deposit the basket for all the GRET the mint issues, and the fee's share of that GRET goes to the fee recipient. With a 1% fee, minting 1 GRET gives you 0.99 GRET and the recipient 0.01. The minter pays the whole fee, so the value behind every other GRET does not change.</p>
+<p>The mint fee also protects holders. Someone who already holds the basket could mint just before a <code>sync</code> and redeem just after, taking part of a distribution that belongs to others. A quarterly dividend is about 0.3% of its token, which is only part of the basket, so a mint fee around 0.1% makes that unprofitable. The agreed policy is to set one once third parties can mint.</p>
+
+<h3><span class="n">4.2</span>The redemption fee</h3>
+<p>The fee's share of the GRET you hand in goes to the recipient, and only the rest is burned and paid out in tokens. With a 2% fee, redeeming 1 GRET moves 0.02 GRET to the recipient and pays you the tokens for 0.98 GRET.</p>
+
+<h3><span class="n">4.3</span>Limits and changes</h3>
+<ul>
+  <li><span class="label">Cap:</span> at most 5% each, written in the code.</li>
+  <li><span class="label">Raising waits:</span> a raise is announced and can take effect only after 7 days, during the following 7 days; anyone can apply it then. A cut applies at once and cancels any pending raise.</li>
+  <li><span class="label">Recipient:</span> chosen by governance, at once. Once set, it can never be empty again, so a fee always has somewhere to go.</li>
+  <li><span class="label">Never charged</span> on liquidation exits, swaps or ordinary GRET transfers.</li>
+</ul>
+
+<h3><span class="n">4.4</span>Side effects</h3>
+<ul>
+  <li>The recipient's GRET is ordinary GRET and stays in circulation. If the recipient holds less than 1 GRET, it counts against the 1 GRET floor, so the last holders cannot fully redeem until the recipient hands its GRET over. In the pilot the recipient would be the pilot wallet.</li>
+  <li>The <code>Minted</code> and <code>Redeemed</code> events report net amounts; the fee appears in its own <code>FeeCharged</code> event.</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 5</p>
+<h2>The basket and its reserves</h2>
+<p class="intro">The vault keeps its own record of what backs GRET, separate from whatever happens to sit in its balance. That separation is what keeps everyone's share honest.</p>
+
+<h3><span class="n">5.1</span>Components</h3>
+<p>The basket's tokens are called components. There can be between 1 and 128. The pilot starts with 11: ITOTon, SPYx, EFAon, IEMGon, SGOVon, BILon, JAAAx, PAXG, cbBTC, VNQon and DBCon. The cap of 128 exists because mint and redemption visit every component in one transaction, and Ethereum limits the gas a single transaction can use (about 16.7M). With 128 tokens like today's, a mint would take about 8.7M.</p>
+
+<h3><span class="n">5.2</span>Reserve, balance and surplus</h3>
+<table>
+  <tr><th style="width:18%">Term</th><th>Meaning</th></tr>
+  <tr><td>Reserve</td><td>What the vault recognizes as backing GRET. It changes only through mints, redemptions, swaps, recognized losses, write-offs and <code>sync</code>.</td></tr>
+  <tr><td>Balance</td><td>What the vault actually holds of a token, as the token contract reports it.</td></tr>
+  <tr><td>Surplus</td><td>Balance above the reserve: donations, issuer distributions, mistaken transfers. It does not back GRET until governance decides.</td></tr>
+</table>
+
+<h3><span class="n">5.3</span>Losses</h3>
+<p>If the vault holds less of a token than its reserve (an issuer seizure, a negative rebase, an issuer fee), the reserve drops to the real balance and the loss is shared by every holder in proportion. Mint, redemption and swap do this on their own, and anyone can trigger it with <code>recognizeLoss</code>.</p>
+
+<h3><span class="n">5.4</span>Surpluses: sync and rescue</h3>
+<p>A surplus is not added on its own. Governance decides, case by case:</p>
+<ul>
+  <li><code>sync(token)</code> adds the surplus to the reserve, for the benefit of every holder. The agreed policy is to sync issuer distributions, which belong to the holders, as soon as they arrive, pausing minting around the sync. The pause only stops whoever arrives after it: someone who minted before, having seen the surplus, still takes a share. Once third parties can mint, a small mint fee makes that unprofitable (section 4.1).</li>
+  <li><code>rescue(token, to, amount)</code> withdraws it: for a component, only what exceeds what is owed to holders; for a token outside the basket, all of it. Never a written-off token.</li>
+</ul>
+<p>If someone sends GRET itself to the vault's address by mistake, the transfer simply fails, so nothing is lost and governance never holds GRET.</p>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 6</p>
+<h2>Governance</h2>
+<p class="intro">Governance is a single address that decides changes. Today it is the pilot wallet; later it can be a multisig, a timelock or a vote. Whatever it is, the vault sets the limits.</p>
+
+<h3><span class="n">6.1</span>What governance can and cannot do</h3>
+<div class="two">
+<div class="box ok">
+<span class="label">It can</span>
+<ul>
+  <li>Add, remove and write off components</li>
+  <li>Set the initial basket</li>
+  <li>Set fees within 5%</li>
+  <li>Appoint and revoke the rebalancer</li>
+  <li>Sync or rescue surpluses</li>
+  <li>Pause and resume minting</li>
+  <li>Start a liquidation</li>
+  <li>Appoint its successor</li>
+</ul>
+</div>
+<div class="box no">
+<span class="label">It cannot</span>
+<ul>
+  <li>Withdraw reserves or liquidation rights</li>
+  <li>Mint GRET</li>
+  <li>Change the contract's code</li>
+  <li>Pause redemptions or reverse a liquidation</li>
+  <li>Skip any of the waits</li>
+  <li>Swap, unless it appoints itself rebalancer</li>
+</ul>
+</div>
+</div>
+<p>The rules must live in the vault, not in the governance contract, because governance can be replaced. If the 7-day wait lived in governance, a new or captured governance could arrive without it. Think of the vault as a safe with a time lock: the board decides to open it, but the lock belongs to the safe, and it stays when the board changes.</p>
+
+<h3><span class="n">6.2</span>How a change works: wait, then a window</h3>
+<figure>
+<svg viewBox="0 0 680 120" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12">
+  <rect x="80" y="44" width="260" height="28" fill="#eef2fb" stroke="#3b5bdb"/>
+  <rect x="340" y="44" width="260" height="28" fill="#f1f8f3" stroke="#5a9e6f"/>
+  <text x="210" y="62" text-anchor="middle">waiting: public, can be cancelled</text>
+  <text x="470" y="62" text-anchor="middle">window: it can be carried out</text>
+  <line x1="80" y1="36" x2="80" y2="80" stroke="#555"/>
+  <line x1="340" y1="36" x2="340" y2="80" stroke="#555"/>
+  <line x1="600" y1="36" x2="600" y2="80" stroke="#555"/>
+  <text x="80" y="28" text-anchor="middle" font-weight="600">Day 0</text>
+  <text x="340" y="28" text-anchor="middle" font-weight="600">Day 7</text>
+  <text x="600" y="28" text-anchor="middle" font-weight="600">Day 14</text>
+  <text x="80" y="98" text-anchor="middle" font-size="11" fill="#555">proposed</text>
+  <text x="340" y="98" text-anchor="middle" font-size="11" fill="#555">ready</text>
+  <text x="600" y="98" text-anchor="middle" font-size="11" fill="#555">expires if not carried out</text>
+</svg>
+<figcaption>Every important change follows the same calendar.</figcaption>
+</figure>
+<p>This applies to adding a token, writing one off, raising fees, appointing a rebalancer and handing over governance. Three of them (adding, writing off and applying a fee raise) can be carried out by <em>anyone</em> once ready: governance already decided when it proposed, so a voting governance needs only one vote per change. The window keeps an old notice from being used by surprise months later.</p>
+
+<h3><span class="n">6.3</span>Adding a token</h3>
+<ol>
+  <li>Governance announces it with <code>announceComponent(token)</code>. It must be a contract and not already in the basket.</li>
+  <li>From day 7 to day 14, anyone calls <code>addComponent(token)</code>. It joins at the end of the list, with zero reserve and zero initial amount.</li>
+  <li>Nothing changes for holders yet: mint does not ask for a token with no reserve. It starts counting once the rebalancer buys some with a swap (chapter 7).</li>
+</ol>
+<p class="small">Governance can cancel with <code>cancelComponentAnnouncement</code> during the wait. Tokens cannot be added during a liquidation or beyond 128.</p>
+
+<h3><span class="n">6.4</span>Removing a token</h3>
+<ol>
+  <li>The rebalancer sells the whole reserve through swaps, until it is 0.</li>
+  <li>Governance calls <code>removeComponent(token)</code>. There is no wait, because a token with no reserve backs nothing.</li>
+  <li>The tokens after it move down one position. Any leftover balance becomes a token outside the basket, which governance may rescue.</li>
+  <li>Adding or removing a token raises <code>basketVersion</code> by one, so mints and redemptions prepared for the old list revert instead of applying their limits to the wrong token.</li>
+</ol>
+<p class="small">It cannot remove the last component, a written-off one, or anything during a liquidation. If a mint lands just before the final sale and leaves a remainder, a second small swap sells it.</p>
+
+<h3><span class="n">6.5</span>Writing off a broken token</h3>
+<p>If an issuer freezes the vault, minting stops, every redemption has to skip that token with <code>redeemSkipping</code>, and the token cannot be sold because the vault cannot send it. The write-off lets the vault work normally again without it.</p>
+<ol>
+  <li>Governance proposes it with <code>proposeWriteOff(token)</code>. It judges that the token is broken; the vault does not check.</li>
+  <li>From day 7 to day 14, anyone calls <code>writeOffComponent(token)</code>.</li>
+  <li>The token's reserve and initial amount drop to 0. Mint and redemption continue without it.</li>
+</ol>
+<div class="box">
+<span class="label">Why it cannot be used to steal</span>
+<p>The tokens stay in the vault, the written-off token stays in the basket for good, and <code>rescue</code> refuses it forever. If it recovers, or if it was written off by mistake, <code>sync</code> returns it to the holders at once, even during a liquidation. Holders lose that token's share only while it stays broken.</p>
+</div>
+
+<h3><span class="n">6.6</span>Appointing the rebalancer</h3>
+<p>There is no rebalancer at deployment. Governance proposes one with <code>proposeRebalancer(address)</code>, and that address accepts with <code>acceptRebalancer</code> between day 7 and day 14. Governance can revoke the rebalancer at once with <code>revokeRebalancer</code>, which also discards one still pending: taking power away never needs a wait.</p>
+<p>Before any swap, governance must also appoint a price guard with <code>proposePriceGuard(address)</code>. After the same 7 days anyone applies it with <code>applyPriceGuard</code>, until day 14. Section 7.4 explains what it does.</p>
+
+<h3><span class="n">6.7</span>Setting fees</h3>
+<p>Governance calls <code>proposeFees(mintFee, redeemFee)</code>, in basis points (100 = 1%). Lower values apply at once. Higher ones wait and are applied with <code>applyFees</code> between day 7 and day 14. Governance chooses the recipient with <code>setFeeRecipient</code>. Details in chapter 4.</p>
+
+<h3><span class="n">6.8</span>Pausing the mint</h3>
+<p>Governance can pause minting, and resume it, at once with <code>setMintPaused</code>. Everyone who minted can still redeem, normally or with the emergency exit. A wallet that never minted, though, cannot qualify while the pause lasts: if it bought GRET, it has to sell it or wait. This is an accepted risk (R-07 in section 11.4): redemption stays for wallets that minted, and a pause that let new wallets mint would not serve its purpose.</p>
+<p>The pause is useful during an incident, while something is investigated, and around a <code>sync</code>: pause, sync, resume, so nobody can mint between the pause and the sync. It does not stop someone who minted before the pause from sharing in the sync, so a surplus should be synced as soon as it appears.</p>
+<p>There is no way to pause redemptions. That is deliberate: a pause on exits is exactly the power to trap holders during the 7-day notice of a new rebalancer. For real emergencies the tools are the write-off and the liquidation.</p>
+
+<h3><span class="n">6.9</span>Handing over governance</h3>
+<p>The current governance calls <code>proposeGovernance(next)</code>, and the new one accepts with <code>acceptGovernance</code> between day 7 and day 14. A timelock with its own delay of up to 14 days can still accept in time if it schedules the acceptance right away.</p>
+
+<h3><span class="n">6.10</span>From a wallet to a vote</h3>
+<p>For the vault, governance is just one address, and it can change: from the pilot wallet to a multisig, then a timelock, and finally a vote by VORA holders. Each step uses the handover of section 6.9, without touching the vault. Chapter 10 explains every stage and how voting works.</p>
+<p class="small">Mind the names: the Governor's <code>propose</code> creates a vote; the vault's <code>announceComponent</code> starts a token's 7-day wait.</p>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 7</p>
+<h2>The rebalancer and swaps</h2>
+<p class="intro">Rebalancing means changing what the vault holds. The rebalancer does it by exchanging one basket token for another, and mint and redemption follow on their own.</p>
+
+<h3><span class="n">7.1</span>Why nobody sets "how much to deposit"</h3>
+<p>It might seem simpler for governance to declare "from today, 1 GRET costs 0.5 PAXG". It cannot work. Mint and redemption must follow what the vault holds, or new minters would take value from existing holders, and without prices the vault cannot tell whether two different baskets are worth the same.</p>
+<div class="box warn">
+<span class="label">The problem in numbers</span>
+<p>The vault holds 10 PAXG and 10 GRET: 1 PAXG per GRET. If someone could mint 1 GRET paying 0.5 PAXG, there would be 10.5 PAXG for 11 GRET, about 0.95 PAXG each. The newcomer paid 0.5 and holds 0.95; each earlier holder lost 0.05.</p>
+</div>
+
+<h3><span class="n">7.2</span>What a swap does</h3>
+<p>The rebalancer calls <code>swap(tokenOut, amountOut, tokenIn, amountIn)</code>. Both amounts are fixed in the call: together they are the price.</p>
+<ol>
+  <li>The vault records any loss on both tokens.</li>
+  <li>It collects <code>amountIn</code> of the incoming token from the rebalancer and measures what arrived, with the same tolerance as mint.</li>
+  <li>Only then does it send <code>amountOut</code> of the outgoing token. Only reserve can leave, never surplus.</li>
+  <li>Both reserves change; the GRET supply does not.</li>
+</ol>
+<div class="box example">
+<span class="label">Example</span>
+<p>100 GRET are in circulation and the vault holds 10 PAXG and 0.5 cbBTC, so 1 GRET = 0.1 PAXG + 0.005 cbBTC. The rebalancer delivers 0.05 cbBTC and takes 1 PAXG. Now the vault holds 9 PAXG and 0.55 cbBTC, and 1 GRET = 0.09 PAXG + 0.0055 cbBTC. The next mint asks for exactly that.</p>
+<p>At October 22 prices (PAXG ≈ USD 4,050, cbBTC ≈ USD 81,150), 1 PAXG ≈ 0.05 cbBTC, so the price was fair. Had the rebalancer delivered only 0.01 cbBTC, holders would have lost the difference.</p>
+</div>
+
+<h3><span class="n">7.3</span>Trust and its limits</h3>
+<p><span class="label">The rebalancer chooses the price; the price guard bounds it.</span> A malicious rebalancer could still sell a little cheaply or buy a worthless token that governance added, but only within the guard's limits. The defenses are the price guard, the 7-day notice before any new rebalancer or guard acts, and the emergency exit of chapter 3.</p>
+<ul>
+  <li><span class="label">Pilot:</span> the pilot wallet, with the Chainlink guard.</li>
+  <li><span class="label">Later:</span> a bot or contract that finds the best price, still within the guard. It would be appointed through the same 7-day wait, without changing the vault.</li>
+</ul>
+
+<h3><span class="n">7.4</span>The price guard</h3>
+<p>Every swap must be accepted by the price guard, a separate contract whose address the vault keeps. Governance appoints it like a rebalancer, with the 7-day wait, and without a guard there are no swaps. Mint, redemption and liquidation never ask it anything, so not even a broken guard can block an exit.</p>
+<p>The first guard, <code>ChainlinkPriceGuard</code>, values both sides of each swap in dollars with Chainlink price feeds and refuses:</p>
+<ul>
+  <li>a token with no feed, or whose price is stale, such as a stock feed outside market hours;</li>
+  <li>a swap that loses more than 2% of what the vault sells;</li>
+  <li>a swap that would make the week's swaps take more than 2% of the vault's value. Each loss counts as the share of the vault it takes at that moment, which is what every GRET loses, so money that comes in or leaves during the week does not stretch the limit. The vault is valued by what it really holds, so tokens an issuer took away, and that nobody has recorded yet, do not count either.</li>
+</ul>
+<div class="box example">
+<span class="label">Why a weekly limit</span>
+<p>With only a per-swap limit, a stolen rebalancer key could trade the same value back and forth: USD 1,000 for 980, then 980 for 960, and so on. Fifty swaps, each within 2%, would leave 364. The weekly limit caps the total: in a week, all swaps together can take at most 2% of the vault, however many there are. An honest rebalance barely touches it: selling USD 300 at 0.5% below the price takes 0.15% of the vault.</p>
+</div>
+<p>The guard has no owner. Its feeds and limits are fixed when it is deployed, and changing any of them means deploying a new guard and waiting the 7 days. It is only as honest as its prices: a captured governance could appoint a guard that accepts everything, but the 7-day notice gives holders time to leave, as with a rebalancer. And it only sees what its feeds see: if a token trades far below the asset its feed prices, a swap that buys it looks fair and is not limited at all (R-03 in section 11.4).</p>
+<p>Today Chainlink has feeds on Ethereum for five of the eleven tokens: SPYx (through SPY's price), SGOVon, BILon, PAXG and cbBTC. The other six cannot be swapped until feeds exist and a new guard is appointed. Stock feeds pause on weekends, so swaps of those tokens do too.</p>
+
+<h3><span class="n">7.5</span>Funding a swap</h3>
+<p>Because the vault collects the incoming token first, the rebalancer must have it before the swap. There are three ways to do that without changing the vault:</p>
+<ul>
+  <li><span class="label">Own funds, in steps.</span> Buy some cbBTC, swap it in, receive PAXG, sell the PAXG and repeat. You need the capital of one step, not of the whole rebalance. This is the pilot's way.</li>
+  <li><span class="label">A flash loan.</span> A small rebalancer contract borrows the incoming token (for example, cbBTC from Morpho or Aave), swaps it into the vault, sells the token it receives on an exchange and repays the loan, all in one transaction. It needs no capital, only exchange liquidity for both tokens. The contract chooses the price, so it should deliver what the exchange pays, minus costs.</li>
+  <li><span class="label">An auction.</span> Each bidder brings its own incoming token; the auction contract calls the swap and hands over what comes out. Bidders compete, which also gives better prices.</li>
+</ul>
+<p class="small">Swaps are closed during a liquidation. There is no cap on how much can be swapped, only on how much swaps can lose: a volume cap would slow down a stolen key, but also a legitimate large rebalance.</p>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 8</p>
+<h2>Liquidation</h2>
+<p class="intro">Liquidation is the emergency exit for everyone. It ends normal operation for good and lets every holder take their share, token by token.</p>
+
+<h3><span class="n">8.1</span>Starting it</h3>
+<p>Only governance can start a liquidation, with <code>activateLiquidation</code>. It is irreversible. It closes mint, normal redemption, swaps and basket changes, and it freezes the reserves and the GRET supply at that moment as the basis of every holder's right. It does not call any token, so a broken token cannot prevent it.</p>
+<p>The supply frozen at activation never changes afterwards. Each holder's right over a token is <em>GRET converted ÷ supply at activation × that token's reserve</em>, so converting early or late, all at once or in several steps, gives exactly the same share. What someone claims is recorded apart and never lowers the reserve the others' shares are computed on.</p>
+
+<h3><span class="n">8.2</span>Exiting token by token</h3>
+<ol>
+  <li>Any holder, whether they minted or not, calls <code>convertToClaims(shares)</code>. Their GRET is burned and turned into rights over every token. This can be done in several steps, and unconverted GRET stays transferable.</li>
+  <li>For each token, the holder calls <code>claim(index, to, minAmount)</code>. Each token is claimed separately, and can be sent to another address if, for example, an issuer blocks the holder's own.</li>
+</ol>
+<p>No fee is charged on any of this.</p>
+
+<h3><span class="n">8.3</span>When a token falls short or fails</h3>
+<ul>
+  <li><span class="label">A token fails to transfer:</span> that claim reverts and the right stays pending, ready to claim later. The other tokens are unaffected.</li>
+  <li><span class="label">The vault holds less than everyone is owed:</span> each claimant is paid the same fraction. <code>minAmount</code> lets a holder refuse a cut and wait, in case the balance recovers.</li>
+  <li><span class="label">Tokens arrive later:</span> governance can <code>sync</code> them, which raises everyone's rights in proportion, or rescue only what exceeds what is owed.</li>
+</ul>
+<div class="box example">
+<span class="label">Example: a liquidation with a shortfall</span>
+<p>Governance starts a liquidation with 100 GRET in circulation and reserves of 10 PAXG and 100 SPYx. Alice holds 50 GRET, Bob 30 and Carol 20, and all three convert. Their rights: Alice 5 PAXG and 50 SPYx, Bob 3 PAXG and 30 SPYx, Carol 2 PAXG and 20 SPYx. Everyone claims their PAXG in full.</p>
+<p>Then SPYx's issuer seizes 40 SPYx: the vault holds 60 but owes 100.</p>
+<ol>
+  <li>Alice claims SPYx now. Everyone pending gets the same fraction, 60 ÷ 100, so she receives 30 SPYx, and her SPYx right is used up.</li>
+  <li>Bob sets <code>minAmount</code> to 30 and waits: a cut makes his claim revert, and his right stays pending.</li>
+  <li>The issuer returns the 40 SPYx. The vault holds 70 and owes 50 to Bob and Carol, so both are paid in full: 30 and 20.</li>
+  <li>20 SPYx are left over: exactly Alice's cut. The agreed policy is for governance to rescue them and return them to Alice.</li>
+</ol>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 9</p>
+<h2>A year in the life of the vault</h2>
+<p class="intro">One story, from deployment to the end of the first year, with every number worked out. The basket is cut down to three tokens and the amounts are round, made-up figures, so the arithmetic stays easy to follow.</p>
+
+<h3><span class="n">9.1</span>Deployment</h3>
+<p>The team deploys the vault with two components, PAXG and SPYx, and an initial basket of 0.01 PAXG and 0.1 SPYx per GRET. Governance is the team's wallet. There is no rebalancer, both fees are zero and minting is open. The vault is empty.</p>
+
+<h3><span class="n">9.2</span>The first mint</h3>
+<p>The team mints 1 GRET, the only amount a first mint can ask for, and deposits exactly the initial basket. Its wallet can now redeem.</p>
+<table>
+  <tr><th style="width:30%">Supply</th><th>Reserves</th><th style="width:34%">Behind 1 GRET</th></tr>
+  <tr><td>1 GRET (team)</td><td>0.01 PAXG · 0.1 SPYx</td><td>0.01 PAXG · 0.1 SPYx</td></tr>
+</table>
+
+<h3><span class="n">9.3</span>Alice joins</h3>
+<p>Alice mints 9 GRET and deposits nine times what stands behind 1 GRET: 0.09 PAXG and 0.9 SPYx. SPYx loses 2 base units on the way, so she receives 9 GRET minus a few wei; the story rounds that away.</p>
+<table>
+  <tr><th style="width:30%">Supply</th><th>Reserves</th><th style="width:34%">Behind 1 GRET</th></tr>
+  <tr><td>10 GRET</td><td>0.1 PAXG · 1 SPYx</td><td>0.01 PAXG · 0.1 SPYx</td></tr>
+</table>
+
+<h3><span class="n">9.4</span>A new token joins</h3>
+<p>Governance wants Bitcoin in the basket.</p>
+<ul>
+  <li><span class="label">Day 0.</span> It calls <code>announceComponent(cbBTC)</code>, proposes the team's wallet as rebalancer and proposes a Chainlink price guard. All three are public at once.</li>
+  <li><span class="label">Day 7.</span> Someone calls <code>addComponent(cbBTC)</code> and <code>applyPriceGuard</code>, and the team's wallet accepts the rebalancer role. cbBTC is in the basket with zero reserve, so nothing changes yet: mints still ask only for PAXG and SPYx.</li>
+  <li><span class="label">Day 8.</span> The team buys 0.001 cbBTC on the market and swap it in for 0.02 PAXG. At the day's prices both are worth about USD 81, so the price is fair, and the guard accepts it.</li>
+</ul>
+<table>
+  <tr><th style="width:30%">Supply</th><th>Reserves</th><th style="width:34%">Behind 1 GRET</th></tr>
+  <tr><td>10 GRET</td><td>0.08 PAXG · 1 SPYx · 0.001 cbBTC</td><td>0.008 PAXG · 0.1 SPYx · 0.0001 cbBTC</td></tr>
+</table>
+<p>Nobody deposited or withdrew anything for the basket to change: the amounts behind each GRET simply followed the reserves.</p>
+
+<h3><span class="n">9.5</span>A fee is turned on</h3>
+<p>Governance makes the team's wallet the fee recipient and proposes a 0.5% mint fee. Seven days later, Alice's bot applies it: anyone can. Then Bob mints 10 GRET. He deposits the basket for 10 GRET (0.08 PAXG, 1 SPYx and 0.001 cbBTC), receives 9.95 GRET, and the team's wallet receives 0.05 GRET.</p>
+<table>
+  <tr><th style="width:30%">Supply</th><th>Reserves</th><th style="width:34%">Behind 1 GRET</th></tr>
+  <tr><td>20 GRET (team 1.05, Alice 9, Bob 9.95)</td><td>0.16 PAXG · 2 SPYx · 0.002 cbBTC</td><td>0.008 PAXG · 0.1 SPYx · 0.0001 cbBTC</td></tr>
+</table>
+<p>The value behind each GRET did not move: Bob paid for every share issued, including the fee's.</p>
+
+<h3><span class="n">9.6</span>An issuer freezes the vault</h3>
+<p>In month seven, SPYx's issuer blocks the vault's address by mistake. The vault can no longer send or receive SPYx, so every mint reverts (it must pull SPYx) and every plain redemption reverts (it must send SPYx).</p>
+<p>Governance pauses minting and proposes writing off SPYx. Alice does not want to wait: she calls <code>redeemSkipping</code> for her 9 GRET, listing SPYx. She receives 9/20 of the PAXG and cbBTC, 0.072 PAXG and 0.0009 cbBTC, and her 0.9 SPYx stays for the others.</p>
+<table>
+  <tr><th style="width:30%">Supply</th><th>Reserves</th><th style="width:34%">Behind 1 GRET</th></tr>
+  <tr><td>11 GRET (team 1.05, Bob 9.95)</td><td>0.088 PAXG · 2 SPYx (frozen) · 0.0011 cbBTC</td><td>0.008 PAXG · 0.18 SPYx · 0.0001 cbBTC</td></tr>
+</table>
+<p>Seven days after the proposal, Bob calls <code>writeOffComponent(SPYx)</code>. The SPYx reserve drops to zero, while the 2 SPYx stay in the vault, out of governance's reach. Plain redemptions work again, without SPYx: 1 GRET now stands for 0.008 PAXG and 0.0001 cbBTC. Minting stays paused, because SPYx may come back.</p>
+
+<h3><span class="n">9.7</span>The issuer lifts the freeze</h3>
+<p>Two months later, the issuer unblocks the vault. With minting still paused, governance calls <code>sync(SPYx)</code>: the 2 SPYx that never left the vault return to the reserve. Then it resumes minting.</p>
+<table>
+  <tr><th style="width:30%">Supply</th><th>Reserves</th><th style="width:34%">Behind 1 GRET</th></tr>
+  <tr><td>11 GRET</td><td>0.088 PAXG · 2 SPYx · 0.0011 cbBTC</td><td>0.008 PAXG · 0.18 SPYx · 0.0001 cbBTC</td></tr>
+</table>
+<p>The team and Bob now have about 0.18 SPYx behind each GRET, up from 0.1: they kept Alice's share of SPYx, the price of her early exit. Had minting stayed open, someone could have minted during the freeze without depositing any SPYx and taken part of it.</p>
+
+<h3><span class="n">9.8</span>A notice that expires</h3>
+<p>In month eleven, governance proposes raising the mint fee to 1%, then changes its mind and forgets to cancel. The raise is ready on day 7 and nobody applies it. After day 14 it has expired: nobody can apply it later, and a new raise would need a new 7-day notice.</p>
+
+<h3><span class="n">9.9</span>The year at a glance</h3>
+<table>
+  <tr><th style="width:16%">When</th><th>What happened</th><th style="width:14%">Supply</th></tr>
+  <tr><td>Day 0</td><td>Deployment; the team mints the first 1 GRET</td><td>1</td></tr>
+  <tr><td>Month 2</td><td>Alice mints 9 GRET</td><td>10</td></tr>
+  <tr><td>Month 3</td><td>cbBTC announced and added; the team's wallet becomes rebalancer and swaps PAXG for cbBTC</td><td>10</td></tr>
+  <tr><td>Month 5</td><td>0.5% mint fee; Bob mints 10 GRET and the fee goes to the team's wallet</td><td>20</td></tr>
+  <tr><td>Month 7</td><td>SPYx frozen; minting paused; Alice leaves skipping SPYx; SPYx written off</td><td>11</td></tr>
+  <tr><td>Month 9</td><td>Freeze lifted; SPYx synced back; minting resumed</td><td>11</td></tr>
+  <tr><td>Month 11</td><td>A fee raise is proposed, never applied, and expires</td><td>11</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 10</p>
+<h2>Governance in practice: from a wallet to a VORA vote</h2>
+<p class="intro">The vault only checks which address is governance. Who stands behind that address, and how they decide, can grow over time without changing the vault. This chapter walks through each stage, ending with on-chain voting by VORA holders using OpenZeppelin's standard contracts.</p>
+
+<h3><span class="n">10.1</span>Four stages</h3>
+<table>
+  <tr><th style="width:22%">Stage</th><th>How a decision is made</th><th style="width:30%">What it takes</th></tr>
+  <tr><td>1. Pilot wallet</td><td>One signature, at once. The current stage.</td><td>Nothing</td></tr>
+  <tr><td>2. Safe</td><td>Several signers must approve, for example 2 of 3, at once.</td><td>A Safe created at app.safe.global; no code</td></tr>
+  <tr><td>3. Safe + timelock</td><td>The Safe schedules each action, and it runs only after a public delay.</td><td>OpenZeppelin's <code>TimelockController</code>, already tested with the vault</td></tr>
+  <tr><td>4. VORA vote + timelock</td><td>VORA holders vote; what passes waits in the same timelock, then runs.</td><td>OpenZeppelin's <code>Governor</code>, and VORA built on <code>ERC20Votes</code></td></tr>
+</table>
+<p>Each move from one stage to the next is a governance handover (section 6.9): the current governance proposes the next address, and that address accepts between day 7 and day 14.</p>
+
+<h3><span class="n">10.2</span>Stage 2: a multisig</h3>
+<p>A Safe is a wallet that needs several signatures to act: with 2 of 3, any two of three signers must approve every transaction. Losing one key no longer locks governance, and stealing one key is not enough to control it. A Safe can also bundle several calls into one transaction, which all succeed or all fail together.</p>
+<p>To move there, the pilot wallet calls <code>proposeGovernance(safe)</code>, and the Safe calls <code>acceptGovernance</code> between day 7 and day 14. Decisions are still immediate: the Safe acts as soon as enough signers approve.</p>
+
+<h3><span class="n">10.3</span>Stage 3: a timelock</h3>
+<p>A <code>TimelockController</code> is a contract that holds a queue of actions. Every action is <em>scheduled</em> first and can be <em>executed</em> only after a minimum delay, so anyone watching the chain sees it coming. The timelock becomes the vault's governance; the Safe keeps the power to schedule.</p>
+<table>
+  <tr><th style="width:22%">Timelock role</th><th>What it allows</th><th style="width:30%">Proposed holder</th></tr>
+  <tr><td>Proposer</td><td>Schedule actions (each proposer is also made a canceller)</td><td>The Safe</td></tr>
+  <tr><td>Executor</td><td>Run an action once its delay has passed; can be open to anyone</td><td>The Safe</td></tr>
+  <tr><td>Canceller</td><td>Remove a scheduled action before it runs</td><td>The Safe</td></tr>
+  <tr><td>Admin</td><td>Change the roles</td><td>Nobody: the timelock manages itself</td></tr>
+</table>
+<p>The delays add up. With a 2-day timelock, adding a token takes 2 days for the timelock plus the vault's own 7 days: holders get 9 days of notice. Liquidation, which the vault does not delay, would then wait the timelock's 2 days.</p>
+<div class="box">
+<span class="label">One detail of the handover</span>
+<p>The timelock must accept governance itself, which means the call <code>acceptGovernance</code> has to go through its own queue and land between day 7 and day 14. The Safe should schedule it right after proposing the handover, with a timelock delay of at most 14 days.</p>
+</div>
+
+<h3><span class="n">10.4</span>Stage 4: the voting token</h3>
+<p>VORA is the project's planned voting token; GRET itself never votes. For the Governor to count votes, VORA must be built on OpenZeppelin's <code>ERC20Votes</code>, which keeps a history of each holder's voting power.</p>
+<ul>
+  <li><span class="label">Voting power must be activated.</span> Holding VORA is not enough: a holder must <em>delegate</em> its votes, to itself or to someone it trusts. Until then, its tokens do not count.</li>
+  <li><span class="label">Votes are counted at a fixed moment.</span> Each proposal takes a snapshot of voting power when voting opens. Buying, borrowing or receiving VORA afterwards changes nothing, so a flash loan cannot swing a vote.</li>
+  <li><span class="label">Delegates.</span> Holders who do not follow every proposal can delegate to a representative and take the votes back at any time.</li>
+</ul>
+
+<h3><span class="n">10.5</span>A proposal from start to finish</h3>
+<figure>
+<svg viewBox="0 0 680 150" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11.5">
+  <defs><marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#555"/></marker></defs>
+  <rect x="10" y="40" width="110" height="40" rx="6" fill="none" stroke="#555"/>
+  <text x="65" y="58" text-anchor="middle" font-weight="600">Pending</text>
+  <text x="65" y="73" text-anchor="middle" fill="#555" font-size="10.5">voting delay</text>
+  <rect x="145" y="40" width="110" height="40" rx="6" fill="none" stroke="#555"/>
+  <text x="200" y="58" text-anchor="middle" font-weight="600">Active</text>
+  <text x="200" y="73" text-anchor="middle" fill="#555" font-size="10.5">voting period</text>
+  <rect x="280" y="40" width="110" height="40" rx="6" fill="#f1f8f3" stroke="#5a9e6f"/>
+  <text x="335" y="58" text-anchor="middle" font-weight="600">Succeeded</text>
+  <text x="335" y="73" text-anchor="middle" fill="#555" font-size="10.5">quorum and majority</text>
+  <rect x="415" y="40" width="110" height="40" rx="6" fill="none" stroke="#555"/>
+  <text x="470" y="58" text-anchor="middle" font-weight="600">Queued</text>
+  <text x="470" y="73" text-anchor="middle" fill="#555" font-size="10.5">timelock delay</text>
+  <rect x="550" y="40" width="110" height="40" rx="6" fill="#eef2fb" stroke="#3b5bdb"/>
+  <text x="605" y="58" text-anchor="middle" font-weight="600">Executed</text>
+  <text x="605" y="73" text-anchor="middle" fill="#555" font-size="10.5">calls run</text>
+  <path d="M120 60H145" stroke="#555" marker-end="url(#g)"/>
+  <path d="M255 60H280" stroke="#555" marker-end="url(#g)"/>
+  <path d="M390 60H415" stroke="#555" marker-end="url(#g)"/>
+  <path d="M525 60H550" stroke="#555" marker-end="url(#g)"/>
+  <rect x="145" y="105" width="110" height="34" rx="6" fill="#fcf2f0" stroke="#c96a5a"/>
+  <text x="200" y="126" text-anchor="middle" font-weight="600">Defeated</text>
+  <path d="M200 80V105" stroke="#555" marker-end="url(#g)"/>
+  <rect x="10" y="105" width="110" height="34" rx="6" fill="#fcf2f0" stroke="#c96a5a"/>
+  <text x="65" y="126" text-anchor="middle" font-weight="600">Canceled</text>
+  <path d="M65 80V105" stroke="#555" marker-end="url(#g)"/>
+  <text x="10" y="24" font-size="11" fill="#555">A proposal moves left to right; it stops at Defeated if the vote fails, or at Canceled.</text>
+</svg>
+<figcaption>The states of an OpenZeppelin Governor proposal, when it runs through a timelock.</figcaption>
+</figure>
+<ol>
+  <li><span class="label">Propose.</span> A holder with enough voting power (the <em>proposal threshold</em>) submits a list of exact calls, for example "call <code>vault.announceComponent(X)</code>", with a description. The calls cannot be changed afterwards.</li>
+  <li><span class="label">Wait (Pending).</span> The <em>voting delay</em> gives holders time to read the proposal and delegate. Voting power is fixed when it ends. The proposer can still cancel during this phase.</li>
+  <li><span class="label">Vote (Active).</span> During the <em>voting period</em>, each holder votes For, Against or Abstain with the power it had at the snapshot.</li>
+  <li><span class="label">Count.</span> The proposal succeeds if For plus Abstain reach the <em>quorum</em> (a share of all VORA at the snapshot) and For is strictly larger than Against. Otherwise it is defeated.</li>
+  <li><span class="label">Queue.</span> A successful proposal is sent to the timelock, where its calls wait the timelock's delay in public.</li>
+  <li><span class="label">Execute.</span> After the delay, the calls run from the timelock, in order and all together, exactly as voted.</li>
+</ol>
+
+<h3><span class="n">10.6</span>Settings to choose</h3>
+<p>These numbers are set when the Governor is deployed and can later be changed only by a vote. The values below are common starting points, not decisions.</p>
+<table>
+  <tr><th style="width:26%">Setting</th><th style="width:20%">Example</th><th>What it protects against</th></tr>
+  <tr><td>Voting delay</td><td>1 day</td><td>Surprise votes: time to read a proposal and delegate before power is fixed</td></tr>
+  <tr><td>Voting period</td><td>5 to 7 days</td><td>Votes that pass before most holders notice</td></tr>
+  <tr><td>Proposal threshold</td><td>0.5% to 1% of VORA</td><td>Spam proposals</td></tr>
+  <tr><td>Quorum</td><td>4% to 10% of VORA</td><td>A small group deciding while everyone else is absent</td></tr>
+  <tr><td>Timelock delay</td><td>2 to 7 days (at most 14)</td><td>Changes that run before holders can react</td></tr>
+  <tr><td>Late-quorum extension</td><td>2 days</td><td>A large holder tipping the vote at the last minute; the period is extended so others can answer</td></tr>
+  <tr><td>Proposal guardian</td><td>The Safe</td><td>A malicious proposal that passes: the guardian can cancel it at any stage, but can never pass anything</td></tr>
+</table>
+<p>The last two are optional OpenZeppelin extensions (<code>GovernorPreventLateQuorum</code> and <code>GovernorProposalGuardian</code>).</p>
+
+<h3><span class="n">10.7</span>Who holds what at stage 4</h3>
+<ul>
+  <li>The vault's governance is the timelock.</li>
+  <li>The Governor is the timelock's proposer and canceller. The executor can be the Governor or open to anyone.</li>
+  <li>The Safe stops being a proposer. OpenZeppelin warns that any extra proposer could act as the timelock without a vote. The Safe can stay as proposal guardian, with power only to cancel.</li>
+  <li>The timelock has no admin: only a vote can change its roles.</li>
+</ul>
+
+<h3><span class="n">10.8</span>Example: adding a token by vote</h3>
+<table>
+  <tr><th style="width:18%">Day</th><th>What happens</th></tr>
+  <tr><td>0</td><td>A VORA holder proposes one call: <code>vault.announceComponent(X)</code>. Everyone can read it on the chain and on Tally.</td></tr>
+  <tr><td>1</td><td>The voting delay ends and voting power is fixed. Voting opens.</td></tr>
+  <tr><td>6</td><td>Voting closes: quorum reached and more For than Against. Anyone queues it in the timelock.</td></tr>
+  <tr><td>8</td><td>The timelock's 2 days pass. Anyone executes it: the vault's 7-day announcement starts.</td></tr>
+  <tr><td>15 to 22</td><td>Anyone calls <code>addComponent(X)</code>, with no further vote. Then the rebalancer can buy it.</td></tr>
+</table>
+<p>A proposal can carry several calls that run together. Syncing an issuer distribution safely becomes one vote with three calls, <code>setMintPaused(true)</code>, <code>sync(token)</code> and <code>setMintPaused(false)</code>, which run in the same transaction, so nobody can mint in between even if anyone may execute. The proposal itself is public for days, during the vote and the timelock, so someone who sees it can mint before and share in the sync; small, frequent syncs keep that gain small.</p>
+
+<h3><span class="n">10.9</span>What can go wrong</h3>
+<table>
+  <tr><th style="width:32%">Risk</th><th>Defense</th></tr>
+  <tr><td>Someone buys or borrows VORA to pass a harmful proposal</td><td>The snapshot ignores power acquired after voting opens; the quorum, the voting period, the timelock delay and the guardian give time to react; the vault's own waits and the emergency exit still apply</td></tr>
+  <tr><td>Few holders vote</td><td>The quorum; delegation to active representatives</td></tr>
+  <tr><td>A harmful call is hidden in a proposal</td><td>Proposals list exact calls; interfaces such as Tally decode them; the timelock delay leaves time to inspect and cancel</td></tr>
+  <tr><td>A last-minute swing</td><td>The late-quorum extension</td></tr>
+  <tr><td>The guardian misbehaves</td><td>It can only cancel, never pass; a vote can replace it</td></tr>
+</table>
+<p>Whatever happens in the governance layer, the vault's limits stay in place: waits, caps, the fee ceiling, the ban on taking reserves or written-off tokens, and the exits of chapters 3 and 8.</p>
+
+<h3><span class="n">10.10</span>Tools</h3>
+<ul>
+  <li><span class="label">Tally</span> works with OpenZeppelin's Governor: it lists proposals, decodes their calls, and lets holders delegate, vote, queue and execute from the browser.</li>
+  <li><span class="label">Safe</span> provides the multisig interface for stages 2 and 3, including batches of calls.</li>
+  <li><span class="label">Snapshot</span> offers free off-chain polls. They are useful to sound out opinion but do not bind the vault unless a separate tool connects them to a Safe; they are not needed here.</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 11</p>
+<h2>Safety</h2>
+<p class="intro">No contract is risk-free. This chapter separates what the code enforces from what depends on people and issuers, and lists every risk that was accepted and why.</p>
+
+<h3><span class="n">11.1</span>What the code guarantees</h3>
+<div class="box ok">
+<ul>
+  <li>Nobody issues GRET without depositing the basket: governance has no mint.</li>
+  <li>Reserves leave only when GRET is burned or another component is delivered in exchange.</li>
+  <li>The code never changes: no upgrades.</li>
+  <li>A new rebalancer, token, governance, write-off or fee raise waits 7 days, visible on chain, and expires 7 days after that.</li>
+  <li>Fees never exceed 5% each.</li>
+  <li>Governance can never take what was written off.</li>
+  <li>Redemption can never be paused, and whoever minted can always leave with every token that still works.</li>
+  <li>The limits you sign apply only to the basket you saw: if a token is added or removed in between, your transaction reverts.</li>
+  <li>Every swap passes the price guard; with the Chainlink guard, swaps lose at most 2% each and 2% of the vault per week.</li>
+  <li>In a liquidation, every holder can exit token by token, even if some token fails.</li>
+</ul>
+</div>
+
+<h3><span class="n">11.2</span>What it does not</h3>
+<div class="box no">
+<ul>
+  <li><span class="label">The price of swaps, fully.</span> A malicious rebalancer can still take up to the guard's weekly limit until it is revoked, or more if a token trades below the asset its feed prices, and a captured governance can appoint a guard that accepts everything; the 7-day notice is the defense against that. Six tokens have no price feed and cannot be swapped.</li>
+  <li><span class="label">An exit for every holder during the notice.</span> Only wallets that minted can redeem. The others have to mint first, which governance can block by pausing minting; otherwise they depend on selling their GRET or on a liquidation, which only governance can start.</li>
+  <li><span class="label">The issuers.</span> All 11 tokens are upgradeable; their issuers can freeze, charge or change them.</li>
+  <li><span class="label">Late minters.</span> Whoever mints after a distribution arrives or a written-off token recovers, and before governance syncs it, shares in it without having paid. Pausing minting only stops those who arrive after the pause; a small mint fee makes it unprofitable for distributions, and keeping minting paused covers a recovery.</li>
+  <li><span class="label">The absence of bugs.</span> The contract has had internal reviews, not an independent audit.</li>
+  <li><span class="label">Everything else that was weighed and accepted:</span> section 11.4.</li>
+</ul>
+</div>
+
+<h3><span class="n">11.3</span>The pilot</h3>
+<div class="box warn">
+<p>In the pilot, governance is the pilot wallet. Whoever obtains its key can start a liquidation, withdraw surpluses and, after a 7-day wait visible on chain, appoint themselves rebalancer and exchange the reserves for anything. If the key is lost, nobody can liquidate, sync or change the basket. Before third-party funds, governance should move to a Safe and the contract should be audited.</p>
+</div>
+
+<h3 class="page-start"><span class="n">11.4</span>Accepted risks, one by one</h3>
+<p>These are the known risks that were weighed and accepted, each with its reason. Problems that were found and fixed are not listed: they are simply part of how the vault works. Each risk keeps a stable ID, used in <code>docs/ACCEPTED_RISKS.md</code>, which also names the test that reproduces it. The P numbers point to the commitments in section 11.5.</p>
+<table>
+  <thead><tr><th style="width:7%">ID</th><th style="width:33%">What can happen</th><th style="width:24%">Worst case</th><th>Why it is accepted, and what limits it</th></tr></thead>
+  <tr class="group"><td colspan="4"><span class="label">Governance and rebalancing</span></td></tr>
+  <tr><td class="id">R-01</td><td>Governance holds broad powers, and its key can be stolen or lost.</td><td>After a 7-day notice, the reserves swapped for worthless tokens. If the key is lost, nobody can liquidate, sync or change the basket.</td><td>Someone has to manage the basket and emergencies, and every power that can take value waits 7 days in public. Wallets that minted can leave during the notice. A Safe before third-party funds (<span class="id">P-12</span>).</td></tr>
+  <tr><td class="id">R-02</td><td>The rebalancer chooses the price of each swap, within the guard's limits.</td><td>2% of the value behind each GRET per week, or 4% across a change of week, until the rebalancer is revoked; deposits and withdrawals do not stretch it.</td><td>Exact prices are impossible with thin liquidity, and a volume cap would also block an honest rebalance. Revoking takes effect at once (<span class="id">P-6</span>, <span class="id">P-8</span>).</td></tr>
+  <tr><td class="id">R-03</td><td>The guard is only as good as its feeds. A feed of the underlying keeps pricing a token that trades far below it, so buying that token at the feed price records no loss. Feeds also move in steps of 0.5% to 2%, six tokens have no feed, and stock feeds stop on weekends.</td><td>The healthy reserves the guard lets be sold, swapped for the cheap token until the rebalancer is revoked; not bounded by <span class="id">R-02</span>. Half of the basket cannot be rebalanced.</td><td>The available feeds price the underlying or the fund; a market price of each token would need another oracle. Watch market prices against the feeds and revoke at once (<span class="id">P-8</span>); a new guard when feeds appear (<span class="id">P-10</span>).</td></tr>
+  <tr><td class="id">R-04</td><td>Governance decides what happens to surpluses: distributions, losses that come back, and balance that returns after claims took a cut in a liquidation.</td><td>Governance keeps value that belongs to holders, which works like a fee.</td><td>Recovery rights per holder would add a lot of accounting, and forbidding <code>rescue</code> would trap tokens sent by mistake. Governance syncs them and repays cuts (<span class="id">P-1</span>, <span class="id">P-2</span>, <span class="id">P-3</span>, <span class="id">P-7</span>).</td></tr>
+  <tr><td class="id">R-05</td><td>An issuer gives a token a second address over the same balance, and governance rescues the reserve through it.</td><td>A whole component.</td><td>It needs both an issuer change and a dishonest governance; none of the 11 tokens has a second address (<span class="id">P-10</span>).</td></tr>
+  <tr><td class="id">R-06</td><td>Governance writes off a healthy token.</td><td>Whoever mints before it is synced back shares in it (<span class="id">R-08</span>).</td><td>Governance gains nothing: it can never rescue the token, and <code>sync</code> undoes the write-off (<span class="id">P-5</span>).</td></tr>
+  <tr class="group"><td colspan="4"><span class="label">Entering and exiting</span></td></tr>
+  <tr><td class="id">R-07</td><td>While minting is paused, or a token is frozen, a holder who never minted cannot qualify for redemption.</td><td>During a hostile notice, such holders can only sell, hand their GRET to a wallet that minted, or wait for a liquidation.</td><td>Redemption stays for wallets that proved access to the whole basket, and a pause that let new wallets mint would not serve its purpose. In the pilot, the only holder minted.</td></tr>
+  <tr><td class="id">R-08</td><td>Whoever mints just before a sync, a favorable swap or the recovery of a written-off token, and redeems after, takes part of that value.</td><td>Most of a distribution or recovery.</td><td>Giving it only to earlier holders needs new accounting. A mint fee of about 0.1% once third parties can mint, pauses, private transactions and small, frequent syncs (<span class="id">P-4</span>, <span class="id">P-5</span>, <span class="id">P-6</span>).</td></tr>
+  <tr><td class="id">R-09</td><td>The 1 GRET floor holds back the last holders when someone keeps a fraction of GRET: a tiny mint, or fees held by the recipient.</td><td>Just under 1 GRET held back; a liquidation releases it.</td><td>The floor stops rounding from distorting the basket; a seed locked forever would cost about the same. In the pilot the recipient is the pilot wallet.</td></tr>
+  <tr><td class="id">R-10</td><td>Minimums bound what the vault sends, not what arrives.</td><td>Less than the minimum received, or nothing from a token that fakes its transfers.</td><td>Checking the recipient would add calls to every exit, and a token that lies about transfers can lie about balances too (<span class="id">P-10</span>).</td></tr>
+  <tr><td class="id">R-11</td><td>A token may arrive up to 10 base units short; after a severe loss, that can cost a minter more of the other tokens.</td><td>A minter overpays; for cbBTC, 10 units are about one cent.</td><td>The xStocks lose 2 to 3 units per transfer. <code>minShares</code> lets the minter refuse.</td></tr>
+  <tr class="group"><td colspan="4"><span class="label">Issuers and tokens</span></td></tr>
+  <tr><td class="id">R-12</td><td>Issuers can pause, freeze, seize or change their tokens.</td><td>A token lost to holders.</td><td>It comes with tokenized assets. <code>redeemSkipping</code>, a write-off and liquidation limit the damage (<span class="id">P-10</span>).</td></tr>
+  <tr><td class="id">R-13</td><td>A token upgraded to take more from the vault than it sends.</td><td>The remaining holders pay the difference, and the last one cannot withdraw that token.</td><td>None does it today, and a check after every transfer was rejected. Holders who minted skip it; governance writes it off or sells it.</td></tr>
+  <tr><td class="id">R-14</td><td>A token's <code>balanceOf</code> breaks while its transfers work.</td><td>The first to leave are paid in full; the last bear the whole shortfall.</td><td>Being able to exit a broken token comes first. A write-off ends it.</td></tr>
+  <tr><td class="id">R-15</td><td>A token becomes expensive to call, or calls back into the vault.</td><td>Normal redemption no longer fits in one transaction, or swaps stop, since the guard reads every priced balance.</td><td>No cap can bound outside code. <code>redeemSkipping</code> never calls the skipped tokens, and every reserve operation is guarded against reentrancy.</td></tr>
+  <tr class="group"><td colspan="4"><span class="label">The basket</span></td></tr>
+  <tr><td class="id">R-16</td><td>A mint lands just before the sale of a whole reserve and leaves dust, which blocks removing the token.</td><td>One more swap.</td><td>Letting the vault sell "whatever is there" would change the price after it was set (<span class="id">P-11</span>).</td></tr>
+  <tr><td class="id">R-17</td><td>Written-off tokens keep their place forever.</td><td>After more than a hundred write-offs, no room for new tokens.</td><td>Keeping them lets a recovery return to the holders at once.</td></tr>
+  <tr><td class="id">R-18</td><td>Any contract can be announced as a new token.</td><td>A useless or hostile token, after 7 days of notice.</td><td>The vault cannot judge tokens; the notice gives time to leave (<span class="id">P-10</span>).</td></tr>
+  <tr><td class="id">R-19</td><td>The initial amounts go stale after basket changes.</td><td>If everyone leaves, nobody can mint again until governance updates them.</td><td>They matter only at zero supply (<span class="id">P-9</span>).</td></tr>
+  <tr><td class="id">R-20</td><td>A dust reserve of a rounding token might make small mints revert; this was never reproduced.</td><td>Small mints revert until the dust is sold.</td><td>Whole reserves are sold and the token removed (<span class="id">P-11</span>).</td></tr>
+  <tr class="group"><td colspan="4"><span class="label">Liquidation</span></td></tr>
+  <tr><td class="id">R-21</td><td>When every pending payout of a token rounds to zero, nobody can claim what is left.</td><td>A few base units: a fraction of a cent with the current tokens.</td><td>Pooling rights would add code for dust.</td></tr>
+  <tr><td class="id">R-22</td><td>Rights over a token that never moves again, and GRET held by contracts that cannot convert it, are never paid.</td><td>Those rights stay pending for good.</td><td>A liquidation cannot force a token to move, and contracts must provide their own exit.</td></tr>
+  <tr class="group"><td colspan="4"><span class="label">Limits of the design</span></td></tr>
+  <tr><td class="id">R-23</td><td>The vault cannot change: no upgrades, no new rules such as an allowlist, no claiming distributions that do not arrive as balance.</td><td>A bug or a new rule needs a new vault, which holders join voluntarily.</td><td>Any power to change the vault would also be a power to act against holders. Tests, reviews, an audit before third-party funds, and a pilot with own funds.</td></tr>
+  <tr><td class="id">R-24</td><td>Fees round down.</td><td>Operations of a few wei pay no fee.</td><td>Avoiding it costs more gas than it saves.</td></tr>
+</table>
+
+<h3><span class="n">11.5</span>What governance commits to</h3>
+<p style="break-after: avoid">Many of the limits above depend on how governance behaves. The vault does not enforce these commitments; they are the agreed policy.</p>
+<table>
+  <thead><tr><th style="width:7%">ID</th><th>Commitment</th><th style="width:18%">For</th></tr></thead>
+  <tr><td class="id">P-1</td><td>Sync every recovery of a recognized loss; never rescue it.</td><td class="id">R-04</td></tr>
+  <tr><td class="id">P-2</td><td>In a liquidation, use a balance that comes back after claims took a cut to repay those cuts, in proportion to what each claimant lost.</td><td class="id">R-04</td></tr>
+  <tr><td class="id">P-3</td><td>Sync issuer distributions, which belong to the holders. Rescue only what does not, such as tokens sent by mistake.</td><td class="id">R-04</td></tr>
+  <tr><td class="id">P-4</td><td>Around every sync: pause minting, send it through a private RPC, sync small and often, keep a mint fee of about 0.1% once third parties can mint, and let only the Safe execute timelocked operations.</td><td class="id">R-08</td></tr>
+  <tr><td class="id">P-5</td><td>Write off only a token that stopped working, and cancel if it recovers. Keep minting paused while a written-off token may recover, and sync it at once.</td><td>R-06, <span class="id">R-08</span></td></tr>
+  <tr><td class="id">P-6</td><td>Send every swap through a private RPC.</td><td>R-02, <span class="id">R-08</span></td></tr>
+  <tr><td class="id">P-7</td><td>If a token removed after a total loss gets its balance back, add it again and sync it.</td><td class="id">R-04</td></tr>
+  <tr><td class="id">P-8</td><td>Watch the guard's <code>LossRecorded</code> events, and the market price of every priced token against its feed. Revoke the rebalancer after any loss nobody expected, or when a token trades away from its feed.</td><td><span class="id">R-02</span>, <span class="id">R-03</span></td></tr>
+  <tr><td class="id">P-9</td><td>Update the initial amounts with every basket change.</td><td class="id">R-19</td></tr>
+  <tr><td class="id">P-10</td><td>Admit tokens carefully and watch their issuers: no transfer fees, callbacks or second addresses; 8 decimals or more; a Chainlink feed if the token must be rebalanced.</td><td>R-03, <span class="id">R-05</span>, <span class="id">R-10</span> to <span class="id">R-15</span>, <span class="id">R-18</span>, <span class="id">R-21</span></td></tr>
+  <tr><td class="id">P-11</td><td>Finish the sale of a whole reserve with a second small swap, and remove tokens whose reserve was sold.</td><td>R-16, <span class="id">R-20</span></td></tr>
+  <tr><td class="id">P-12</td><td>Before third-party funds, move governance to a Safe with a tested recovery procedure.</td><td class="id">R-01</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 12</p>
+<h2>Questions and answers</h2>
+<p class="intro">Short answers to the questions people ask first, with a pointer to where the full explanation is.</p>
+
+<h3><span class="n">12.1</span>Can governance take my tokens?</h3>
+<p>Not directly. It cannot withdraw reserves, mint GRET or touch liquidation rights. Its most dangerous power is indirect: appointing a rebalancer, and a price guard that accepts any price. That takes a 7-day public notice, during which anyone who minted can redeem, skipping any token that was made to fail (chapters 3 and 7). With the Chainlink guard in place, even a stolen rebalancer key can lose at most 2% of the vault per week.</p>
+
+<h3><span class="n">12.2</span>I bought GRET on an exchange. Why can't I redeem it?</h3>
+<p>Normal redemption is only for wallets that have minted at least once. Mint any amount once from the same wallet and you can redeem everything you hold, including what you bought. While governance has minting paused you cannot do that first mint, so you have to wait or sell. In a liquidation, every holder can exit without this condition (sections 3.1 and 8.2).</p>
+
+<h3><span class="n">12.3</span>What happens if an issuer freezes the vault?</h3>
+<p>Minting stops and plain redemptions revert, because that token cannot move. Holders who minted can leave at once with <code>redeemSkipping</code>, giving up their part of the frozen token; those who never minted cannot qualify until the token is written off, because their first mint would have to deposit it. Governance can write it off after 7 days so the vault works normally again, and <code>sync</code> returns it to the holders if the freeze ends (sections 3.4 and 6.5).</p>
+
+<h3><span class="n">12.4</span>What if an issuer takes tokens from the vault or charges a fee?</h3>
+<p>If the vault holds less than it recorded, the loss is recognized and shared by every holder in proportion. A token that charges a fee on transfers makes mints revert for it, so it should not be in the basket (section 5.3).</p>
+
+<h3><span class="n">12.5</span>Can the basket change without me knowing?</h3>
+<p>A new token always waits 7 days in public before it can join, and so does a new rebalancer. Once a rebalancer is in place, though, its swaps take effect at once: the proportions can change from one block to the next. What never changes without notice is who is allowed to swap (sections 6.3 and 7.2).</p>
+
+<h3><span class="n">12.6</span>Why is there a 1 GRET floor?</h3>
+<p>Without it, someone holding almost everything could redeem down to a few wei, and the rounding leftovers would distort the basket so much that minting became unusable. The cost is that the last bit of the last large holder may need a liquidation, or the GRET gathered in one wallet, to come out (section 3.3).</p>
+
+<h3><span class="n">12.7</span>Does GRET have a price?</h3>
+<p>Not inside the contract, which only counts tokens. GRET is worth whatever stands behind it, valued at the market prices of the basket's tokens. If it trades on an exchange, its market price can drift from that value, which is what makes minting and redeeming worthwhile for arbitrageurs.</p>
+
+<h3><span class="n">12.8</span>Can the contract be upgraded?</h3>
+<p>No. Its code is fixed for good. Everything that can change (the basket, fees, the rebalancer, governance) changes within rules the code already contains. Anything beyond that requires a new vault, and holders would move voluntarily by redeeming from the old one and minting in the new one.</p>
+
+<h3><span class="n">12.9</span>Do I earn anything by holding GRET?</h3>
+<p>GRET has no yield of its own. Issuer distributions that arrive as balance, such as the xStocks multiplier increases, are synced into the reserves and belong to all holders. Value otherwise moves with the prices of the basket's tokens.</p>
+
+<h3><span class="n">12.10</span>Can I lose money?</h3>
+<p>Yes. The basket's tokens can lose value; an issuer can freeze, seize or change its token; a rebalancer can trade at a bad price; and the contract can have bugs, since it has had internal reviews but no independent audit yet (chapter 11).</p>
+
+<h3><span class="n">12.11</span>What if the pilot wallet's key is lost or stolen?</h3>
+<p>Lost: nobody can change the basket, sync, rescue or start a liquidation, but holders can still mint and redeem. Stolen: the thief can start a liquidation, withdraw surpluses and, after a public 7-day notice, appoint a rebalancer and swap the reserves away. Holders who minted can leave during that notice (section 11.3).</p>
+</section>
+
+<!-- ============================================================ -->
+<section class="chapter">
+<p class="chapter-num">Chapter 13</p>
+<h2>Reference</h2>
+<p class="intro">Every function and every fixed number in one place.</p>
+
+<h3><span class="n">13.1</span>Functions</h3>
+<table>
+  <tr><th style="width:28%">Function</th><th style="width:16%">Who</th><th>What it does</th><th style="width:24%">Condition</th></tr>
+  <tr class="group"><td colspan="4"><span class="label">Holders</span></td></tr>
+  <tr><td><code>mint</code></td><td>Anyone</td><td>Deposits the basket and receives GRET, minus the mint fee</td><td>No liquidation; not paused; current basket version</td></tr>
+  <tr><td><code>redeem</code></td><td>Wallets that minted</td><td>Pays the fee in GRET, burns the rest, receives every token</td><td>Supply left 0 or ≥ 1 GRET; current basket version</td></tr>
+  <tr><td><code>redeemSkipping</code></td><td>Wallets that minted</td><td>Same, without the listed tokens, which are not called</td><td>Their minimum must be 0; current basket version</td></tr>
+  <tr><td><code>recognizeLoss</code></td><td>Anyone</td><td>Lowers a reserve to the real balance</td><td>No liquidation</td></tr>
+  <tr class="group"><td colspan="4"><span class="label">Basket</span></td></tr>
+  <tr><td><code>announceComponent</code></td><td>Governance</td><td>Announces a new token</td><td>—</td></tr>
+  <tr><td><code>cancelComponentAnnouncement</code></td><td>Governance</td><td>Discards the announcement</td><td>—</td></tr>
+  <tr><td><code>addComponent</code></td><td>Anyone</td><td>Adds the token, with zero reserve</td><td>Day 7 to 14; max 128</td></tr>
+  <tr><td><code>removeComponent</code></td><td>Governance</td><td>Removes a token</td><td>Zero reserve; not the last; never written off</td></tr>
+  <tr><td><code>proposeWriteOff</code></td><td>Governance</td><td>Proposes writing off a broken token</td><td>Governance judges it</td></tr>
+  <tr><td><code>cancelWriteOff</code></td><td>Governance</td><td>Discards the proposal</td><td>—</td></tr>
+  <tr><td><code>writeOffComponent</code></td><td>Anyone</td><td>Drops the token's reserve to 0</td><td>Day 7 to 14</td></tr>
+  <tr><td><code>setMintPaused</code></td><td>Governance</td><td>Pauses or resumes minting</td><td>Immediate</td></tr>
+  <tr><td><code>setInitialAmounts</code></td><td>Governance</td><td>Sets the first mint's basket</td><td>Used only at zero supply; current basket version</td></tr>
+  <tr><td><code>sync</code></td><td>Governance</td><td>Adds a token's surplus to its reserve</td><td>GRET in circulation</td></tr>
+  <tr><td><code>rescue</code></td><td>Governance</td><td>Withdraws surpluses or tokens outside the basket</td><td>Never what is owed; never written off</td></tr>
+  <tr class="group"><td colspan="4"><span class="label">Rebalancer</span></td></tr>
+  <tr><td><code>swap</code></td><td>Rebalancer</td><td>Delivers one token, takes another from the reserve</td><td>No liquidation</td></tr>
+  <tr><td><code>proposeRebalancer</code></td><td>Governance</td><td>Proposes a rebalancer</td><td>—</td></tr>
+  <tr><td><code>acceptRebalancer</code></td><td>Proposed address</td><td>Takes over the role</td><td>Day 7 to 14</td></tr>
+  <tr><td><code>cancelRebalancerProposal</code></td><td>Governance</td><td>Discards the proposal</td><td>—</td></tr>
+  <tr><td><code>revokeRebalancer</code></td><td>Governance</td><td>Removes the rebalancer and any pending one</td><td>Immediate</td></tr>
+  <tr><td><code>proposePriceGuard</code></td><td>Governance</td><td>Proposes the contract that must accept every swap</td><td>—</td></tr>
+  <tr><td><code>applyPriceGuard</code></td><td>Anyone</td><td>Applies the proposed guard</td><td>Day 7 to 14</td></tr>
+  <tr><td><code>cancelPriceGuardProposal</code></td><td>Governance</td><td>Discards the proposal</td><td>—</td></tr>
+  <tr class="group"><td colspan="4"><span class="label">Fees</span></td></tr>
+  <tr><td><code>proposeFees</code></td><td>Governance</td><td>Sets mint and redemption fees</td><td>Max 5%; raises wait</td></tr>
+  <tr><td><code>applyFees</code></td><td>Anyone</td><td>Applies a proposed raise</td><td>Day 7 to 14; needs a recipient</td></tr>
+  <tr><td><code>cancelFeesProposal</code></td><td>Governance</td><td>Discards a proposed raise</td><td>—</td></tr>
+  <tr><td><code>setFeeRecipient</code></td><td>Governance</td><td>Chooses who receives the fees</td><td>Immediate</td></tr>
+  <tr class="group"><td colspan="4"><span class="label">Governance and liquidation</span></td></tr>
+  <tr><td><code>proposeGovernance</code></td><td>Governance</td><td>Proposes the next governance</td><td>—</td></tr>
+  <tr><td><code>acceptGovernance</code></td><td>Proposed address</td><td>Takes over the role</td><td>Day 7 to 14</td></tr>
+  <tr><td><code>cancelGovernanceProposal</code></td><td>Governance</td><td>Discards the proposal</td><td>—</td></tr>
+  <tr><td><code>activateLiquidation</code></td><td>Governance</td><td>Starts the irreversible liquidation</td><td>—</td></tr>
+  <tr><td><code>convertToClaims</code></td><td>Any holder</td><td>Burns GRET in exchange for rights</td><td>During liquidation</td></tr>
+  <tr><td><code>claim</code></td><td>Whoever converted</td><td>Withdraws one token</td><td>During liquidation</td></tr>
+</table>
+
+<h3><span class="n">13.2</span>Fixed numbers</h3>
+<table>
+  <tr><th style="width:34%">Constant</th><th style="width:16%">Value</th><th>Meaning</th></tr>
+  <tr><td><code>INITIAL_SHARES</code></td><td>1 GRET</td><td>What the first mint issues</td></tr>
+  <tr><td><code>MIN_SUPPLY</code></td><td>1 GRET</td><td>The floor a redemption cannot cross, except to zero</td></tr>
+  <tr><td><code>MAX_COMPONENTS</code></td><td>128</td><td>Most tokens in the basket</td></tr>
+  <tr><td><code>MAX_RECEIPT_SHORTFALL</code></td><td>10 base units</td><td>How short a token may arrive on mint or swap</td></tr>
+  <tr><td><code>BASKET_CHANGE_DELAY</code></td><td>7 days</td><td>Wait for a new token, rebalancer or write-off</td></tr>
+  <tr><td><code>GOVERNANCE_TRANSFER_DELAY</code></td><td>7 days</td><td>Wait for a new governance</td></tr>
+  <tr><td><code>FEE_INCREASE_DELAY</code></td><td>7 days</td><td>Wait for a fee raise</td></tr>
+  <tr><td><code>EXECUTION_WINDOW</code></td><td>7 days</td><td>Time to carry out a ready proposal before it expires</td></tr>
+  <tr><td><code>MAX_SWAP_LOSS</code> (guard)</td><td>200 (2%)</td><td>Most a single swap can lose, against the feeds</td></tr>
+  <tr><td><code>MAX_WEEKLY_LOSS</code> (guard)</td><td>200 (2%)</td><td>Most all swaps in a week can lose, of the vault's value</td></tr>
+  <tr><td><code>MAX_FEE</code></td><td>500 (5%)</td><td>Highest mint or redemption fee, in basis points</td></tr>
+</table>
+
+<h3><span class="n">13.3</span>Glossary</h3>
+<table>
+  <tr><th style="width:24%">Term</th><th>Meaning</th></tr>
+  <tr><td>Base unit</td><td>The smallest amount of a token. Most tokens have 18 decimals, so 1 token is 10<sup>18</sup> base units; cbBTC has 8. For GRET the base unit is also called a wei.</td></tr>
+  <tr><td>Basis point</td><td>One hundredth of a percent: 100 basis points = 1%, 500 = 5%.</td></tr>
+  <tr><td>Basket</td><td>The set of tokens the vault holds; each is a <em>component</em>.</td></tr>
+  <tr><td>Basket version</td><td>A counter that grows whenever a token is added or removed. Mints and redemptions state the version they were prepared for, so a changed list makes them revert.</td></tr>
+  <tr><td>Burn</td><td>Destroying GRET, which lowers the supply. Redemptions and conversions to claims burn GRET.</td></tr>
+  <tr><td>Claim</td><td>In a liquidation, withdrawing one token against the rights obtained by converting GRET.</td></tr>
+  <tr><td>Fee recipient</td><td>The address that receives the mint and redemption fees, in GRET.</td></tr>
+  <tr><td>Flash loan</td><td>A loan taken and repaid within one transaction; if it is not repaid, the whole transaction is undone.</td></tr>
+  <tr><td>Delegation</td><td>Assigning one's VORA voting power to oneself or to a representative; tokens that are not delegated do not vote.</td></tr>
+  <tr><td>Governance</td><td>The address that decides changes within the vault's rules: today the pilot wallet.</td></tr>
+  <tr><td>Governor</td><td>OpenZeppelin's standard voting contract, planned for VORA holders.</td></tr>
+  <tr><td>Initial basket</td><td>The amounts the first mint deposits for exactly 1 GRET, used whenever the supply is zero.</td></tr>
+  <tr><td>Issuer</td><td>The company behind a component token (Ondo, Backed, Paxos, Coinbase), able to pause, freeze or upgrade it.</td></tr>
+  <tr><td>Liquidation</td><td>The irreversible emergency mode in which holders exit token by token.</td></tr>
+  <tr><td>Mint</td><td>Creating GRET by depositing the basket.</td></tr>
+  <tr><td>Multisig (Safe)</td><td>A wallet that needs several signatures, for example 2 of 3, to act.</td></tr>
+  <tr><td>Price feed</td><td>A Chainlink contract that publishes an asset's price on the chain and updates it on a schedule or when the price moves.</td></tr>
+  <tr><td>Price guard</td><td>The contract that prices every swap and refuses the ones that lose too much. It has no owner; changing it takes the 7-day wait.</td></tr>
+  <tr><td>Proposal threshold</td><td>The voting power needed to submit a proposal.</td></tr>
+  <tr><td>Quorum</td><td>The share of all voting power that must vote For or Abstain for a proposal to be valid.</td></tr>
+  <tr><td>Rebalancer</td><td>The one address allowed to swap one component for another.</td></tr>
+  <tr><td>Redeem</td><td>Handing in GRET for the proportional part of every component.</td></tr>
+  <tr><td>Rescue</td><td>Governance withdrawing a surplus or a token outside the basket; never reserves.</td></tr>
+  <tr><td>Reserve</td><td>What the vault recognizes as backing GRET, token by token.</td></tr>
+  <tr><td>Snapshot (voting)</td><td>The moment at which a proposal fixes each holder's voting power.</td></tr>
+  <tr><td>Supply</td><td>The total GRET in circulation.</td></tr>
+  <tr><td>Surplus</td><td>Balance above the reserve, which does not back GRET until synced.</td></tr>
+  <tr><td>Swap</td><td>The rebalancer delivering one component and taking another, at amounts it sets.</td></tr>
+  <tr><td>Sync</td><td>Governance adding a surplus to the reserve, for every holder.</td></tr>
+  <tr><td>Timelock</td><td>A contract that makes every action wait a public delay before it runs.</td></tr>
+  <tr><td>VORA</td><td>The project's planned voting token for governance. GRET itself does not vote.</td></tr>
+  <tr><td>Write-off</td><td>Dropping a broken component's reserve to zero so the vault keeps working without it.</td></tr>
+  <tr><td>xStocks</td><td>Backed's tokenized stocks, such as SPYx and JAAAx, which lose a few base units per transfer.</td></tr>
+</table>
+
+<h3><span class="n">13.4</span>Still open</h3>
+<ul>
+  <li><span class="label">Name check.</span> Name and symbol are fixed per contract, so before deploying: a search for other "GRET" tokens on Ethereum and for trademarks on the name.</li>
+  <li><span class="label">Independent audit</span> of the whole contract before third-party funds.</li>
+  <li><span class="label">Price coverage.</span> Six tokens have no Chainlink feed on Ethereum and cannot be swapped; a new guard once feeds appear.</li>
+  <li><span class="label">Governance after the pilot:</span> the Safe's signers and threshold, whether there will be a timelock and with which delay, and the Governor with VORA.</li>
+</ul>
+</section>
+
+</body>
+</html>

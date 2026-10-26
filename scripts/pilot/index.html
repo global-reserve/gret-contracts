@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRET Pilot</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e2e2dc;
+    --ok: #1f7a3d; --err: #b42318; --warn-bg: #fdecea; --rehearsal-bg: #e8f4ec; --accent: #1d4ed8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1f1f1d; --text: #ecece8; --muted: #9b9b94; --line: #33332f;
+      --ok: #5cc27f; --err: #f2867b; --warn-bg: #3a1f1c; --rehearsal-bg: #1c3324; --accent: #7aa2ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 0 0 14px; }
+  .banner { padding: 10px 14px; border-radius: 8px; margin: 0 0 14px; font-weight: 600; display: none; }
+  .banner.mainnet { display: block; background: var(--warn-bg); color: var(--err); }
+  .banner.rehearsal { display: block; background: var(--rehearsal-bg); color: var(--ok); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 13px; }
+  td.num, th.num { text-align: right; }
+  .table-wrap { overflow-x: auto; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input { font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); flex: 1; min-width: 0; }
+  code { font-size: 13px; word-break: break-all; }
+  .ok { color: var(--ok); } .err { color: var(--err); } .muted { color: var(--muted); }
+  ul.checks { list-style: none; padding: 0; margin: 8px 0 0; }
+  ol#log { margin: 0; padding-left: 20px; font-size: 14px; }
+  ol#log li { margin: 2px 0; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>GRET pilot</h1>
+  <p class="sub">Deployment, first mint and test redemption. You sign in MetaMask; this page never sees your key.</p>
+
+  <div id="banner" class="banner"></div>
+
+  <section>
+    <h2>Connection</h2>
+    <div class="row">
+      <button id="connect" class="primary">Connect MetaMask</button>
+      <span id="connection" class="muted">Not connected.</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Your wallet</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Token</th><th class="num">Weight</th><th class="num">In 1 GRET</th><th class="num">You hold</th><th></th></tr></thead>
+        <tbody id="tokens"><tr><td colspan="5" class="muted">Connect MetaMask to see your balances.</td></tr></tbody>
+      </table>
+    </div>
+    <p id="eth" class="muted"></p>
+    <div class="row" id="fund-row" hidden><button id="fund">Add 1 test ETH (rehearsal only)</button></div>
+  </section>
+
+  <section>
+    <h2>1. Deploy the contract</h2>
+    <p id="vault-info" class="muted">No vault yet.</p>
+    <div class="row">
+      <button id="deploy" class="primary" disabled>Deploy</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input id="vault-input" placeholder="Or paste the address of a vault already deployed">
+      <button id="vault-use" disabled>Use</button>
+      <button id="vault-forget" disabled>Forget</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Verify the contract</h2>
+    <p class="muted">Checked automatically against the configuration in this repository. If anything does not match, stop.</p>
+    <ul id="checks" class="checks"><li class="muted">No vault yet.</li></ul>
+  </section>
+
+  <section>
+    <h2>3. Mint 1 GRET</h2>
+    <p class="muted">Each token is approved for the exact amount, never unlimited, and then you mint. Up to 12 signatures.</p>
+    <div class="row"><button id="mint" class="primary" disabled>Approve and mint</button><span id="gret" class="muted"></span></div>
+  </section>
+
+  <section>
+    <h2>4. Redeem everything (test)</h2>
+    <p class="muted">Burns your GRET and returns the 11 tokens. You can then mint again with step 3.</p>
+    <div class="row"><button id="redeem" disabled>Redeem everything</button></div>
+  </section>
+
+  <section>
+    <h2>Log</h2>
+    <ol id="log"><li class="muted">Nothing yet.</li></ol>
+  </section>
+</main>
+
+<script>
+"use strict";
+const CHAINS = { 1: "Ethereum mainnet", 31337: "local rehearsal (mainnet fork)" };
+const state = { config: null, account: null, chainId: null, vault: null, status: null, busy: false };
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const short = (value) => `${value.slice(0, 6)}…${value.slice(-4)}`;
+const escape = (text) => String(text).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+
+function fmt(raw, decimals) {
+  const digits = BigInt(raw).toString().padStart(decimals + 1, "0");
+  const whole = digits.slice(0, digits.length - decimals) || "0";
+  const fraction = decimals ? digits.slice(-decimals).replace(/0+$/, "") : "";
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
+function link(kind, value) {
+  if (state.chainId !== 1) return `<code>${escape(short(value))}</code>`;
+  return `<a href="https://etherscan.io/${kind}/${value}" target="_blank" rel="noopener">${escape(short(value))}</a>`;
+}
+
+function log(html, cls = "") {
+  const list = $("log");
+  if (list.firstElementChild?.classList.contains("muted")) list.innerHTML = "";
+  const item = document.createElement("li");
+  item.className = cls;
+  item.innerHTML = html;
+  list.appendChild(item);
+}
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || response.statusText);
+  return body;
+}
+
+const vaultKey = () => `gret-pilot-vault-${state.chainId}`;
+function loadVault() { try { return localStorage.getItem(vaultKey()); } catch { return null; } }
+function saveVault(vault) {
+  try { if (vault) localStorage.setItem(vaultKey(), vault); else localStorage.removeItem(vaultKey()); } catch {}
+}
+
+function ready() {
+  return state.config && state.account && CHAINS[state.chainId] &&
+    state.account.toLowerCase() === state.config.wallet.toLowerCase();
+}
+
+function render() {
+  const s = state.status;
+  const c = state.config;
+  const enoughTokens = Boolean(s && c.components.every((t, i) => BigInt(s.balances[i]) >= BigInt(t.amount)));
+  const checksOk = Boolean(s?.checks?.length && s.checks.every((check) => check.ok));
+  const gret = s?.vault ? BigInt(s.vault.gret) : 0n;
+
+  if (s && c) {
+    $("tokens").innerHTML = c.components.map((t, i) => {
+      const ok = BigInt(s.balances[i]) >= BigInt(t.amount);
+      return `<tr><td>${escape(t.symbol)}</td><td class="num">${t.weightPct} %</td><td class="num">${escape(t.perGret)}</td>` +
+        `<td class="num">${fmt(s.balances[i], t.decimals)}</td><td class="${ok ? "ok" : "err"}">${ok ? "enough" : "short"}</td></tr>`;
+    }).join("");
+    $("eth").textContent = `ETH for gas: ${fmt(s.eth, 18)}. The full cycle uses about 7.5M gas; 0.03 ETH leaves ample margin.`;
+  }
+
+  if (state.vault) {
+    $("vault-info").innerHTML = `Vault: ${link("address", state.vault)} <code>${escape(state.vault)}</code>`;
+  } else {
+    $("vault-info").textContent = "No vault yet.";
+  }
+  if (s?.checks) {
+    $("checks").innerHTML = s.checks.map((check) =>
+      `<li class="${check.ok ? "ok" : "err"}">${check.ok ? "✓" : "✗"} ${escape(check.label)}</li>`).join("");
+  } else {
+    $("checks").innerHTML = '<li class="muted">No vault yet.</li>';
+  }
+  $("gret").textContent = s?.vault
+    ? `You hold ${fmt(s.vault.gret, 18)} GRET · total supply ${fmt(s.vault.supply, 18)} GRET · redemption enabled: ${s.vault.hasMinted ? "yes" : "no"}`
+    : "";
+
+  const can = ready() && !state.busy;
+  $("deploy").disabled = !(can && !state.vault && enoughTokens);
+  $("vault-use").disabled = !can;
+  $("vault-forget").disabled = !(can && state.vault);
+  $("mint").disabled = !(can && state.vault && checksOk && enoughTokens);
+  $("redeem").disabled = !(can && state.vault && checksOk && gret > 0n);
+  $("fund").disabled = !can;
+}
+
+async function refresh() {
+  if (!ready()) return render();
+  try {
+    const query = new URLSearchParams({ chainId: String(state.chainId) });
+    if (state.vault) query.set("vault", state.vault);
+    state.status = await api(`/api/status?${query}`);
+  } catch (error) {
+    state.status = null;
+    log(`Could not read the state: ${escape(error.message)}` +
+      (state.chainId === 31337 ? " Is <code>npm run pilot:fork-node</code> running?" : ""), "err");
+  }
+  render();
+}
+
+async function waitForReceipt(hash) {
+  for (let attempt = 0; attempt < 900; attempt++) {
+    const receipt = await ethereum.request({ method: "eth_getTransactionReceipt", params: [hash] });
+    if (receipt) return receipt;
+    await sleep(2000);
+  }
+  throw new Error("The transaction is taking too long; check it in the explorer before retrying.");
+}
+
+async function send(tx) {
+  log(`Sign in MetaMask: <b>${escape(tx.label)}</b>`);
+  const params = { from: state.account, data: tx.data };
+  if (tx.to) params.to = tx.to;
+  const hash = await ethereum.request({ method: "eth_sendTransaction", params: [params] });
+  log(`Sent: ${escape(tx.label)} (${link("tx", hash)}). Waiting for confirmation…`);
+  const receipt = await waitForReceipt(hash);
+  if (receipt.status !== "0x1") throw new Error(`Failed on chain: ${tx.label}`);
+  log(`Confirmed: ${escape(tx.label)}`, "ok");
+  return receipt;
+}
+
+async function run(action) {
+  state.busy = true;
+  render();
+  try {
+    await action();
+  } catch (error) {
+    log(error.code === 4001 ? "You rejected the signature. Nothing else was sent." : escape(error.message), "err");
+  } finally {
+    state.busy = false;
+    await refresh();
+  }
+}
+
+async function connect() {
+  if (!window.ethereum) {
+    log("MetaMask was not found in this browser.", "err");
+    return;
+  }
+  const [account] = await ethereum.request({ method: "eth_requestAccounts" });
+  state.account = account;
+  state.chainId = parseInt(await ethereum.request({ method: "eth_chainId" }), 16);
+  ethereum.on?.("accountsChanged", () => location.reload());
+  ethereum.on?.("chainChanged", () => location.reload());
+
+  const network = CHAINS[state.chainId];
+  const banner = $("banner");
+  if (state.chainId === 1) {
+    banner.className = "banner mainnet";
+    banner.textContent = "You are on Ethereum mainnet: everything you sign here is real.";
+  } else if (state.chainId === 31337) {
+    banner.className = "banner rehearsal";
+    banner.textContent = "Local rehearsal: nothing you sign here reaches mainnet.";
+    $("fund-row").hidden = false;
+  }
+  $("connection").innerHTML = `${escape(short(account))} on ${escape(network ?? `network ${state.chainId}, which is not supported`)}`;
+  if (!network) log("Switch MetaMask to Ethereum mainnet or to the local rehearsal network (chainId 31337).", "err");
+  if (account.toLowerCase() !== state.config.wallet.toLowerCase()) {
+    log(`This is not the pilot account. Select ${escape(state.config.wallet)} in MetaMask.`, "err");
+  }
+  state.vault = loadVault();
+  await refresh();
+}
+
+async function deploy() {
+  if (state.chainId === 1) {
+    const basket = state.config.components.map((t) => `  ${t.symbol}: ${t.perGret}`).join("\n");
+    const message = "You are about to deploy GRETVault on Ethereum mainnet. Its code cannot be changed afterwards.\n\n" +
+      `Governance: ${state.config.governance}\n\nContents of 1 GRET:\n${basket}\n\nContinue?`;
+    if (!confirm(message)) return;
+  }
+  const receipt = await send(state.config.deploy);
+  state.vault = receipt.contractAddress;
+  saveVault(state.vault);
+  log(`Vault deployed at <code>${escape(state.vault)}</code>`, "ok");
+}
+
+async function sendPlan(path, mainnetQuestion) {
+  const query = new URLSearchParams({ chainId: String(state.chainId), vault: state.vault });
+  const { txs } = await api(`${path}?${query}`);
+  if (txs.length === 0) return log("Nothing to send.");
+  if (state.chainId === 1 && !confirm(`${mainnetQuestion}\n\n${txs.map((tx) => `• ${tx.label}`).join("\n")}`)) return;
+  for (const tx of txs) await send(tx);
+}
+
+$("connect").onclick = () => run(connect);
+$("deploy").onclick = () => run(deploy);
+$("mint").onclick = () => run(() => sendPlan("/api/mint", "You are about to sign on mainnet:"));
+$("redeem").onclick = () => run(() => sendPlan("/api/redeem", "You are about to redeem on mainnet:"));
+$("fund").onclick = () => run(async () => {
+  await api("/api/fund", { method: "POST" });
+  log("Added 1 test ETH on the local fork.", "ok");
+});
+$("vault-use").onclick = () => run(async () => {
+  const value = $("vault-input").value.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(value)) throw new Error("That address is not valid.");
+  state.vault = value;
+  saveVault(value);
+});
+$("vault-forget").onclick = () => run(async () => {
+  if (!confirm("Forget this vault on this page? The contract still exists on chain.")) return;
+  state.vault = null;
+  saveVault(null);
+});
+
+api("/api/config").then((config) => { state.config = config; render(); })
+  .catch((error) => log(`Could not load the configuration: ${escape(error.message)}`, "err"));
+</script>
+</body>
+</html>
