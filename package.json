@@ -6,7 +6,7 @@
   "description": "Smart contracts for Global Reserve Token (GRET): a basket vault on Ethereum",
   "license": "MIT",
   "author": "Global Reserve contributors",
-  "homepage": "https://github.com/global-reserve/gret-contracts#readme",
+  "homepage": "https://grt.finance",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/global-reserve/gret-contracts.git"

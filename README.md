@@ -7,6 +7,9 @@
 Smart contracts for **Global Reserve Token (GRET)**: an ERC-20 share of a basket of tokenized
 assets on Ethereum, minted and redeemed in kind.
 
+**[Website](https://grt.finance)** · **[Guide (PDF)](docs/GRETVault-explained.pdf)** ·
+[Specification](docs/SPECIFICATION.md) · [Accepted risks](docs/ACCEPTED_RISKS.md)
+
 > [!WARNING]
 > **Not deployed and not independently audited.** A mainnet pilot with the project's own funds
 > is prepared and rehearsed. Nothing in this repository is an offer to buy or sell any asset,
