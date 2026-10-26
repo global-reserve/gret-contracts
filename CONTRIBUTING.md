@@ -1,7 +1,8 @@
 # Contributing
 
 Thanks for your interest in GRET. Security issues must not be reported here: follow
-[SECURITY.md](SECURITY.md).
+[SECURITY.md](SECURITY.md). By participating you agree to the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Setup
 

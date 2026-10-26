@@ -72,6 +72,7 @@ involved.
 | [Mainnet pilot](docs/PILOT.md) | Steps to deploy the vault and make the first mint |
 | [Security policy](SECURITY.md) | How to report a vulnerability |
 | [Contributing](CONTRIBUTING.md) | Setup, what to run for each change and conventions |
+| [Code of conduct](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
 
 ## Deployments
 
@@ -220,6 +221,9 @@ docs/GRETVault-explained.pdf, .html  Plain-language guide to the contracts (PDF 
 docs/PILOT.md                        Mainnet pilot guide
 .github/workflows/ci.yml             Continuous integration: compile, type-check and test
 CONTRIBUTING.md                      Setup, what to run for each change and conventions
+CODE_OF_CONDUCT.md                   Contributor Covenant 2.1
+.github/ISSUE_TEMPLATE/              Bug report and proposal forms; security reports go private
+.github/pull_request_template.md     Pull request checklist
 SECURITY.md                          How to report a vulnerability
 ```
 
