@@ -70,6 +70,7 @@ involved.
 | [Accepted risks](docs/ACCEPTED_RISKS.md) | Every accepted risk with its reason and mitigation, and governance's operating policy |
 | [Guide (PDF)](docs/GRETVault-explained.pdf) | How the contracts work, in plain language, with diagrams and examples |
 | [Mainnet pilot](docs/PILOT.md) | Steps to deploy the vault and make the first mint |
+| [Security review](docs/audits/2026-10-27-GRETVault-review.md) | AI-assisted internal review of October 27, 2026: scope, method, results and the tests it added |
 | [Security policy](SECURITY.md) | How to report a vulnerability |
 | [Contributing](CONTRIBUTING.md) | Setup, what to run for each change and conventions |
 | [Code of conduct](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
@@ -223,6 +224,7 @@ test/GRETVault.risks.t.sol           One case per accepted risk, named after its
 test/GRETVault.fuzz.t.sol            Property fuzzing in Solidity
 test/GRETVault.invariant.t.sol       Invariants over random sequences of every operation
 test/GRETVault.invariants.ts         Deterministic random sequences with invariants
+test/GRETVault.audit-*.t.sol         Property tests added by the October 2026 security review
 test/MockERC20.ts                    Tests of the mocks with 18 and 8 decimals
 test/helpers/basket.ts               Test basket shared by the vault tests
 test/helpers/GRETVaultCase.sol       Setup and adverse tokens shared by the Solidity cases
@@ -238,6 +240,7 @@ docs/SPECIFICATION.md                Specification: design, rules, implementatio
 docs/ACCEPTED_RISKS.md               Accepted risks, their reasons and governance's operating policy
 docs/GRETVault-explained.pdf, .html  Plain-language guide to the contracts (PDF and its HTML source)
 docs/PILOT.md                        Mainnet pilot guide
+docs/audits/                         Security reviews and the mainnet state they checked
 .github/workflows/ci.yml             Continuous integration: compile, type-check and test
 CONTRIBUTING.md                      Setup, what to run for each change and conventions
 CODE_OF_CONDUCT.md                   Contributor Covenant 2.1
@@ -276,7 +279,8 @@ it for reentrancy guards that are cleared at the end of the call is safe.
 
 ## Security
 
-The contracts have had internal reviews, not an independent audit. Report vulnerabilities
+The contracts have had internal reviews, not an independent audit; the latest, AI-assisted,
+is in [docs/audits/](docs/audits/2026-10-27-GRETVault-review.md). Report vulnerabilities
 privately as described in [SECURITY.md](SECURITY.md); the risks that were consciously
 accepted are in [docs/ACCEPTED_RISKS.md](docs/ACCEPTED_RISKS.md).
 

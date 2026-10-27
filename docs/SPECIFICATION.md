@@ -503,6 +503,7 @@ pending.
 | Adversarial: reentrancy in 70 combinations, tokens without `bool`, tokens rejecting zero transfers, issuer freezing the vault or a holder, 0 and 24 decimals, 128 components | `test/GRETVault.adversarial.ts` | `npm test` |
 | Deterministic random sequences | `test/GRETVault.invariants.ts` | `npm test` |
 | Property fuzzing and invariants with a handler | `test/GRETVault.fuzz.t.sol`, `test/GRETVault.invariant.t.sol` | `npm test` (fast), `npm run test:deep` |
+| Security review properties: receipt shortfalls with unrecognized losses, donations and fees; liquidation against an independent token ledger; removals at every basket position | `test/GRETVault.audit-accounting.t.sol`, `test/GRETVault.audit-liquidation.t.sol`, `test/GRETVault.audit-governance.t.sol` | `npm test` (fast), `npm run test:deep` |
 | Mainnet fork with the 11 components, including swaps, basket changes and the price guard with the real feeds | `test-fork/GRETVault.mainnet.ts` | `npm run test:fork` |
 | Protections: attacks and failures the vault refuses or lets holders get around | `test/GRETVault.protections.t.sol` | `npm test` |
 | Accepted risks: each test reproduces an accepted behavior and is named after its ID in `docs/ACCEPTED_RISKS.md` | `test/GRETVault.risks.t.sol` | `npm test` |
@@ -540,7 +541,7 @@ changed, write-offs followed by mints and by a `sync` of the recovered balance, 
 redemptions with fees, redemptions that skip a component (also by the last holder), failed
 claims, losses during liquidation, `sync` during liquidation and GRET rejected by the vault;
 another probe confirmed that the guard's fuzz test reaches the weekly limit. `npm run check`
-passes 166 tests. Coverage of `GRETVault.sol` and `ChainlinkPriceGuard.sol`: 100% of lines and
+passes 169 tests. Coverage of `GRETVault.sol` and `ChainlinkPriceGuard.sol`: 100% of lines and
 statements.
 
 Slither 0.11.6 on the vault and on `ChainlinkPriceGuard`, with Solidity 0.8.38: no high

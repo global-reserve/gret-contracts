@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { type Address, parseEther } from "viem";
+import { type Address, erc20Abi, parseEther } from "viem";
 
 import { PILOT } from "../scripts/pilot/config.js";
 import {
@@ -71,9 +71,21 @@ describe("GRET pilot rehearsal on a mainnet fork", { skip: RPC_URL === undefined
     assert.equal(minted.vault?.supply, INITIAL_SHARES);
     assert.equal(minted.vault?.hasMinted, true);
     for (const [i, c] of components.entries()) {
-      assert.equal(start.balances[i] - minted.balances[i], c.amount, `${c.symbol} paid`);
-      const reserve = minted.vault?.reserves[i] ?? 0n;
-      assert.ok(reserve <= c.amount && reserve + ROUNDING >= c.amount, `${c.symbol} reserve`);
+      // Share-based tokens can also debit a few units less than requested, depending on
+      // the sender's existing fractional balance. Other components must remain exact.
+      const tolerance = c.symbol === "SPYx" || c.symbol === "JAAAx" ? ROUNDING : 0n;
+      const paid = start.balances[i] - minted.balances[i];
+      assert.ok(paid <= c.amount && paid + tolerance >= c.amount, `${c.symbol}: paid ${paid} of ${c.amount}`);
+      const reserve: bigint = minted.vault?.reserves[i] ?? 0n;
+      assert.ok(reserve <= c.amount && reserve + tolerance >= c.amount, `${c.symbol} reserve`);
+      const held = await publicClient.readContract({
+        address: c.address,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [vault],
+      });
+      assert.equal(held, reserve, `${c.symbol} actual backing`);
+      assert.ok(reserve <= paid, `${c.symbol} credited more than the wallet paid`);
     }
 
     const redeem = await redeemTransaction(client, vault, wallet);
