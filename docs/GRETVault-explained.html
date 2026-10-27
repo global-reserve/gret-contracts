@@ -96,7 +96,7 @@
       <ol><li>What the code guarantees</li><li>What it does not</li><li>The pilot</li><li>Accepted risks, one by one</li><li>What governance commits to</li></ol></li>
     <li><span class="num">12</span>Questions and answers</li>
     <li><span class="num">13</span>Reference
-      <ol><li>Functions</li><li>Fixed numbers</li><li>Glossary</li><li>Still open</li></ol></li>
+      <ol><li>Functions</li><li>Fixed numbers</li><li>Glossary</li><li>Addresses on Ethereum mainnet</li><li>Still open</li></ol></li>
   </ol>
 </section>
 
@@ -442,7 +442,7 @@
 <p class="intro">The vault keeps its own record of what backs GRET, separate from whatever happens to sit in its balance. That separation is what keeps everyone's share honest.</p>
 
 <h3><span class="n">5.1</span>Components</h3>
-<p>The basket's tokens are called components. There can be between 1 and 128. The pilot starts with 11: ITOTon, SPYx, EFAon, IEMGon, SGOVon, BILon, JAAAx, PAXG, cbBTC, VNQon and DBCon. The cap of 128 exists because mint and redemption visit every component in one transaction, and Ethereum limits the gas a single transaction can use (about 16.7M). With 128 tokens like today's, a mint would take about 8.7M.</p>
+<p>The basket's tokens are called components. There can be between 1 and 128. The pilot starts with 11: ITOTon, SPYx, EFAon, IEMGon, SGOVon, BILon, JAAAx, PAXG, cbBTC, VNQon and DBCon, listed with their addresses in section 13.4. The cap of 128 exists because mint and redemption visit every component in one transaction, and Ethereum limits the gas a single transaction can use (about 16.7M). With 128 tokens like today's, a mint would take about 8.7M.</p>
 
 <h3><span class="n">5.2</span>Reserve, balance and surplus</h3>
 <table>
@@ -1115,7 +1115,24 @@
   <tr><td>xStocks</td><td>Backed's tokenized stocks, such as SPYx and JAAAx, which lose a few base units per transfer.</td></tr>
 </table>
 
-<h3><span class="n">13.4</span>Still open</h3>
+<h3><span class="n">13.4</span>Addresses on Ethereum mainnet</h3>
+<p>The pilot vault, <code>GRETVault</code>, is at <code>0x21b823334D2794a637cb9c0fd7fF8671b35F5A23</code>. It was deployed on October 27, 2026, and its source is verified on Sourcify. Its components, in the order of <code>components()</code>, with addresses checked against each issuer's official sources:</p>
+<table>
+  <tr><th style="width:5%">#</th><th style="width:10%">Token</th><th>Asset (issuer)</th><th style="width:43%">Address</th></tr>
+  <tr><td>0</td><td>ITOTon</td><td>iShares Core S&amp;P Total U.S. Stock Market ETF (Ondo)</td><td><code>0x0692481C369E2BDc728A69ae31b848343a4567Be</code></td></tr>
+  <tr><td>1</td><td>SPYx</td><td>SPDR S&amp;P 500 ETF Trust (Backed / xStocks)</td><td><code>0x90A2a4c76b5D8c0bc892A69EA28Aa775a8f2dD48</code></td></tr>
+  <tr><td>2</td><td>EFAon</td><td>iShares MSCI EAFE ETF (Ondo)</td><td><code>0x4111b60bc87F2Bd1e81E783E271D7F0ec6EE088B</code></td></tr>
+  <tr><td>3</td><td>IEMGon</td><td>iShares Core MSCI Emerging Markets ETF (Ondo)</td><td><code>0xcDD60D15125bf3362b6838D2506b0Fa33bc1a515</code></td></tr>
+  <tr><td>4</td><td>SGOVon</td><td>iShares 0-3 Month Treasury Bond ETF (Ondo)</td><td><code>0x8De5D49725550f7b318b2FA0f1B1F118E98E8D0F</code></td></tr>
+  <tr><td>5</td><td>BILon</td><td>SPDR Bloomberg 1-3 Month T-Bill ETF (Ondo)</td><td><code>0x2710E30d84B376c34a3B3036aa196b26a83A321b</code></td></tr>
+  <tr><td>6</td><td>JAAAx</td><td>Janus Henderson AAA CLO ETF (Backed / xStocks)</td><td><code>0x3bf2E3be4A829Bb3a5f5BE450AE4c8Eb3488da71</code></td></tr>
+  <tr><td>7</td><td>PAXG</td><td>Physical gold (Paxos)</td><td><code>0x45804880De22913dAFE09f4980848ECE6EcbAf78</code></td></tr>
+  <tr><td>8</td><td>cbBTC</td><td>Bitcoin (Coinbase)</td><td><code>0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf</code></td></tr>
+  <tr><td>9</td><td>VNQon</td><td>Vanguard Real Estate ETF (Ondo)</td><td><code>0xcCAe8843E26259278C200C6506F6E5A3bdD524cd</code></td></tr>
+  <tr><td>10</td><td>DBCon</td><td>Invesco DB Commodity Index Tracking Fund (Ondo)</td><td><code>0x20224080aD516769723c9a4A18325fC4E8C9Ab5D</code></td></tr>
+</table>
+
+<h3><span class="n">13.5</span>Still open</h3>
 <ul>
   <li><span class="label">Name check.</span> Name and symbol are fixed per contract, and the pilot vault already uses them: a search for other "GRET" tokens on Ethereum and for trademarks on the name. A conflict would need a new vault.</li>
   <li><span class="label">Independent audit</span> of the whole contract before third-party funds.</li>
