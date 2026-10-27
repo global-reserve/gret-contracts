@@ -657,22 +657,22 @@ false positive still to be reported.
 Next: verify the vault on Etherscan and report the MetaMask alert. An independent audit comes
 before opening the vault to third parties.
 
-1. **Name check, before deploying.** Name and symbol are fixed per vault. Search Etherscan
-   for an unlisted "GRET" token on mainnet, and the USPTO and EUIPO trademark registers for
-   "GRET" and "Global Reserve Token".
-2. Revisit the pilot's amounts in 1 GRET if prices move a lot before deploying.
-3. Restrictions a fork does not show: trading hours (DBCon), future changes to the
+1. **Name check.** Name and symbol are fixed per vault, and the pilot vault already uses
+   them. Search Etherscan for an unlisted "GRET" token on mainnet, and the USPTO and EUIPO
+   trademark registers for "GRET" and "Global Reserve Token"; a conflict would need a new
+   vault.
+2. Restrictions a fork does not show: trading hours (DBCon), future changes to the
    upgradeable tokens and the xStocks fee policy.
-4. Governance after the pilot: the Safe it is handed to, signers and threshold, whether
+3. Governance after the pilot: the Safe it is handed to, signers and threshold, whether
    there will be a timelock and with which delay (with execution for the Safe only), and
    later the Governor with the VORA voting token (GRET does not vote).
-5. Independent review and longer fuzzing before using third-party funds, covering the vault
+4. Independent review and longer fuzzing before using third-party funds, covering the vault
    and the price guard.
-6. Price coverage: six components (half of the basket's weight) have no Chainlink feed on
+5. Price coverage: six components (half of the basket's weight) have no Chainlink feed on
    Ethereum and cannot be swapped; a new guard when feeds appear, and whether to choose
    components with that in mind.
-7. Final choice of implementation, and how it maps to existing audited designs.
-8. The mint fee once third parties can mint (P-4 in
+6. Final choice of implementation, and how it maps to existing audited designs.
+7. The mint fee once third parties can mint (P-4 in
    [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md#operating-policy)).
-9. Update the development dependency flagged by `npm audit` (`follow-redirects`, pulled in
+8. Update the development dependency flagged by `npm audit` (`follow-redirects`, pulled in
    by `solc`); it is not part of the vault.
