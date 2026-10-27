@@ -92,7 +92,7 @@
   <section>
     <h2>3. Mint 1 GRET</h2>
     <p class="muted">Each token is approved for the exact amount, never unlimited, and then you mint. Up to 12 signatures.</p>
-    <div class="row"><button id="mint" class="primary" disabled>Approve and mint</button><span id="gret" class="muted"></span></div>
+    <div class="row"><button id="mint" class="primary" disabled>Approve and mint</button><button id="watch" disabled>Add GRET to MetaMask</button><span id="gret" class="muted"></span></div>
   </section>
 
   <section>
@@ -110,6 +110,8 @@
 <script>
 "use strict";
 const CHAINS = { 1: "Ethereum mainnet", 31337: "local rehearsal (mainnet fork)" };
+// Public copy of assets/gret-logo-256.png; MetaMask fetches it, so a local path would not do.
+const LOGO = "https://raw.githubusercontent.com/global-reserve/gret-contracts/main/assets/gret-logo-256.png";
 const state = { config: null, account: null, chainId: null, vault: null, status: null, busy: false };
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -192,6 +194,7 @@ function render() {
   $("vault-forget").disabled = !(can && state.vault);
   $("mint").disabled = !(can && state.vault && checksOk && enoughTokens);
   $("redeem").disabled = !(can && state.vault && checksOk && gret > 0n);
+  $("watch").disabled = !(can && state.vault && checksOk);
   $("fund").disabled = !can;
 }
 
@@ -298,6 +301,14 @@ $("connect").onclick = () => run(connect);
 $("deploy").onclick = () => run(deploy);
 $("mint").onclick = () => run(() => sendPlan("/api/mint", "You are about to sign on mainnet:"));
 $("redeem").onclick = () => run(() => sendPlan("/api/redeem", "You are about to redeem on mainnet:"));
+// EIP-747: MetaMask shows GRET with its logo. The checks have already confirmed the symbol.
+$("watch").onclick = () => run(async () => {
+  const added = await ethereum.request({
+    method: "wallet_watchAsset",
+    params: { type: "ERC20", options: { address: state.vault, symbol: "GRET", decimals: 18, image: LOGO } },
+  });
+  log(added ? "GRET added to MetaMask." : "MetaMask did not add GRET.", added ? "ok" : "");
+});
 $("fund").onclick = () => run(async () => {
   await api("/api/fund", { method: "POST" });
   log("Added 1 test ETH on the local fork.", "ok");

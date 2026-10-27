@@ -232,6 +232,7 @@ scripts/deploy-local.ts              Local deployment of 11 mocks and the vault
 scripts/pilot/config.ts              Mainnet pilot parameters
 scripts/pilot/plan.ts                Pilot transactions and checks
 scripts/pilot/server.ts, index.html  Local page to sign the pilot with MetaMask
+assets/gret-logo.svg, -256.png       GRET logo (SVG, and 256 px PNG for wallets and explorers)
 hardhat.config.ts                    Compiler, plugins and local networks
 docs/SPECIFICATION.md                Specification: design, rules, implementation details, tests and the pilot
 docs/ACCEPTED_RISKS.md               Accepted risks, their reasons and governance's operating policy
