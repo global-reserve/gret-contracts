@@ -11,9 +11,9 @@ assets on Ethereum, minted and redeemed in kind.
 [Specification](docs/SPECIFICATION.md) · [Accepted risks](docs/ACCEPTED_RISKS.md)
 
 > [!WARNING]
-> **Not deployed and not independently audited.** A mainnet pilot with the project's own funds
-> is prepared and rehearsed. Nothing in this repository is an offer to buy or sell any asset,
-> nor investment advice. Use it at your own risk.
+> **Not independently audited.** The vault is deployed on Ethereum mainnet as a pilot with the
+> project's own funds, not meant for third parties. Nothing in this repository is an offer to
+> buy or sell any asset, nor investment advice. Use it at your own risk.
 
 ## Overview
 
@@ -78,7 +78,25 @@ involved.
 
 | Network | Contract | Address |
 | --- | --- | --- |
-| Ethereum mainnet | `GRETVault` | Not deployed yet |
+| Ethereum mainnet | `GRETVault` (pilot) | [`0x21b823334D2794a637cb9c0fd7fF8671b35F5A23`](https://etherscan.io/address/0x21b823334D2794a637cb9c0fd7fF8671b35F5A23) |
+
+Basket at deployment, in the order of `components()`, with the amounts in the first GRET from
+`initialAmounts()`. Addresses verified against each issuer's official sources; see the
+[specification](docs/SPECIFICATION.md#mainnet-pilot).
+
+| # | Token | Asset | Address | In 1 GRET |
+| ---: | --- | --- | --- | ---: |
+| 0 | ITOTon | iShares Core S&P Total U.S. Stock Market ETF (Ondo) | [`0x0692481C369E2BDc728A69ae31b848343a4567Be`](https://etherscan.io/token/0x0692481C369E2BDc728A69ae31b848343a4567Be) | 0.0447 |
+| 1 | SPYx | SPDR S&P 500 ETF Trust (Backed / xStocks) | [`0x90A2a4c76b5D8c0bc892A69EA28Aa775a8f2dD48`](https://etherscan.io/token/0x90A2a4c76b5D8c0bc892A69EA28Aa775a8f2dD48) | 0.009789 |
+| 2 | EFAon | iShares MSCI EAFE ETF (Ondo) | [`0x4111b60bc87F2Bd1e81E783E271D7F0ec6EE088B`](https://etherscan.io/token/0x4111b60bc87F2Bd1e81E783E271D7F0ec6EE088B) | 0.07099 |
+| 3 | IEMGon | iShares Core MSCI Emerging Markets ETF (Ondo) | [`0xcDD60D15125bf3362b6838D2506b0Fa33bc1a515`](https://etherscan.io/token/0xcDD60D15125bf3362b6838D2506b0Fa33bc1a515) | 0.03256 |
+| 4 | SGOVon | iShares 0-3 Month Treasury Bond ETF (Ondo) | [`0x8De5D49725550f7b318b2FA0f1B1F118E98E8D0F`](https://etherscan.io/token/0x8De5D49725550f7b318b2FA0f1B1F118E98E8D0F) | 0.09729 |
+| 5 | BILon | SPDR Bloomberg 1-3 Month T-Bill ETF (Ondo) | [`0x2710E30d84B376c34a3B3036aa196b26a83A321b`](https://etherscan.io/token/0x2710E30d84B376c34a3B3036aa196b26a83A321b) | 0.108 |
+| 6 | JAAAx | Janus Henderson AAA CLO ETF (Backed / xStocks) | [`0x3bf2E3be4A829Bb3a5f5BE450AE4c8Eb3488da71`](https://etherscan.io/token/0x3bf2E3be4A829Bb3a5f5BE450AE4c8Eb3488da71) | 0.3953 |
+| 7 | PAXG | Physical gold (Paxos) | [`0x45804880De22913dAFE09f4980848ECE6EcbAf78`](https://etherscan.io/token/0x45804880De22913dAFE09f4980848ECE6EcbAf78) | 0.004936 |
+| 8 | cbBTC | Bitcoin (Coinbase) | [`0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf`](https://etherscan.io/token/0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf) | 0.00003081 |
+| 9 | VNQon | Vanguard Real Estate ETF (Ondo) | [`0xcCAe8843E26259278C200C6506F6E5A3bdD524cd`](https://etherscan.io/token/0xcCAe8843E26259278C200C6506F6E5A3bdD524cd) | 0.02658 |
+| 10 | DBCon | Invesco DB Commodity Index Tracking Fund (Ondo) | [`0x20224080aD516769723c9a4A18325fC4E8C9Ab5D`](https://etherscan.io/token/0x20224080aD516769723c9a4A18325fC4E8C9Ab5D) | 0.2974 |
 
 ## Getting started
 

@@ -21,8 +21,8 @@ lose.
 
 Both contracts are tested with mocks on the local Hardhat network and against the 11 real
 components on an Ethereum mainnet fork (see [Tests and results](#tests-and-results)). They
-have not been independently audited. A mainnet pilot with the project's own funds is prepared
-and rehearsed, not yet deployed (see [Mainnet pilot](#mainnet-pilot)). The governance
+have not been independently audited. A mainnet pilot with the project's own funds was
+deployed on October 27, 2026 (see [Mainnet pilot](#mainnet-pilot)). The governance
 contracts (voting, timelock) and any rebalancing mechanism beyond the vault's `swap` and the
 price guard, such as auctions or trading bots, are outside this repository.
 
@@ -582,6 +582,17 @@ block requires an RPC with historical state and `MAINNET_FORK_BLOCK`.
 Parameters in
 [`scripts/pilot/config.ts`](../scripts/pilot/config.ts); steps in [`PILOT.md`](PILOT.md).
 
+- **Deployment:** `GRETVault` at `0x21b823334D2794a637cb9c0fd7fF8671b35F5A23` on Ethereum
+  mainnet, October 27, 2026, 03:14 UTC, block 26,281,281, transaction
+  `0x7ae2271ee3d7a81c04e78137c8d5eb12cc724656231eb6fa91bcfa0b45302467`, signed by the pilot
+  wallet with MetaMask from the local page. Gas: 5,434,767 at 0.043 gwei, about 0.00023 ETH.
+  The page's eight checks passed against mainnet right after the deployment, and
+  `npm run test:fork` passed that day against a fresh fork. The source is verified on
+  Sourcify with an exact match (creation and runtime bytecode).
+- **First mint:** 1 GRET to the pilot wallet, October 27, 2026, 03:26 UTC, block 26,281,343,
+  transaction `0x9c72908baa94af16a1c209cc4a340964d1f75f7d1d0fe4e7f9ae3074288ece33`, after
+  eleven approvals for the exact amounts. Gas: 1,154,288. The vault received the basket
+  except 1 base unit of SPYx and 1 of JAAAx, lost to xStocks rounding, as in the rehearsal.
 - **Pilot wallet:** `0xe03E228E1f1c50a985556Cc9c05b0aB953Feb7fd`, an EOA. It deploys,
   makes the first mint and is the initial governance. Deploying gives no power over the
   vault. There is no rebalancer or price guard at deployment; if the pilot needs a rebalance,
@@ -597,19 +608,22 @@ Parameters in
 - **1 GRET ≈ USD 100 at deployment**, split by the target weights, at DefiLlama prices of
   October 22, 2026, 17:53 UTC:
 
-| Component | Weight | Price (USD) | In 1 GRET |
-| --- | ---: | ---: | ---: |
-| ITOTon | 7.5% | 167.80 | 0.0447 |
-| SPYx | 7.5% | 766.15 | 0.009789 |
-| EFAon | 7.5% | 105.65 | 0.07099 |
-| IEMGon | 2.5% | 76.77 | 0.03256 |
-| SGOVon | 10% | 102.78 | 0.09729 |
-| BILon | 10% | 92.60 | 0.108 |
-| JAAAx | 20% | 50.60 | 0.3953 |
-| PAXG | 20% | 4,051.64 | 0.004936 |
-| cbBTC | 2.5% | 81,150.78 | 0.00003081 |
-| VNQon | 2.5% | 94.06 | 0.02658 |
-| DBCon | 10% | 33.63 | 0.2974 |
+| Component | Address | Weight | Price (USD) | In 1 GRET |
+| --- | --- | ---: | ---: | ---: |
+| ITOTon | `0x0692481C369E2BDc728A69ae31b848343a4567Be` | 7.5% | 167.80 | 0.0447 |
+| SPYx | `0x90A2a4c76b5D8c0bc892A69EA28Aa775a8f2dD48` | 7.5% | 766.15 | 0.009789 |
+| EFAon | `0x4111b60bc87F2Bd1e81E783E271D7F0ec6EE088B` | 7.5% | 105.65 | 0.07099 |
+| IEMGon | `0xcDD60D15125bf3362b6838D2506b0Fa33bc1a515` | 2.5% | 76.77 | 0.03256 |
+| SGOVon | `0x8De5D49725550f7b318b2FA0f1B1F118E98E8D0F` | 10% | 102.78 | 0.09729 |
+| BILon | `0x2710E30d84B376c34a3B3036aa196b26a83A321b` | 10% | 92.60 | 0.108 |
+| JAAAx | `0x3bf2E3be4A829Bb3a5f5BE450AE4c8Eb3488da71` | 20% | 50.60 | 0.3953 |
+| PAXG | `0x45804880De22913dAFE09f4980848ECE6EcbAf78` | 20% | 4,051.64 | 0.004936 |
+| cbBTC | `0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf` | 2.5% | 81,150.78 | 0.00003081 |
+| VNQon | `0xcCAe8843E26259278C200C6506F6E5A3bdD524cd` | 2.5% | 94.06 | 0.02658 |
+| DBCon | `0x20224080aD516769723c9a4A18325fC4E8C9Ab5D` | 10% | 33.63 | 0.2974 |
+
+  The addresses and amounts are the ones the deployed vault returns from `components()` and
+  `initialAmounts()`, in that order.
 
   cbBTC gets 3,081 sats, below the ~10⁴ base-unit guideline. Accepted: with a 2.5% weight,
   a one-sat rounding is a negligible share of the basket's value, and reaching 10⁴ sats
@@ -624,23 +638,24 @@ Parameters in
   approves exact amounts, mints 1 GRET, redeems it and mints again. Gas: deployment 5.43M;
   each approval between 54k and 60k; the first mint in a new vault 1.15M, because it writes
   empty storage; the full redemption 0.53M; the full cycle 9.46M. The round trip lost 1 base
-  unit of SPYx and 1 of JAAAx. The local page has not been tested against a local fork since
-  rebalancing was added.
+  unit of SPYx and 1 of JAAAx. The MetaMask rehearsal on a local fork was skipped: the page
+  was first used for the mainnet deployment and mint, after the automated rehearsal ran
+  against mainnet state shortly before.
 - **Tools:** `scripts/pilot/plan.ts` builds the transactions and verifies the deployed
   vault (code identical to this repository's build, components, amounts, governance, no
   rebalancer, fees at zero, minting not paused, name and symbol). The page (`npm run pilot`)
   only sends what that module returns; the automated rehearsal uses the same module. Both assume the deployment's
   basket: after a basket change, mint and redemption need the new component list.
 
-Pending for the pilot: fund the wallet with ETH, rehearse with MetaMask on the local fork,
-verify the source on Etherscan after deploying and record the vault address here and in the
-README.
+Pending for the pilot: verifying the source on Etherscan. MetaMask flags the approvals and
+the mint as malicious (a Blockaid alert, common for new contracts that receive approvals of
+many tokens); the vault only pulls tokens from the caller of `mint` or `swap`, so it is a
+false positive still to be reported.
 
 ## Roadmap and open items
 
-Next: complete the mainnet pilot following [`PILOT.md`](PILOT.md), rerunning
-`npm run test:fork` on the deployment day. An independent audit comes before opening the vault
-to third parties.
+Next: verify the vault on Etherscan and report the MetaMask alert. An independent audit comes
+before opening the vault to third parties.
 
 1. **Name check, before deploying.** Name and symbol are fixed per vault. Search Etherscan
    for an unlisted "GRET" token on mainnet, and the USPTO and EUIPO trademark registers for
