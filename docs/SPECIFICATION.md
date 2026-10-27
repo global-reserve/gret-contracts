@@ -588,7 +588,8 @@ Parameters in
   wallet with MetaMask from the local page. Gas: 5,434,767 at 0.043 gwei, about 0.00023 ETH.
   The page's eight checks passed against mainnet right after the deployment, and
   `npm run test:fork` passed that day against a fresh fork. The source is verified on
-  Sourcify with an exact match (creation and runtime bytecode).
+  Sourcify with an exact match (creation and runtime bytecode) and, the same day, on
+  Etherscan.
 - **First mint:** 1 GRET to the pilot wallet, October 27, 2026, 03:26 UTC, block 26,281,343,
   transaction `0x9c72908baa94af16a1c209cc4a340964d1f75f7d1d0fe4e7f9ae3074288ece33`, after
   eleven approvals for the exact amounts. Gas: 1,154,288. The vault received the basket
@@ -647,15 +648,14 @@ Parameters in
   only sends what that module returns; the automated rehearsal uses the same module. Both assume the deployment's
   basket: after a basket change, mint and redemption need the new component list.
 
-Pending for the pilot: verifying the source on Etherscan. MetaMask flags the approvals and
-the mint as malicious (a Blockaid alert, common for new contracts that receive approvals of
-many tokens); the vault only pulls tokens from the caller of `mint` or `swap`, so it is a
-false positive still to be reported.
+Pending for the pilot: MetaMask flags the approvals and the mint as malicious (a Blockaid
+alert, common for new contracts that receive approvals of many tokens); the vault only pulls
+tokens from the caller of `mint` or `swap`, so it is a false positive still to be reported.
 
 ## Roadmap and open items
 
-Next: verify the vault on Etherscan and report the MetaMask alert. An independent audit comes
-before opening the vault to third parties.
+Next: report the MetaMask alert. An independent audit comes before opening the vault to third
+parties.
 
 1. **Name check.** Name and symbol are fixed per vault, and the pilot vault already uses
    them. Search Etherscan for an unlisted "GRET" token on mainnet, and the USPTO and EUIPO

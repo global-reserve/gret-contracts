@@ -64,7 +64,8 @@ There is also an automated rehearsal, without MetaMask: `npm run pilot:rehearse`
    governance, no rebalancer, fees at zero, minting not paused, and the name and symbol.
    **If any fails, stop.**
 4. **Approve and mint.** Each approval is for the exact amount, never unlimited.
-5. Check on Etherscan that the wallet holds 1 GRET.
+5. Check on Etherscan that the wallet holds 1 GRET. **Add GRET to MetaMask** shows it in
+   the wallet with its logo.
 6. Optional: **Redeem everything** and mint again, to test the exit with real funds.
 
 Rejecting a signature sends nothing else; resume with the same button. After a reload,
@@ -73,8 +74,8 @@ the page remembers the vault in this browser; otherwise paste its address and cl
 
 ## Afterwards
 
-- Verify the vault's source code on Etherscan.
-- Record the vault address in the README's Deployments table and in `SPECIFICATION.md`.
+- Verify the vault's source code on Etherscan and Sourcify, and record the vault address in
+  the README's Deployments table and in `SPECIFICATION.md`. Done on October 27, 2026.
 - Later, hand governance over to a Safe, with the vault's two steps and 7-day wait.
 - To rebalance, governance proposes the rebalancer (the pilot wallet itself) and a
   `ChainlinkPriceGuard` deployed with `PRICE_FEEDS` from `config.ts`; both take effect after
