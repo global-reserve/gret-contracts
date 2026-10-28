@@ -183,9 +183,9 @@ independently verified against a second provider or a local Ethereum node.
 
 ## Material risks retained by the design
 
-These are **existing accepted risks**, not new findings. Impact labels describe
-the conditional consequence; they must not be added to a count of newly found
-vulnerabilities. Detailed acceptance decisions remain in
+This section summarizes the risks documented in the project's risk register.
+Impact labels describe conditional consequences; they must not be added to a
+count of newly found vulnerabilities. Detailed acceptance decisions remain in
 [`ACCEPTED_RISKS.md`](../ACCEPTED_RISKS.md).
 
 | Priority | Existing risk | Preconditions and impact | Evidence |
@@ -220,10 +220,10 @@ a new deployment. No such architecture change was made or accepted by this revie
 
 ### The 2% limits are not a universal loss bound
 
-The guard correctly measures each recorded swap loss as a fraction of the priced
-reserve before that swap; temporary deposits and later withdrawals do not restore
-spent budget. Rounding is conservative. It refuses missing, stale, future-dated,
-nonpositive prices and swaps beyond the configured limits.
+Within one guard instance, the guard correctly measures each recorded swap loss
+as a fraction of the priced reserve before that swap; temporary deposits and later
+withdrawals do not restore spent budget. Rounding is conservative. It refuses
+missing, stale, future-dated, nonpositive prices and swaps beyond the configured limits.
 
 However, buying an impaired token at its reported feed price produces no measured
 loss. A rebalancer can repeat such purchases against the healthy priced reserves.
@@ -231,6 +231,11 @@ The per-swap and weekly limits do not constrain that loss. The same limitation
 applies when an issuer debits more than the nominal sale amount. Fixed week
 boundaries also allow approximately 4% of feed-valued loss across two adjacent
 budgets, as already accepted in R-02.
+
+That budget is local to the guard instance. Replacing it starts a new counter;
+R-02 documents the additional loss budgets possible around a
+replacement. The approximately 4% figure above describes two adjacent weekly
+budgets of the same guard, not an aggregate bound across guard replacements.
 
 The five configured feeds cover 50% of the pilot's target weights. The other six
 tokens cannot be traded through this guard. A feed can be fresh while its price
@@ -247,9 +252,12 @@ Fee shares held by a separate recipient can create the same obstruction.
 The bound is in GRET, not dollars. In this pilot, the initial entire basket was
 approximately the value of 1 GRET, so this is substantial relative to pilot size.
 The successful full-exit simulation is consistent with this: at the checked block
-the pilot wallet still held the entire supply. It does not protect against a later
-entrant. Consolidation or governance-triggered liquidation are the accepted exits;
-liquidation irreversibly ends normal operation.
+the pilot wallet still held the entire supply and the redemption fee was zero.
+It does not protect against a later entrant. Consolidation permits a full normal
+exit only when the redemption fee is zero. With a positive redemption fee, fee
+shares remain in the supply even if the holder is also the fee recipient, so at
+least 1 GRET remains until governance cuts the fee to zero or activates
+liquidation (R-09). Liquidation irreversibly ends normal operation.
 
 ### External token failures remain a trust boundary
 
