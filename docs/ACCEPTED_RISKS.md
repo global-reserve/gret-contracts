@@ -205,7 +205,8 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   vault, and redeems after it, takes part of that value. A pause around the `sync` only stops
   those who arrive after the pause. The same holds for the share a `redeemSkipping` leaves
   behind: it would become surplus if the redemption emptied the supply, but whoever mints just
-  before keeps the supply from emptying and takes part of it. Conversely, a holder who redeems
+  before keeps the supply from emptying and takes all of it when the one skipping was the last
+  holder, or its proportional part otherwise. Conversely, a holder who redeems
   before a swap that loses value and mints after it pushes its share of that loss onto the
   others, within the guard's limits.
 - **Who can cause it.** Anyone who can mint the basket, above all someone who already holds it
@@ -230,6 +231,8 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   by keeping a positive redemption fee.
 - **Worst case.** Just under 1 GRET held back from the last holders, or 1 GRET while the
   redemption fee is positive. The bound is in GRET, not in dollars: what backs 1 GRET can grow.
+  If governance's key is lost while the redemption fee is positive, nobody can cut the fee or
+  liquidate, and that last GRET stays held back for good (R-01).
 - **Why it is accepted.** The floor stops rounding dust from distorting the basket near zero
   supply. A seed locked forever at the first mint would remove the dependency, but it would lock
   about the same value forever.

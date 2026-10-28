@@ -66,7 +66,8 @@ percentages, not initial amounts per share.
   stays in the reserve for the other holders or, when the redemption empties the supply,
   becomes surplus. Whoever holds GRET at that moment shares it, including someone who mints
   just before the skipping redemption, which keeps the supply from emptying, and redeems after
-  it (R-08). Without it, a single component that cannot be sent (an issuer freeze, or a
+  it; if the one skipping was the last holder, that entrant takes all of it (R-08). Without
+  it, a single component that cannot be sent (an issuer freeze, or a
   token a captured governance syncs in and makes fail) blocks every redemption, so the
   7-day notice of a new rebalancer would give nobody an exit. Keeping the skipped share as a
   pending right for the caller was rejected: it would bring liquidation-style accounting
@@ -78,7 +79,8 @@ percentages, not initial amounts per share.
   component), making minting unusable. The last holders with less than 1 GRET between them
   must gather their GRET in one wallet to leave (R-09). While the redemption fee is positive,
   redemption never empties the supply: the fee stays in it, so at least 1 GRET always remains
-  until governance cuts the fee to zero, which applies at once, or liquidates.
+  until governance cuts the fee to zero, which applies at once, or liquidates; with
+  governance's key lost, it remains for good.
 - **Mint by what arrived:** the vault measures what arrives of each component and issues
   GRET for the minimum proportion received, rounded down. It tolerates up to
   `MAX_RECEIPT_SHORTFALL` (10 base units) per component, which covers tokens that convert
