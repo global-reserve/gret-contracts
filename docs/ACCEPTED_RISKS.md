@@ -320,8 +320,13 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   still works.
 - **Who can cause it.** An issuer, or a broken token.
 - **Worst case.** The last holders bear the whole shortfall of that component.
-- **Why it is accepted.** Being able to exit a broken token takes priority over sharing the loss
-  equally.
+- **Why it is accepted.** `balanceOf` tells the vault how much backing remains, which it needs
+  to detect a shortfall and share the loss proportionally. A failed balance read does not mean
+  transfers must fail too. Instead of blocking the exit when that read reverts, the vault tries
+  the transfer using its recorded reserve; if the transfer fails, the operation reverts and the
+  holder keeps their GRET or pending claim. This favors being able to exit a broken token over
+  sharing a loss proportionally: if the recorded reserve exceeds the actual balance, early
+  exits may be paid in full while later holders bear the shortfall.
 - **Mitigation.** A write-off.
 - **Evidence.** `test_R14_brokenBalanceReadPaysFirstRedeemerInFull`.
 
