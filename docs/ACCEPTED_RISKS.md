@@ -15,7 +15,10 @@ internal reviews, not an independent audit.
 
 Each risk has a stable ID. Where a test reproduces the accepted behavior, it is in
 [`test/GRETVault.risks.t.sol`](../test/GRETVault.risks.t.sol) and named after the ID; if a
-decision changes, its entry and its test change with it. Mitigations that depend on
+decision changes, its entry and its test change with it. The cases found by the
+[October 28, 2026 review](audits/2026-10-28-GRETVault-review.md) are in
+`test/GRETVault.review2-*.t.sol`, named after that review's findings (`test_M01_…`), which
+its summary maps to these risks. Mitigations that depend on
 governance's conduct are in the [operating policy](#operating-policy) at the end.
 
 ## Summary

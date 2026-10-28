@@ -125,7 +125,7 @@ stands in for governance.
 | `npm run typecheck` | Compile and type-check TypeScript |
 | `npm run check` | Type-check and run the tests |
 | `npm run test:coverage` | Run the tests with coverage |
-| `npm run test:deep` | Long fuzz and invariant runs (about 2 minutes) |
+| `npm run test:deep` | Long fuzz and invariant runs (about 5 minutes) |
 | `npm run test:fork` | Test the vault with the 11 real components on a mainnet fork |
 | `npm run pilot:rehearse` | Rehearse the pilot on a mainnet fork with the pilot wallet |
 | `npm run pilot:fork-node` | Local mainnet fork at `127.0.0.1:8545`, to rehearse with MetaMask |
@@ -225,7 +225,8 @@ test/GRETVault.risks.t.sol           One case per accepted risk, named after its
 test/GRETVault.fuzz.t.sol            Property fuzzing in Solidity
 test/GRETVault.invariant.t.sol       Invariants over random sequences of every operation
 test/GRETVault.invariants.ts         Deterministic random sequences with invariants
-test/GRETVault.audit-*.t.sol         Property tests added by the October 2026 security review
+test/GRETVault.audit-*.t.sol         Property tests added by the October 27, 2026 security review
+test/GRETVault.review2-*.t.sol       Tests of the October 28, 2026 review's findings and new invariants
 test/MockERC20.ts                    Tests of the mocks with 18 and 8 decimals
 test/helpers/basket.ts               Test basket shared by the vault tests
 test/helpers/GRETVaultCase.sol       Setup and adverse tokens shared by the Solidity cases

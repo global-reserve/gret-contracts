@@ -5,8 +5,9 @@ Claude Opus 5.5 and carried out separately from the
 [October 27, 2026 review](2026-10-27-GRETVault-review.md). It is not an independent audit
 by a security firm, a formal verification, or a certification. It covers the source at
 commit `219b6a47da88e4e788a87581934f501e16049785`, whose contracts are identical to those the
-first review read. Production contracts were not changed and no tests were added to the
-repository. No mainnet transaction was sent.
+first review read. Production contracts were not changed. The review's tests were added to
+the repository after it, in `test/GRETVault.review2-*.t.sol`. No mainnet transaction was
+sent.
 
 **Result: no permissionless way to take reserves was found, and the accounting held under
 every property exercised. Fifteen findings were confirmed: one Medium, nine Low and five
@@ -510,8 +511,9 @@ passed (169 tests); a test written for this review failed on that mutant. These 
 the on-chain notice that the 7-day waits exist to give. The committed stateful handler also
 never leaves a loss unrecognized, removes only the last component, never calls
 `setInitialAmounts`, skips only one component, never delivers short in sequences, never
-claims to a third party and has no checks that a healthy mint or exit succeeds. Proposed:
-add a test of the six events and extend the handler.
+claims to a third party and has no checks that a healthy mint or exit succeeds. Resolved
+after the review: `test_I05_proposalEventsCarryReadyAt` asserts the six events, and two new
+handlers cover those paths (see the tests below).
 
 ## Properties that held
 
@@ -553,15 +555,22 @@ are explicit exceptions; mocks do not prove compatibility with the real issuers.
 
 ## Tests written for this review
 
-The tests are kept outside the repository; they are not part of `npm run check`.
+The finders' proofs of concept were replaced by the verifiers' own tests. After the review,
+those and the test-gaps lens's tests were added to the repository, without their logs and
+with each test named after its finding (`test_M01_…`); they run with `npm run check` and
+`npm run test:deep`:
 
-| Tests | Purpose | Result |
+| Test file | Purpose | Result during the review |
 | --- | --- | --- |
-| Finders' proofs of concept, one or more files per lens | Reproduce each candidate | Passing; replaced by the verifiers' own tests |
-| `Find2Gaps.invariant.t.sol`, `Find2Unrecognized.invariant.t.sol` and liquidation fuzz | Stateful paths the committed handler skips | 6 + 6 passing (2,500 × 200 and 1,000 × 200); 3 × 10,000 runs |
-| `VerifyGuard.t.sol` | REVIEW2-M01, L02, L06, L07, I04 | 14 passing |
-| `VerifyExits.t.sol` | REVIEW2-L01, L04, L05, L08, I01 | 14 passing, including a 256-run fuzz |
-| `VerifyGovernance.t.sol` | REVIEW2-L03, L09, I02, I03, I05 | 12 passing, including a 256-run fuzz; one mutation run |
+| [`GRETVault.review2-guard.t.sol`](../../test/GRETVault.review2-guard.t.sol) | REVIEW2-M01, L02, L06, L07, I04 | 14 passing |
+| [`GRETVault.review2-exits.t.sol`](../../test/GRETVault.review2-exits.t.sol) | REVIEW2-L01, L04, L05, L08, I01 | 14 passing, including a fuzz test |
+| [`GRETVault.review2-governance.t.sol`](../../test/GRETVault.review2-governance.t.sol) | REVIEW2-L03, L09, I02, I03, I05 | 12 passing, including a fuzz test; one mutation run |
+| [`GRETVault.review2-invariant.t.sol`](../../test/GRETVault.review2-invariant.t.sol) | Stateful paths the committed handler skips, with an address-keyed ledger | 6 invariants, 2,500 sequences of depth 200 |
+| [`GRETVault.review2-unrecognized.t.sol`](../../test/GRETVault.review2-unrecognized.t.sol) | The same, with half of the losses left unrecognized | 6 invariants, 1,000 sequences of depth 200 |
+| [`GRETVault.review2-liquidation.t.sol`](../../test/GRETVault.review2-liquidation.t.sol) | Shortfall payouts in any order, solvency after cuts and recovery | 3 fuzz tests, 10,000 runs each |
+
+The reachability probes, which fail on purpose once a path is reached, and the mutation of
+the six events were run during the review and are not in the repository.
 
 ## Executed validation
 
@@ -578,9 +587,10 @@ The tests are kept outside the repository; they are not part of `npm run check`.
 | `slither-check-erc` (ERC-20) | GRET conforms; only the standard approval race of OpenZeppelin's ERC20 is flagged |
 
 The checks ran on October 28, 2026 at commit `95177d0`, whose contracts and tests are
-identical to `219b6a4`. An earlier run on October 27 gave the same results; its logs were
-lost with the temporary folder, so only the reruns are cited. Reproduce them with the pinned
-dependencies and an RPC that still serves the blocks:
+identical to `219b6a4`. With the review's tests added afterwards, `npm run check` passes 224
+tests (96 Solidity and 128 Node.js). An earlier run on October 27 gave the same results; its
+logs were lost with the temporary folder, so only the reruns are cited. Reproduce them with
+the pinned dependencies and an RPC that still serves the blocks:
 
 ```sh
 npm ci
@@ -645,8 +655,8 @@ guard part, L02 and L06's guard check) are proposed code changes for `ChainlinkP
 before it is deployed, recorded as item 9 of the specification's roadmap, not decided.
 Adopted in the documents: pausing minting before a write-off becomes executable and before
 the last holders leave with `redeemSkipping` (P-5), and mapping `LossRecognized` by replaying
-events (P-1). Proposed, not adopted: the other operating rules named in each finding, and the
-tests of REVIEW2-I05.
+events (P-1). The review's tests, including those of REVIEW2-I05, are in the repository.
+Proposed, not adopted: the other operating rules named in each finding.
 
 For the own-funds pilot, the deployed code matches the reviewed code, its backing is present
 and its only holder's exit simulated successfully. None of the findings can occur in that
