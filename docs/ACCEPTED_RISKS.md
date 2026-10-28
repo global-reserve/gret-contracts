@@ -1,6 +1,11 @@
 # Accepted risks
 
-Updated on October 26, 2026.
+Updated on October 28, 2026. Changes since the
+[October 27, 2026 review](audits/2026-10-27-GRETVault-review.md), from a second internal review:
+R-02, R-09 and P-5 widen their scope (the week of a guard replacement, a positive redemption
+fee, pausing before a write-off can be executed); R-03, R-14 and R-15 correct how feeds and a
+broken `balanceOf` are described; R-06, R-08, R-18, P-1 and P-2 add detail. No risk was removed
+or renumbered.
 
 This document lists every known risk of `GRETVault` and `ChainlinkPriceGuard` that was
 consciously accepted, with the reason and what mitigates it. Issues that were fixed are not
@@ -18,14 +23,14 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 | ID | Risk | Who can cause it | Worst case |
 | --- | --- | --- | --- |
 | [R-01](#r-01--governance-holds-broad-powers-and-its-key-can-be-stolen-or-lost) | Governance holds broad powers | Whoever controls governance | After a 7-day notice, the reserves exchanged for anything |
-| [R-02](#r-02--the-rebalancer-chooses-the-price-within-the-guards-limits) | The rebalancer chooses the price | The rebalancer or a thief of its key | 2% of each GRET's value per week until revoked |
+| [R-02](#r-02--the-rebalancer-chooses-the-price-within-the-guards-limits) | The rebalancer chooses the price | The rebalancer or a thief of its key | 2% of each GRET's value per week (4% in the week of a guard replacement) until revoked |
 | [R-03](#r-03--the-price-guard-is-only-as-good-as-its-feeds) | The guard is only as good as its feeds | A rebalancer, when a token trades below its feed | The priced healthy reserves, until revoked |
 | [R-04](#r-04--governance-decides-what-happens-to-surpluses-and-recoveries) | Governance decides on surpluses and recoveries | Governance | Distributions or recoveries kept by governance |
 | [R-05](#r-05--a-token-with-two-addresses) | A token with two addresses | Governance, after an issuer change | A whole component |
 | [R-06](#r-06--governance-can-write-off-a-healthy-component) | Writing off a healthy component | Governance | Late minters share in that component |
 | [R-07](#r-07--pausing-minting-stops-new-holders-from-qualifying-for-redemption) | A mint pause stops new holders from qualifying | Governance or an issuer | A holder who never minted cannot redeem during a notice |
 | [R-08](#r-08--whoever-mints-before-a-sync-shares-in-it) | Whoever mints before a sync shares in it | Anyone who can mint the basket | Most of a distribution or recovery |
-| [R-09](#r-09--the-1-gret-floor-can-hold-back-the-last-holders) | The 1 GRET floor can hold back the last holders | Anyone who mints a fraction; the fee recipient | Just under 1 GRET held back |
+| [R-09](#r-09--the-1-gret-floor-can-hold-back-the-last-holders) | The 1 GRET floor can hold back the last holders | Anyone who mints a fraction; the fee recipient; a positive redemption fee | Just under 1 GRET held back; 1 GRET while the redemption fee is positive |
 | [R-10](#r-10--minimums-bound-what-the-vault-sends-not-what-arrives) | Minimums bound what is sent, not what arrives | An issuer | Less than the minimum received |
 | [R-11](#r-11--the-mint-tolerance-is-fixed-in-base-units) | The mint tolerance is fixed in base units | A rounding component | A minter overpays the healthy components |
 | [R-12](#r-12--issuers-control-their-tokens) | Issuers control their tokens | Issuers | A component lost to holders |
@@ -75,13 +80,17 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   so a balance an issuer took and nobody has recognized yet does not stretch it either.
 - **Who can cause it.** The rebalancer, or whoever steals its key.
 - **Worst case.** With an honest `ChainlinkPriceGuard`, 2% of the value behind each GRET per week,
-  or 4% in a row across the change of week, until governance revokes the rebalancer. Losses the
+  or 4% in a row across the change of week, until governance revokes the rebalancer. The weekly
+  count lives in each guard and a newly applied guard starts at zero, so in the week of a
+  replacement the two guards allow up to 4%, and about 6% in a row across the change of week;
+  anyone can apply a ready guard, so a hostile rebalancer chooses that moment. Losses the
   feeds do not see are not limited (R-03). A captured governance can instead appoint a guard
   that accepts everything (R-01).
 - **Why it is accepted.** Prices cannot be exact with thin liquidity. A cap on volume was
   rejected because it would also block a large legitimate rebalance. A budget that refills
   gradually would close the 4% case, at the cost of more code.
-- **Mitigation.** Revoking the rebalancer needs no wait. P-6, P-8.
+- **Mitigation.** Revoking the rebalancer needs no wait. P-6, P-8, including around a guard
+  replacement.
 - **Evidence.** `test_priceGuardStopsRebalancerDrain`,
   `test_priceGuardLimitHoldsAfterTemporaryDeposit`, `test_priceGuardLimitShrinksWithRedemptions`
   and `test_priceGuardIgnoresBalanceTheVaultNoLongerHolds` in the protections; [`test/ChainlinkPriceGuard.fuzz.t.sol`](../test/ChainlinkPriceGuard.fuzz.t.sol),
@@ -93,8 +102,11 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   for SPYx; the fund's price times Ondo's multiplier for the Ondo tokens) keeps pricing a token
   that trades far below it, after a depeg or a problem at the issuer. A swap that buys that
   token at the feed price records no loss: neither limit applies, and no `LossRecorded` is
-  emitted. Feeds also update on a deviation threshold (0.5%; 2% for cbBTC), which can eat into
-  the 2%. A token without a feed cannot be swapped, so it can never be sold or removed: today
+  emitted. The same holds for a written-off component: `swap` does not refuse to buy it, and the
+  purchase gives it a reserve again without a `sync`. Feeds also update on a deviation threshold
+  (0.5%; 2% for cbBTC): a swap at a feed price that is off by up to that threshold loses the
+  difference unrecorded, on top of both limits. A token without a feed cannot be swapped, so it
+  can never be sold or removed: today
   ITOTon, EFAon, IEMGon, JAAAx, VNQon and DBCon, half of the basket's weight. The equity feeds
   follow US market hours; on weekends their prices go stale and those swaps stop.
 - **Who can cause it.** A rebalancer, or a thief of its key, that buys the cheap token on the
@@ -151,7 +163,9 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 
 - **What can happen.** Governance judges whether a component is broken; the vault only enforces
   the 7-day wait, and anyone can execute a ready write-off during its window. Writing off a
-  healthy component drops its reserve to zero until a `sync` brings it back.
+  healthy component drops its reserve to zero until a `sync` brings it back. A contract can
+  execute a ready write-off and mint without that component in the same transaction, so a mint
+  pause sent after the write-off comes too late.
 - **Who can cause it.** Governance, or anyone if governance forgets to cancel a ready write-off.
 - **Worst case.** Whoever mints in between shares in that component when it is synced (R-08).
 - **Why it is accepted.** Governance gains nothing directly: it can never rescue the token, and
@@ -186,7 +200,11 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   arrived but is not synced is left out of the price. Whoever mints before the `sync` of a
   distribution or of a written-off component that recovered, or before a swap favorable to the
   vault, and redeems after it, takes part of that value. A pause around the `sync` only stops
-  those who arrive after the pause.
+  those who arrive after the pause. The same holds for the share a `redeemSkipping` leaves
+  behind: it would become surplus if the redemption emptied the supply, but whoever mints just
+  before keeps the supply from emptying and takes part of it. Conversely, a holder who redeems
+  before a swap that loses value and mints after it pushes its share of that loss onto the
+  others, within the guard's limits.
 - **Who can cause it.** Anyone who can mint the basket, above all someone who already holds it
   and can mint and redeem in kind at no other cost.
 - **Worst case.** Most of a distribution or recovery, in proportion to what the entrant brings.
@@ -202,15 +220,19 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 
 - **What can happen.** A normal redemption cannot leave the supply between 0 and 1 GRET. If
   someone keeps a fraction of GRET, from a tiny mint or as fee GRET held by the recipient, the
-  others can redeem only until 1 GRET remains.
-- **Who can cause it.** Anyone who mints a fraction; the fee recipient, by accident.
-- **Worst case.** Just under 1 GRET held back from the last holders. The bound is in GRET, not in
-  dollars: what backs 1 GRET can grow.
+  others can redeem only until 1 GRET remains. While the redemption fee is positive, redemption
+  never empties the supply: each one leaves its fee in it, so at least 1 GRET remains even with
+  every GRET gathered in one wallet.
+- **Who can cause it.** Anyone who mints a fraction; the fee recipient, by accident; governance,
+  by keeping a positive redemption fee.
+- **Worst case.** Just under 1 GRET held back from the last holders, or 1 GRET while the
+  redemption fee is positive. The bound is in GRET, not in dollars: what backs 1 GRET can grow.
 - **Why it is accepted.** The floor stops rounding dust from distorting the basket near zero
   supply. A seed locked forever at the first mint would remove the dependency, but it would lock
   about the same value forever.
-- **Mitigation.** A liquidation lets every holder withdraw everything, although it ends that
-  vault. In the pilot the fee recipient is the pilot wallet.
+- **Mitigation.** Cutting the redemption fee to zero applies at once. A liquidation lets every
+  holder withdraw everything, although it ends that vault. In the pilot the fee recipient is the
+  pilot wallet.
 - **Evidence.** `test_R09_tinyMintHoldsBackLastHolder`,
   `test_R09_feeRecipientHoldsBackLastHolder`; [`test/GRETVault.fees.ts`](../test/GRETVault.fees.ts)
   ("the recipient's GRET stays in the supply…").
@@ -279,7 +301,11 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 
 - **What can happen.** If a component's `balanceOf` reverts while its transfers work, normal
   redemption and claims go ahead with the recorded reserve. If the real balance is short, the
-  first to leave get everything.
+  first to leave get everything. Running out of gas counts as a revert, so whoever chooses the
+  gas limit can force this path when `balanceOf` costs millions of gas. Only a revert is
+  tolerated: a `balanceOf` that succeeds with malformed return data, or a component without
+  code, makes normal redemption and that component's claims revert; `redeemSkipping` without it
+  still works.
 - **Who can cause it.** An issuer, or a broken token.
 - **Worst case.** The last holders bear the whole shortfall of that component.
 - **Why it is accepted.** Being able to exit a broken token takes priority over sharing the loss
@@ -294,7 +320,8 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   could make one token's calls expensive, or make them call back into the vault. During a mint,
   the vault's views can be inconsistent if a component calls back. The price guard reads the
   balance of every priced component on each swap with a loss, so an expensive `balanceOf` there
-  also stops swaps; one that reverts only leaves that component out of the vault's value.
+  also stops swaps; one that reverts only leaves that component out of the vault's value, and
+  one that returns malformed data stops every swap with a loss.
 - **Who can cause it.** An issuer.
 - **Worst case.** One token makes normal redemption no longer fit in a transaction, or stops
   rebalancing.
@@ -334,7 +361,9 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 ### R-18 — Any contract can be announced as a component
 
 - **What can happen.** `announceComponent` accepts any address with code, including the vault
-  itself or an EIP-7702 account.
+  itself or an EIP-7702 account. `proposePriceGuard` likewise only checks for code: the notice
+  covers a guard's address, not its code, so a guard behind an upgradeable proxy or an EIP-7702
+  account can change its behavior later without notice.
 - **Who can cause it.** Governance.
 - **Worst case.** A useless or hostile component, after 7 days of notice; then R-01 and R-02.
 - **Why it is accepted.** The vault cannot judge tokens. GRET as its own component could never
@@ -413,11 +442,13 @@ Agreed conduct for governance, which the vault does not enforce. Each point miti
 that cite it.
 
 - **P-1.** Sync every recovery of a recognized loss (`LossRecognized` events) instead of rescuing
-  it. (R-04)
+  it. The event names the component by index, which a removal shifts: read the component list
+  at that block. (R-04)
 - **P-2.** In liquidation, use a balance that comes back after claims with a cut to return the
   cuts: rescue it and split it among those who claimed, in proportion to `rights − amount` in
   their `Claimed` events, without exceeding each one's cut. What exceeds the cuts is ordinary
-  surplus. (R-04)
+  surplus. A claim whose transfer reported success without moving the tokens records `amount`
+  equal to `rights`; only the token's own transfers show it. (R-04)
 - **P-3.** Sync issuer distributions that arrive as balance, such as xStocks multiplier
   increases: they belong to the holders. `rescue` is for what does not belong to them, such as
   mistaken transfers. (R-04)
@@ -427,8 +458,11 @@ that cite it.
   quarterly dividend's share of the basket; and if a timelock is added, only the Safe executes
   its operations, since a timelocked `sync` is visible during its delay. (R-08)
 - **P-5.** Write off only a component that stopped working, and cancel a pending write-off as
-  soon as the token recovers. Keep minting paused while a written-off component may recover, and
-  sync the recovered balance at once through a private RPC. (R-06, R-08)
+  soon as the token recovers. Pause minting before a write-off becomes executable, since it can
+  be executed and followed by a mint in the same transaction, and keep it paused while a
+  written-off component may recover; sync the recovered balance at once through a private RPC.
+  When the last holders leave with `redeemSkipping`, pause minting first, so the skipped share
+  becomes surplus instead of going to a late minter. (R-06, R-08)
 - **P-6.** Send every `swap` through a private RPC. (R-02, R-08)
 - **P-7.** If a component removed after a total loss gets its balance back, add it again and
   sync that balance instead of rescuing it. (R-04)

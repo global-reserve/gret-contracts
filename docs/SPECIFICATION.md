@@ -1,6 +1,6 @@
 # GRET specification
 
-Updated on October 26, 2026.
+Updated on October 28, 2026.
 
 ## Overview
 
@@ -64,7 +64,9 @@ percentages, not initial amounts per share.
   `redeemSkipping(shares, minAmountsOut, skipped)` is the same redemption but leaves out the
   listed components, which are not called at all. The caller gives up its share of them: it
   stays in the reserve for the other holders or, when the redemption empties the supply,
-  becomes surplus. Without it, a single component that cannot be sent (an issuer freeze, or a
+  becomes surplus. Whoever holds GRET at that moment shares it, including someone who mints
+  just before the skipping redemption, which keeps the supply from emptying, and redeems after
+  it (R-08). Without it, a single component that cannot be sent (an issuer freeze, or a
   token a captured governance syncs in and makes fail) blocks every redemption, so the
   7-day notice of a new rebalancer would give nobody an exit. Keeping the skipped share as a
   pending right for the caller was rejected: it would bring liquidation-style accounting
@@ -74,7 +76,9 @@ percentages, not initial amounts per share.
   whoever held almost the whole supply could redeem down to 1 wei, and the rounding
   leftovers distorted the basket (1 GRET came to require 1e18 units of an 8-decimal
   component), making minting unusable. The last holders with less than 1 GRET between them
-  must gather their GRET in one wallet to leave (R-09).
+  must gather their GRET in one wallet to leave (R-09). While the redemption fee is positive,
+  redemption never empties the supply: the fee stays in it, so at least 1 GRET always remains
+  until governance cuts the fee to zero, which applies at once, or liquidates.
 - **Mint by what arrived:** the vault measures what arrives of each component and issues
   GRET for the minimum proportion received, rounded down. It tolerates up to
   `MAX_RECEIPT_SHORTFALL` (10 base units) per component, which covers tokens that convert
@@ -133,7 +137,9 @@ rebalancer and bounded by the price guard.
   rebalancing, never an exit. The vault holds no prices or limits: they live in the guard,
   since a guard that lies about prices would defeat any limit, wherever it lived. A
   misbehaving guard brings back the earlier situation, a rebalancer trusted with the price,
-  and replacing the guard waits the same 7 days as replacing the rebalancer.
+  and replacing the guard waits the same 7 days as replacing the rebalancer. The notice
+  covers the guard's address, not its code: a guard behind an upgradeable proxy, or an
+  EIP-7702 account, could change its behavior later without notice (R-18).
 - **`ChainlinkPriceGuard`**, the first guard. It values both sides of a swap in US dollars
   with one Chainlink feed per token and refuses:
   - a token without a feed, or whose price is older than its `maxAge`, in the future, zero
@@ -144,8 +150,10 @@ rebalancer and bounded by the price guard.
     swap, and the week adds those shares (`weeklyLoss`). Each priced component is valued at
     the lesser of its recognized reserve and the vault's actual balance, so neither a loss
     nobody has recognized yet nor tokens that are not reserve (a donation, what the swap just
-    brought in) count; components it cannot price, or whose balance cannot be read, count as
-    zero. That share is what every GRET loses, so mints
+    brought in) count; components it cannot price, or whose `balanceOf` reverts, count as
+    zero. A `balanceOf` that succeeds with malformed return data (fewer than 32 bytes) is not
+    caught: every swap with a loss reverts until that component is written off or a guard
+    without its feed is applied (R-15). That share is what every GRET loses, so mints
     and redemptions in between change nothing: capital present only when a loss is recorded
     cannot stretch the limit, and after large exits the limit shrinks with what is left. A
     dollar budget fixed once a week was rejected for that reason. Weeks are fixed 7-day
@@ -153,11 +161,16 @@ rebalancer and bounded by the price guard.
     again within the week. A per-swap limit alone lets the same value be traded back and
     forth, losing up to 2% each time: 50 such swaps take 64%. Swaps that lose nothing do not
     count. Around the change of week, up to 4% can be lost in a row; a limit that refills
-    gradually would avoid that, but it was rejected as more code.
+    gradually would avoid that, but it was rejected as more code. The count lives in each
+    guard, and a newly applied guard starts at zero: in the week of a replacement the old and
+    the new guard together allow up to 4%, and about 6% in a row across the change of week.
+    Anyone can apply a ready guard, so a rebalancer can choose that moment (R-02).
   - What leaves is valued rounded up and what arrives rounded down, so rounding never hides
     a loss.
   - It has no owner and nothing can be changed after deployment: tokens, feeds, `maxAge`
-    and both limits are fixed. Changing any of them means
+    and both limits are fixed, and each token's decimals are read once, at deployment. If an
+    issuer changed a token's decimals, the guard would misvalue it by that power of ten and
+    neither limit would hold for it. Changing any of them means
     deploying another guard, with the 7-day notice. Only the vault can call `checkSwap`;
     otherwise anyone could use up the weekly limit.
   - Each feed must quote one whole token, with nothing to convert. The proposed feeds are in
@@ -171,10 +184,13 @@ rebalancer and bounded by the price guard.
     market hours: on weekends they go stale and those swaps stop.
   - Limits of what it protects: a feed of the underlying does not see a token that loses
     its peg, and a swap that buys such a token at the feed price records no loss, so neither
-    limit applies; feeds update on a deviation threshold (0.5%; 2% for cbBTC), which can eat
-    into the 2%; and up to the weekly limit, a stolen rebalancer key still takes value until
-    governance revokes it. Watching `LossRecorded` and each token's market price against its
-    feed is policy, not code (R-02, R-03 and P-8 in [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md)).
+    limit applies; feeds update on a deviation threshold (0.5%; 2% for cbBTC), and a swap at
+    a feed price that is off by up to that threshold loses the difference without the guard
+    recording it, on top of both limits; a written-off component can still be bought, and
+    the swap gives it a reserve again without a `sync`; and up to the weekly limit, a stolen
+    rebalancer key still takes value until governance revokes it. Watching `LossRecorded`
+    and each token's market price against its feed is policy, not code (R-02, R-03 and P-8
+    in [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md)).
 - **Adding a component.** Governance announces a token (`announceComponent`, named apart from
   a Governor's `propose`) and, after 7 days, anyone can add it as
   the last component, with no reserve and no initial amount. Mint does not ask for it until the
@@ -191,7 +207,10 @@ rebalancer and bounded by the price guard.
   whichever token moved into its position. A write-off does not change the version, because
   the component keeps its position. Clients read `basketVersion()` together with
   `components()` and the previews; a call waiting in a Safe or a timelock fails instead of
-  landing on another token.
+  landing on another token. Tokens announced at least 7 days earlier let the version change
+  again and again: anyone can add each one once, and governance can remove one at once while
+  it has no reserve. A hostile governance can use them to make prepared redemptions revert
+  during a notice; holders read the version again and resubmit, through a private RPC (R-01).
 - **`sync` takes the token's address**, not an index, so a `sync` waiting in a timelock cannot
   land on another component if a removal shifts the indexes in between.
 - Between 1 and 128 components (`MAX_COMPONENTS`), fixed in the code. Mint and redemption visit every component in one transaction, so the cap keeps them
@@ -234,7 +253,12 @@ rebalancer and bounded by the price guard.
     wait (R-06). A check by the vault itself (a probe that tried to read and send the
     balance) was rejected: it could be fooled both ways, and it protected little, since a
     governance that wants to harm holders already has the rebalancer.
+  - Because anyone can execute it, a contract can execute a ready write-off and mint in the
+    same transaction, without the component. Minting must already be paused when the
+    write-off becomes executable; a pause sent after it comes too late (R-06, P-5).
   - What was written off never goes to governance: `rescue` refuses that token forever.
+    Besides `sync`, a `swap` that buys the token gives it a reserve again; the vault does
+    not refuse it (R-03).
   - A written-off component stays in the basket for good and can never be removed: if the
     token recovers, `sync` returns its balance to the reserves at once, also during
     liquidation, without a new 7-day announcement that would let late minters capture it. It
@@ -269,8 +293,10 @@ How the rebalancer evolves (proposed, not decided):
   fee; `previewRedeem` already discounts the redemption fee.
 - **The recipient's GRET stays in the supply.** If the recipient holds less than 1 GRET, the
   last holders cannot take the supply below 1 GRET, even with both fees at zero, unless the
-  recipient hands its GRET over or governance liquidates (R-09). In the pilot the recipient is
-  the pilot wallet, which can consolidate.
+  recipient hands its GRET over or governance liquidates (R-09). With a positive redemption
+  fee not even that helps: every redemption leaves its fee in the supply, so at least 1 GRET
+  remains until the fee is cut to zero. In the pilot the recipient is the pilot wallet, which
+  can consolidate.
 - **Events report net amounts.** `Minted.shares` and `mint`'s return are what the
   caller got; `Redeemed.shares` is what was burned. The GRET issued by a mint, or taken by a
   redemption, is that plus `FeeCharged.shares`. A recipient that mints or redeems pays itself a
@@ -316,7 +342,8 @@ How the rebalancer evolves (proposed, not decided):
   balance comes back later, it first makes whole those who waited, who bore the risk of
   further losses, and what is left becomes surplus (R-04 and P-2 in
   [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md)). The `Claimed` event records `amount` and
-  `rights`, so every cut can be reconstructed.
+  `rights`, so every cut can be reconstructed. A transfer that reports success without moving
+  the tokens is not a cut and does not show there (P-2).
 - `to` allows claiming to another address, for example if an issuer blocks the holder's.
   It cannot be the vault itself.
 - Conservation: what is paid per component never exceeds the rights consumed or the
@@ -411,7 +438,11 @@ Normal accounting:
   recognize losses and measure what arrived), in claims (to detect shortfalls) and when
   computing surpluses. If a component's `balanceOf` reverts, normal redemption and claims
   go ahead without adjusting that component; mint and swaps that involve it revert. Mint
-  does not read components it does not ask for.
+  does not read components it does not ask for. Only a revert is tolerated: a `balanceOf`
+  that succeeds with malformed return data, or a component left without code, makes normal
+  redemption (`redeemSkipping` without it still works) and that component's claims and
+  `claimable` revert. Running out of gas counts as a revert, so a caller who chooses the gas
+  limit can force that path when a component's `balanceOf` costs millions of gas (R-14).
 - Mint contributions round up and redemption outputs round down, so rounding never lowers
   the value behind each GRET. Every successful mint receives at least one base unit of each
   component with a positive reserve and issues positive GRET, so it always meets the
@@ -677,3 +708,7 @@ parties.
    [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md#operating-policy)).
 8. Update the development dependency flagged by `npm audit` (`follow-redirects`, pulled in
    by `solc`); it is not part of the vault.
+9. Proposed, not decided: the price guard is not deployed yet, so before it is, it could take
+   over the previous guard's weekly count, read token decimals at swap time and count a
+   `balanceOf` with malformed return data as zero. Today the specification describes the
+   guard as it is.
