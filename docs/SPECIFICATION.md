@@ -164,13 +164,15 @@ rebalancer and bounded by the price guard.
     gradually would avoid that, but it was rejected as more code. The count lives in each
     guard, and a newly applied guard starts at zero: in the week of a replacement the old and
     the new guard together allow up to 4%, and about 6% in a row across the change of week.
-    Anyone can apply a ready guard, so a rebalancer can choose that moment (R-02).
+    If governance proposes the next guard as soon as one is applied, chained replacements
+    allow about 7.8% within 7 days. Anyone can apply a ready guard, so a rebalancer can choose
+    that moment (R-02).
   - What leaves is valued rounded up and what arrives rounded down, so rounding never hides
     a loss.
   - It has no owner and nothing can be changed after deployment: tokens, feeds, `maxAge`
     and both limits are fixed, and each token's decimals are read once, at deployment. If an
     issuer changed a token's decimals, the guard would misvalue it by that power of ten and
-    neither limit would hold for it. Changing any of them means
+    neither limit would hold for swaps that sell or buy it. Changing any of them means
     deploying another guard, with the 7-day notice. Only the vault can call `checkSwap`;
     otherwise anyone could use up the weekly limit.
   - Each feed must quote one whole token, with nothing to convert. The proposed feeds are in
@@ -186,8 +188,10 @@ rebalancer and bounded by the price guard.
     its peg, and a swap that buys such a token at the feed price records no loss, so neither
     limit applies; feeds update on a deviation threshold (0.5%; 2% for cbBTC), and a swap at
     a feed price that is off by up to that threshold loses the difference without the guard
-    recording it, on top of both limits; a written-off component can still be bought, and
-    the swap gives it a reserve again without a `sync`; and up to the weekly limit, a stolen
+    recording it, on top of both limits. Between two feeds the gap can reach the sum of their
+    thresholds, and it can be taken again on every swap while a feed lags, so it is bounded by
+    the volume swapped, not by the weekly limit; a written-off component can still be bought,
+    and the swap gives it a reserve again without a `sync`; and up to the weekly limit, a stolen
     rebalancer key still takes value until governance revokes it. Watching `LossRecorded`
     and each token's market price against its feed is policy, not code (R-02, R-03 and P-8
     in [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md)).

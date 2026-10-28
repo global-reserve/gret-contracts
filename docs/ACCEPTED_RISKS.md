@@ -83,9 +83,10 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   or 4% in a row across the change of week, until governance revokes the rebalancer. The weekly
   count lives in each guard and a newly applied guard starts at zero, so in the week of a
   replacement the two guards allow up to 4%, and about 6% in a row across the change of week;
-  anyone can apply a ready guard, so a hostile rebalancer chooses that moment. Losses the
-  feeds do not see are not limited (R-03). A captured governance can instead appoint a guard
-  that accepts everything (R-01).
+  if governance proposes the next guard as soon as one is applied, chained replacements allow
+  about 7.8% within 7 days. Anyone can apply a ready guard, so a hostile rebalancer chooses that
+  moment. Losses the feeds do not see are not limited (R-03). A captured governance can instead
+  appoint a guard that accepts everything (R-01).
 - **Why it is accepted.** Prices cannot be exact with thin liquidity. A cap on volume was
   rejected because it would also block a large legitimate rebalance. A budget that refills
   gradually would close the 4% case, at the cost of more code.
@@ -105,7 +106,9 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   emitted. The same holds for a written-off component: `swap` does not refuse to buy it, and the
   purchase gives it a reserve again without a `sync`. Feeds also update on a deviation threshold
   (0.5%; 2% for cbBTC): a swap at a feed price that is off by up to that threshold loses the
-  difference unrecorded, on top of both limits. A token without a feed cannot be swapped, so it
+  difference unrecorded, on top of both limits. Between two feeds the gap can reach the sum of
+  their thresholds, and it can be taken again on every swap while a feed lags: it is bounded by
+  the volume swapped, not by the weekly limit. A token without a feed cannot be swapped, so it
   can never be sold or removed: today
   ITOTon, EFAon, IEMGon, JAAAx, VNQon and DBCon, half of the basket's weight. The equity feeds
   follow US market hours; on weekends their prices go stale and those swaps stop.
