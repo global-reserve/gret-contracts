@@ -4,8 +4,8 @@ Updated on October 28, 2026. Changes since the
 [October 27, 2026 review](audits/2026-10-27-GRETVault-review.md), from a second internal review:
 R-02, R-09 and P-5 widen their scope (the week of a guard replacement, a positive redemption
 fee, pausing before a write-off can be executed); R-03, R-14 and R-15 correct how feeds and a
-broken `balanceOf` are described; R-06, R-08, R-18, P-1 and P-2 add detail. No risk was removed
-or renumbered.
+broken `balanceOf` are described; R-01, R-06, R-08, R-18, P-1 and P-2 add detail. No risk was
+removed or renumbered.
 
 This document lists every known risk of `GRETVault` and `ChainlinkPriceGuard` that was
 consciously accepted, with the reason and what mitigates it. Issues that were fixed are not
@@ -66,8 +66,11 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   that can take value waits 7 days, visible on chain; the powers it has at once cannot take
   reserves.
 - **Mitigation.** During the notice, wallets that minted can redeem, skipping any component
-  made to fail (see R-07 for those that never minted). Governance moves to a Safe multisig
-  with a recovery procedure before third-party funds (P-12).
+  made to fail (see R-07 for those that never minted). A hostile governance can delay those
+  exits: with announced or zero-reserve components it can change `basketVersion` again and
+  again, so redemptions prepared for a fixed version revert with `BasketChanged`; one sent
+  from a contract that reads the version when it executes goes through. Governance moves to a
+  Safe multisig with a recovery procedure before third-party funds (P-12).
 - **Evidence.** `test_R07_pauseKeepsNonMinterInDuringNotice` ends with that drain.
 
 ### R-02 — The rebalancer chooses the price, within the guard's limits
@@ -448,8 +451,9 @@ Agreed conduct for governance, which the vault does not enforce. Each point miti
 that cite it.
 
 - **P-1.** Sync every recovery of a recognized loss (`LossRecognized` events) instead of rescuing
-  it. The event names the component by index, which a removal shifts: read the component list
-  at that block. (R-04)
+  it. The event names the component by index, which a removal shifts: map it to a token by
+  replaying `ComponentAdded` and `ComponentRemoved` in log order up to that event, not by
+  reading the component list at that block. (R-04)
 - **P-2.** In liquidation, use a balance that comes back after claims with a cut to return the
   cuts: rescue it and split it among those who claimed, in proportion to `rights − amount` in
   their `Claimed` events, without exceeding each one's cut. What exceeds the cuts is ordinary

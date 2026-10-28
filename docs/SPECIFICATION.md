@@ -213,10 +213,12 @@ rebalancer and bounded by the price guard.
   whichever token moved into its position. A write-off does not change the version, because
   the component keeps its position. Clients read `basketVersion()` together with
   `components()` and the previews; a call waiting in a Safe or a timelock fails instead of
-  landing on another token. Tokens announced at least 7 days earlier let the version change
-  again and again: anyone can add each one once, and governance can remove one at once while
-  it has no reserve. A hostile governance can use them to make prepared redemptions revert
-  during a notice; holders read the version again and resubmit, through a private RPC (R-01).
+  landing on another token. Announced tokens let the version change again and again: anyone
+  can add each one once within its window, and governance can remove one at once, at any later
+  time, while it has no reserve, so zero-reserve components added long before can be kept for
+  that. A hostile governance can use them to make prepared redemptions revert during a notice.
+  A redemption sent from a contract that reads `basketVersion()` when it executes is not
+  affected; a signed transaction with a fixed version must be prepared again (R-01).
 - **`sync` takes the token's address**, not an index, so a `sync` waiting in a timelock cannot
   land on another component if a removal shifts the indexes in between.
 - Between 1 and 128 components (`MAX_COMPONENTS`), fixed in the code. Mint and redemption visit every component in one transaction, so the cap keeps them
