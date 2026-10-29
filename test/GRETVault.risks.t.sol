@@ -3,6 +3,7 @@ pragma solidity 0.8.38;
 
 import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {GRETVault} from "../contracts/GRETVault.sol";
 import {MockFaultyERC20} from "../contracts/mocks/MockFaultyERC20.sol";
@@ -317,5 +318,240 @@ contract GRETVaultRisksTest is GRETVaultCase {
         single.claim(0, ALICE, 0);
         assertEq(token.balanceOf(address(single)), 1);
         assertEq(single.componentSurplus(0), 0);
+    }
+}
+
+/// @notice Accepted recovery risks R-04 and R-25 in docs/ACCEPTED_RISKS.md.
+/// @dev Governance is an ordinary EOA. Mock faults model possible issuer events, not observed
+/// behavior of a pilot token. Production contracts are unchanged.
+contract GRETVaultRecoveryRisksTest is GRETVaultCase {
+    function _writeOff() private {
+        faulty.setFault(MockFaultyERC20.Fault.RevertOnTransfer);
+        vm.startPrank(GOVERNANCE);
+        vault.setMintPaused(true);
+        vault.proposeWriteOff(address(faulty));
+        vm.stopPrank();
+        vm.warp(vault.writeOffReadyAt(address(faulty)));
+        vault.writeOffComponent(address(faulty));
+    }
+
+    function _twoHolders() private {
+        vm.prank(BOB);
+        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+    }
+
+    function _liquidateAndConvertBoth() private {
+        vm.prank(GOVERNANCE);
+        vault.activateLiquidation();
+        vm.prank(ALICE);
+        vault.convertToClaims(SHARE);
+        vm.prank(BOB);
+        vault.convertToClaims(SHARE);
+    }
+
+    /// A former write-off remains non-rescuable after a full recovery. Direct reimbursement
+    /// reverts even with sufficient surplus; P-2 therefore requires external settlement.
+    function test_R04_writtenOffRecoveryCannotReimburseHaircut() public {
+        _twoHolders();
+        _writeOff();
+        faulty.setFault(MockFaultyERC20.Fault.None);
+        vm.prank(GOVERNANCE);
+        vault.sync(address(faulty));
+        assertEq(vault.reserves()[1], 10e18);
+        _liquidateAndConvertBoth();
+
+        uint256 aliceBefore = faulty.balanceOf(ALICE);
+        uint256 bobBefore = faulty.balanceOf(BOB);
+        faulty.slash(address(vault), 5e18);
+        vm.prank(ALICE);
+        assertEq(vault.claim(1, ALICE, 0), 2.5e18);
+        faulty.mint(address(vault), 5e18);
+        assertEq(vault.componentSurplus(1), 2.5e18);
+
+        vm.startPrank(GOVERNANCE);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.TokenWrittenOff.selector, address(faulty)));
+        vault.rescue(address(faulty), ALICE, 2.5e18);
+        vault.sync(address(faulty));
+        vm.stopPrank();
+        vm.prank(ALICE);
+        vault.claim(1, ALICE, 0);
+        vm.prank(BOB);
+        vault.claim(1, BOB, 0);
+
+        assertEq(faulty.balanceOf(ALICE) - aliceBefore, 3.75e18);
+        assertEq(faulty.balanceOf(BOB) - bobBefore, 6.25e18);
+        assertEq(faulty.balanceOf(address(vault)), 0);
+    }
+
+    /// Control: the very same shortfall/recovery is settled exactly by P-2 without a write-off.
+    function test_R04_controlOrdinaryComponentCanReimburseHaircut() public {
+        _twoHolders();
+        _liquidateAndConvertBoth();
+        uint256 aliceBefore = faulty.balanceOf(ALICE);
+        uint256 bobBefore = faulty.balanceOf(BOB);
+        faulty.slash(address(vault), 5e18);
+        vm.prank(ALICE);
+        vault.claim(1, ALICE, 0);
+        faulty.mint(address(vault), 5e18);
+        vm.prank(GOVERNANCE);
+        vault.rescue(address(faulty), ALICE, 2.5e18);
+        vm.prank(BOB);
+        vault.claim(1, BOB, 0);
+        assertEq(faulty.balanceOf(ALICE) - aliceBefore, 5e18);
+        assertEq(faulty.balanceOf(BOB) - bobBefore, 5e18);
+    }
+
+    /// Vary both holder concentration and the loss. Restoring the entire token balance still
+    /// does not restore the early claimant; the shortfall is transferred to the waiting holder.
+    function testFuzz_R04_syncTransfersPartOfCompensationToWaitingHolder(uint256 k, uint256 cutBps)
+        public
+    {
+        k = bound(k, 1, 100);
+        cutBps = bound(cutBps, 1, 9_999);
+        vm.prank(BOB);
+        vault.mint(k * SHARE, _pair(2e18 * k, 5e18 * k), k * SHARE, 0);
+        _writeOff();
+        faulty.setFault(MockFaultyERC20.Fault.None);
+        vm.prank(GOVERNANCE);
+        vault.sync(address(faulty));
+        vm.prank(GOVERNANCE);
+        vault.activateLiquidation();
+        vm.prank(ALICE);
+        vault.convertToClaims(SHARE);
+        vm.prank(BOB);
+        vault.convertToClaims(k * SHARE);
+
+        uint256 loss = 5e18 * (k + 1) * cutBps / 10_000;
+        uint256 aliceBefore = faulty.balanceOf(ALICE);
+        uint256 bobBefore = faulty.balanceOf(BOB);
+        faulty.slash(address(vault), loss);
+        vm.prank(ALICE);
+        uint256 paidEarly = vault.claim(1, ALICE, 0);
+        uint256 haircut = 5e18 - paidEarly;
+        faulty.mint(address(vault), loss);
+        assertEq(vault.componentSurplus(1), haircut);
+        vm.startPrank(GOVERNANCE);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.TokenWrittenOff.selector, address(faulty)));
+        vault.rescue(address(faulty), ALICE, haircut);
+        vault.sync(address(faulty));
+        vm.stopPrank();
+        vm.prank(ALICE);
+        vault.claim(1, ALICE, 0);
+        vm.prank(BOB);
+        vault.claim(1, BOB, 0);
+        uint256 missing = 5e18 - (faulty.balanceOf(ALICE) - aliceBefore);
+        uint256 extra = faulty.balanceOf(BOB) - bobBefore - 5e18 * k;
+        assertGt(missing, 0);
+        assertGt(extra, 0);
+        assertApproxEqAbs(missing, Math.mulDiv(haircut, k, k + 1), 1);
+        assertApproxEqAbs(extra, missing, 1);
+        assertLe(faulty.balanceOf(address(vault)), 1);
+    }
+
+    /// Liquidating an empty supply permanently removes every vault exit for a written-off token.
+    /// The last redemption may land immediately before an already prepared activation.
+    function test_R25_emptyLiquidationStrandsWrittenOffRecovery() public {
+        _writeOff();
+        vm.prank(ALICE);
+        vault.redeem(SHARE, _pair(0, 0), 0);
+        assertEq(vault.totalSupply(), 0);
+        vm.prank(GOVERNANCE);
+        vault.activateLiquidation();
+        assertEq(vault.liquidationSupply(), 0);
+
+        faulty.setFault(MockFaultyERC20.Fault.None);
+        assertEq(faulty.balanceOf(address(vault)), 5e18);
+        assertEq(vault.componentSurplus(1), 5e18);
+        vm.startPrank(GOVERNANCE);
+        vm.expectRevert(GRETVault.NoSupply.selector);
+        vault.sync(address(faulty));
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.TokenWrittenOff.selector, address(faulty)));
+        vault.rescue(address(faulty), ALICE, 5e18);
+        vm.expectRevert(GRETVault.LiquidationIsActive.selector);
+        vault.removeComponent(address(faulty));
+        vault.setMintPaused(false);
+        vault.setInitialAmounts(_pair(2e18, 0), 0);
+        vm.stopPrank();
+        vm.startPrank(ALICE);
+        vm.expectRevert(GRETVault.LiquidationIsActive.selector);
+        vault.mint(SHARE, _pair(2e18, 0), SHARE, 0);
+        vm.expectRevert();
+        vault.convertToClaims(SHARE);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.NothingToClaim.selector, ALICE, 1));
+        vault.claim(1, ALICE, 0);
+        vm.stopPrank();
+        assertEq(faulty.balanceOf(address(vault)), 5e18);
+    }
+
+    /// Control: activating before the last exit preserves rights even for a written-off token.
+    function test_R25_controlLiveSupplyPreservesWrittenOffRecovery() public {
+        _writeOff();
+        vm.prank(GOVERNANCE);
+        vault.activateLiquidation();
+        vm.prank(ALICE);
+        vault.convertToClaims(SHARE);
+        faulty.setFault(MockFaultyERC20.Fault.None);
+        vm.prank(GOVERNANCE);
+        vault.sync(address(faulty));
+        vm.prank(ALICE);
+        assertEq(vault.claim(1, ALICE, 5e18), 5e18);
+    }
+
+    /// Control: with no liquidation, an empty vault can restart and allocate the recovery.
+    function test_R25_controlEmptyNormalVaultCanRestart() public {
+        _writeOff();
+        vm.prank(ALICE);
+        vault.redeem(SHARE, _pair(0, 0), 0);
+        vm.prank(GOVERNANCE);
+        vault.setMintPaused(false);
+        vm.prank(ALICE);
+        vault.mint(SHARE, _pair(2e18, 0), SHARE, 0);
+        faulty.setFault(MockFaultyERC20.Fault.None);
+        vm.prank(GOVERNANCE);
+        vault.sync(address(faulty));
+        vm.prank(ALICE);
+        uint256[] memory paid = vault.redeem(SHARE, _pair(2e18, 5e18), 0);
+        assertEq(paid[1], 5e18);
+    }
+
+    /// Control: an empty liquidation does not trap ordinary (never written-off) surplus.
+    function test_R25_controlEmptyLiquidationCanRescueOrdinarySurplus() public {
+        faulty.setFault(MockFaultyERC20.Fault.RevertOnTransfer);
+        address[] memory skipped = new address[](1);
+        skipped[0] = address(faulty);
+        vm.prank(ALICE);
+        vault.redeemSkipping(SHARE, _pair(0, 0), skipped, 0);
+        vm.prank(GOVERNANCE);
+        vault.activateLiquidation();
+        faulty.setFault(MockFaultyERC20.Fault.None);
+        uint256 before = faulty.balanceOf(ALICE);
+        vm.prank(GOVERNANCE);
+        vault.rescue(address(faulty), ALICE, 5e18);
+        assertEq(faulty.balanceOf(ALICE) - before, 5e18);
+    }
+
+    /// P-7's re-add-and-sync procedure cannot operate after liquidation, even if a re-addition
+    /// was announced before activation. External rescue and allocation remain possible.
+    function test_R04_removedRecoveryCannotRejoinLiquidation() public {
+        faulty.slash(address(vault), 5e18);
+        vault.recognizeLoss(1);
+        vm.startPrank(GOVERNANCE);
+        vault.removeComponent(address(faulty));
+        vault.announceComponent(address(faulty));
+        vault.activateLiquidation();
+        vm.stopPrank();
+        vm.prank(ALICE);
+        vault.convertToClaims(SHARE);
+        faulty.mint(address(vault), 5e18);
+        vm.warp(vault.componentReadyAt(address(faulty)));
+        vm.expectRevert(GRETVault.LiquidationIsActive.selector);
+        vault.addComponent(address(faulty));
+        vm.startPrank(GOVERNANCE);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.NotAComponent.selector, address(faulty)));
+        vault.sync(address(faulty));
+        uint256 before = faulty.balanceOf(ALICE);
+        vault.rescue(address(faulty), ALICE, 5e18);
+        vm.stopPrank();
+        assertEq(faulty.balanceOf(ALICE) - before, 5e18);
     }
 }

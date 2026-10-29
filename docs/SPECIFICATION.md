@@ -1,6 +1,6 @@
 # GRET specification
 
-Updated on October 28, 2026.
+Updated on October 29, 2026.
 
 ## Overview
 
@@ -269,8 +269,11 @@ rebalancer and bounded by the price guard.
     not refuse it (R-03).
   - A written-off component stays in the basket for good and can never be removed: if the
     token recovers, `sync` returns its balance to the reserves at once, also during
-    liquidation, without a new 7-day announcement that would let late minters capture it. It
-    keeps its place among the 128 (R-17).
+    liquidation with a positive `liquidationSupply`, without a new 7-day announcement that
+    would let late minters capture it. Without normal supply, a fresh mint is needed before
+    syncing; after liquidation starts with zero supply, neither a fresh mint nor a sync is
+    possible, stranding the written-off recovery (R-25, prevented operationally by P-13).
+    It keeps its place among the 128 (R-17).
   - Closed during liquidation, which already handles broken components per claim.
 
 How the rebalancer evolves (proposed, not decided):
@@ -331,7 +334,12 @@ How the rebalancer evolves (proposed, not decided):
 
 - `activateLiquidation()` stores the GRET supply in `liquidationSupply` and fixes the
   recognized reserves as the basis of every right; afterwards only `sync` can raise them.
-  It calls no external token.
+  It calls no external token. It accepts zero supply, irreversibly closing minting with
+  nobody able to acquire claim rights. Ordinary surplus can still be rescued, but a
+  written-off component cannot: its recovery has no exit through the vault (R-25 in
+  [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md#r-25--empty-liquidation-strands-a-written-off-recovery)).
+  P-13 requires positive supply and retaining a governance-controlled GRET position through
+  activation; the current vault does not enforce this operating rule.
 - `convertToClaims(shares)` burns GRET and credits non-transferable `claimShares`. It can
   be done in several steps. Unconverted GRET stays transferable, so whoever receives it can
   also exit.
@@ -351,7 +359,12 @@ How the rebalancer evolves (proposed, not decided):
   further losses, and what is left becomes surplus (R-04 and P-2 in
   [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md)). The `Claimed` event records `amount` and
   `rights`, so every cut can be reconstructed. A transfer that reports success without moving
-  the tokens is not a cut and does not show there (P-2).
+  the tokens is not a cut and does not show there (P-2). P-2's external compensation through
+  `rescue` is also unavailable for a token ever written off, even after a complete recovery:
+  the flag is permanent. Syncing that surplus allocates it to all holders, rather than only
+  those whose claims took a cut. This is accepted under R-04: P-2 requires an external
+  settlement ledger for that case; compensation depends on holder cooperation and is not
+  guaranteed by the vault.
 - `to` allows claiming to another address, for example if an issuer blocks the holder's.
   It cannot be the vault itself.
 - Conservation: what is paid per component never exceeds the rights consumed or the
@@ -359,16 +372,20 @@ How the rebalancer evolves (proposed, not decided):
 - Donations and distributions after activation do not change the rights on their own.
   Governance can add them with `sync(token)`, which raises everyone's rights in proportion,
   also over what was already claimed, or rescue them; it can never touch what is owed to
-  holders (see Governance).
+  holders (see Governance). Sync requires a positive `liquidationSupply` and membership in
+  the basket; rescue is permanently unavailable for written-off tokens. A component removed
+  before liquidation cannot rejoin it. Its recovered balance can be rescued and distributed
+  externally under P-7's liquidation exception; its re-add-and-sync procedure applies only
+  before liquidation (R-04).
 - Known limits: if a component never transfers again, its right stays pending with no
   recovery. GRET held by contracts that cannot call `convertToClaims` (for example, DEX
   pools) stays unclaimed (R-22).
 
 ## Governance
 
-- The vault stores the `governance` address: an external contract that implements
-  voting. The vault only checks `msg.sender == governance`; what can be done, and within
-  which limits, is set by the vault.
+- The vault stores the `governance` address, currently the pilot wallet (an EOA). A future
+  governance contract is not defined or required by the vault: it only checks
+  `msg.sender == governance`; what can be done, and within which limits, is set by the vault.
 - Powers: activating liquidation, `sync(token)` (in normal operation and during liquidation),
   `rescue(token, to, amount)`, appointing the next governance, changing the basket
   (announcing, adding and removing components, setting the initial amounts), appointing and
@@ -395,7 +412,12 @@ How the rebalancer evolves (proposed, not decided):
 
 What these powers still allow, and every other risk that was accepted, is in
 [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md), each with its reason and mitigation, together with
-governance's operating policy (P-1 to P-12), which the vault does not enforce.
+governance's operating policy (P-1 to P-13), which the vault does not enforce. The October 29
+recovery findings are integrated into R-04 and R-25, with operational mitigations accepted
+by the owner and [reproducible evidence](ACCEPTED_RISKS.md#review-evidence--october-29-2026).
+The decision is to retain the current vault and manage these cases operationally; no vault
+code change was adopted. Preventing an invalid sequence does not make it reversible, and
+external settlement is not an on-chain compensation guarantee.
 
 ### How governance grows without changing the vault
 
@@ -546,7 +568,7 @@ pending.
 | Second security review: each finding's measured behavior (guard replacement, `balanceOf` failures and gas limits, the fee floor, skipped shares, write-offs, version changes, proposal events); sequences with unrecognized losses, removals at any position, `setInitialAmounts`, short deliveries and checks that healthy operations succeed; shortfall payouts in any claim order | `test/GRETVault.review2-*.t.sol` | `npm test` (fast), `npm run test:deep` |
 | Mainnet fork with the 11 components, including swaps, basket changes and the price guard with the real feeds | `test-fork/GRETVault.mainnet.ts` | `npm run test:fork` |
 | Protections: attacks and failures the vault refuses or lets holders get around | `test/GRETVault.protections.t.sol` | `npm test` |
-| Accepted risks: each test reproduces an accepted behavior and is named after its ID in `docs/ACCEPTED_RISKS.md` | `test/GRETVault.risks.t.sol` | `npm test` |
+| Accepted risks: reproductions and controls named after their IDs in `docs/ACCEPTED_RISKS.md`, including recovery sequences | `test/GRETVault.risks.t.sol` | `npm test` |
 | Chainlink price guard: configuration, prices, per-swap and weekly limits, tokens without a price | `test/ChainlinkPriceGuard.ts` | `npm test` |
 | Fuzzing: whatever swaps the rebalancer attempts in a week, with deposits and withdrawals in between, a holder who stays keeps 98% of the value of their GRET | `test/ChainlinkPriceGuard.fuzz.t.sol` | `npm test` (fast), `npm run test:deep` |
 | Pilot rehearsal with the pilot wallet on a mainnet fork | `test-fork/GRETVault.pilot.ts` | `npm run pilot:rehearse` |
@@ -581,7 +603,10 @@ changed, write-offs followed by mints and by a `sync` of the recovered balance, 
 redemptions with fees, redemptions that skip a component (also by the last holder), failed
 claims, losses during liquidation, `sync` during liquidation and GRET rejected by the vault;
 another probe confirmed that the guard's fuzz test reaches the weekly limit. `npm run check`
-passes 224 tests. Coverage of `GRETVault.sol` and `ChainlinkPriceGuard.sol`: 100% of lines and
+passes 232 tests, including the eight recovery-sequence tests added on October 29. That
+new suite also passed the deep profile, including 20,000 cases varying holder concentration
+and haircut size. Its passing tests reproduce the reported limitations, not fixes. Coverage
+measured before that addition for `GRETVault.sol` and `ChainlinkPriceGuard.sol`: 100% of lines and
 statements.
 
 Slither 0.11.6 on the vault and on `ChainlinkPriceGuard`, with Solidity 0.8.38: no high
