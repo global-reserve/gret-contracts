@@ -72,6 +72,7 @@ involved.
 | [Mainnet pilot](docs/PILOT.md) | Steps to deploy the vault and make the first mint |
 | [Security review](docs/audits/2026-10-27-GRETVault-review.md) | AI-assisted internal review of October 27, 2026: scope, method, results and the tests it added |
 | [Second security review](docs/audits/2026-10-28-GRETVault-review.md) | AI-assisted internal review of October 28, 2026, made apart from the first: 15 findings and how each was resolved |
+| [Third security review](docs/audits/2026-10-29-GRETVault-review.md) | AI-assisted review of October 29, 2026, by Gemini: accounting, liquidation and governance, with no high-severity defects found |
 | [Security policy](SECURITY.md) | How to report a vulnerability |
 | [Contributing](CONTRIBUTING.md) | Setup, what to run for each change and conventions |
 | [Code of conduct](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
@@ -281,10 +282,11 @@ it for reentrancy guards that are cleared at the end of the call is safe.
 
 ## Security
 
-The contracts have had internal reviews, not an independent audit; the two latest, both
+The contracts have had internal reviews, not an independent audit; the three latest, all
 AI-assisted, are in [docs/audits/](docs/audits/): of
-[October 27](docs/audits/2026-10-27-GRETVault-review.md) and
-[October 28, 2026](docs/audits/2026-10-28-GRETVault-review.md). Report vulnerabilities
+[October 27](docs/audits/2026-10-27-GRETVault-review.md),
+[October 28](docs/audits/2026-10-28-GRETVault-review.md) and
+[October 29, 2026](docs/audits/2026-10-29-GRETVault-review.md). Report vulnerabilities
 privately as described in [SECURITY.md](SECURITY.md); the risks that were consciously
 accepted are in [docs/ACCEPTED_RISKS.md](docs/ACCEPTED_RISKS.md).
 
