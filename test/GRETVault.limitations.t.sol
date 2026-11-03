@@ -11,11 +11,11 @@ import {MockPriceGuard} from "../contracts/mocks/MockPriceGuard.sol";
 import {ChainlinkPriceGuard} from "../contracts/ChainlinkPriceGuard.sol";
 import {GRETVaultCase, SenderSurchargeToken, NoOpTransferToken} from "./helpers/GRETVaultCase.sol";
 
-/// @notice Accepted risks (docs/ACCEPTED_RISKS.md): each test reproduces the accepted behavior,
-/// named after its risk; change it if the decision changes.
-contract GRETVaultRisksTest is GRETVaultCase {
-    /// R-16: a donation obstructs retirement, but a transferable, tradable token can be sold.
-    function test_R16_donationBlocksRemovalUntilAnotherSale() public {
+/// @notice Known limitations (docs/SPECIFICATION.md): each test reproduces the accepted behavior;
+/// change it if the decision changes.
+contract GRETVaultLimitationsTest is GRETVaultCase {
+    /// A donation obstructs retirement, but a transferable, tradable token can be sold.
+    function test_donationBlocksRemovalUntilAnotherSale() public {
         _appoint(vault, address(new MockPriceGuard()));
         vm.prank(REBALANCER);
         vault.swap(address(healthy), 2e18, address(faulty), 1);
@@ -33,9 +33,9 @@ contract GRETVaultRisksTest is GRETVaultCase {
         assertEq(vault.componentCount(), 1);
     }
 
-    /// R-03: the feed prices F's underlying at $40, but F itself trades at $0.40. Selling the whole
+    /// The feed prices F's underlying at $40, but F itself trades at $0.40. Selling the whole
     /// H reserve for F at the feed price records no loss, so neither limit applies.
-    function test_R03_depegTheFeedDoesNotSeeIsNotLimited() public {
+    function test_depegTheFeedDoesNotSeeIsNotLimited() public {
         ChainlinkPriceGuard guard = _chainlinkGuard();
         uint256 marketPrice = 0.4e18;
         uint256 marketBefore = 2 * 100e18 + 5 * marketPrice;
@@ -53,9 +53,9 @@ contract GRETVaultRisksTest is GRETVaultCase {
         assertGt(marketBefore - marketAfter, marketBefore * 98 / 100);
     }
 
-    /// R-07: a holder who never minted cannot leave while minting is paused, so a captured
+    /// A holder who never minted cannot leave while minting is paused, so a captured
     /// governance can pause, appoint a rebalancer and drain the vault after the notice.
-    function test_R07_pauseKeepsNonMinterInDuringNotice() public {
+    function test_pauseKeepsNonMinterInDuringNotice() public {
         vm.prank(ALICE);
         vault.transfer(BOB, SHARE);
         vm.startPrank(GOVERNANCE);
@@ -89,9 +89,9 @@ contract GRETVaultRisksTest is GRETVaultCase {
         assertEq(faulty.balanceOf(address(vault)), 0);
     }
 
-    /// R-07: a holder who never minted cannot qualify while a component cannot be paid in, so
+    /// A holder who never minted cannot qualify while a component cannot be paid in, so
     /// skipping it is not available to them either.
-    function test_R07_frozenComponentKeepsNonMinterFromQualifying() public {
+    function test_frozenComponentKeepsNonMinterFromQualifying() public {
         vm.prank(ALICE);
         vault.transfer(BOB, SHARE / 2);
         faulty.setBlocked(address(vault), true);
@@ -106,8 +106,8 @@ contract GRETVaultRisksTest is GRETVaultCase {
     }
 
 
-    /// R-08: an entry before a future donation still shares that donation.
-    function test_R08_entryBeforeFutureDonationStillSharesIt() public {
+    /// An entry before a future donation still shares that donation.
+    function test_entryBeforeFutureDonationStillSharesIt() public {
         uint256 before = healthy.balanceOf(BOB);
         vm.prank(BOB);
         vault.mint(99 * SHARE, _pair(198e18, 495e18), 99 * SHARE, 0);
@@ -117,9 +117,9 @@ contract GRETVaultRisksTest is GRETVaultCase {
         assertEq(healthy.balanceOf(BOB) - before, 99e18);
     }
 
-    /// R-08: whoever mints between a write-off and reactivation of the recovered balance takes most of
+    /// Whoever mints between a write-off and reactivation of the recovered balance takes most of
     /// it from the holders who bore the write-off.
-    function test_R08_lateMinterCapturesWriteOffRecovery() public {
+    function test_lateMinterCapturesWriteOffRecovery() public {
         faulty.setFault(MockFaultyERC20.Fault.RevertOnTransfer);
         vm.prank(GOVERNANCE);
         vault.proposeWriteOff(address(faulty));
@@ -142,9 +142,9 @@ contract GRETVaultRisksTest is GRETVaultCase {
         assertEq(healthy.balanceOf(CAROL), 1e24);
     }
 
-    /// R-09: a tiny mint that cannot be redeemed alone keeps the supply under the 1 GRET floor if
+    /// A tiny mint that cannot be redeemed alone keeps the supply under the 1 GRET floor if
     /// the last holder leaves.
-    function test_R09_tinyMintHoldsBackLastHolder() public {
+    function test_tinyMintHoldsBackLastHolder() public {
         // Still works when an incoming component loses one base unit.
         faulty.setFault(MockFaultyERC20.Fault.ShortByOneOnTransfer);
         vm.prank(BOB);
@@ -165,9 +165,9 @@ contract GRETVaultRisksTest is GRETVaultCase {
         vault.redeem(dust, _pair(0, 0), 0);
     }
 
-    /// R-09: fee GRET below 1 GRET held by the recipient keeps the last holder from leaving in full,
+    /// Fee GRET below 1 GRET held by the recipient keeps the last holder from leaving in full,
     /// even after both fees are cut to zero, until the recipient hands it over.
-    function test_R09_feeRecipientHoldsBackLastHolder() public {
+    function test_feeRecipientHoldsBackLastHolder() public {
         vm.prank(BOB);
         vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
         vm.startPrank(GOVERNANCE);
@@ -191,8 +191,8 @@ contract GRETVaultRisksTest is GRETVaultCase {
         assertEq(vault.totalSupply(), 0);
     }
 
-    /// R-10: redemption minima apply to the amounts sent, not to what arrives.
-    function test_R10_redeemMinimumIgnoresRecipientFee() public {
+    /// Redemption minima apply to the amounts sent, not to what arrives.
+    function test_redeemMinimumIgnoresRecipientFee() public {
         faulty.setFault(MockFaultyERC20.Fault.FeeOnTransfer);
         uint256 before = faulty.balanceOf(ALICE);
         vm.prank(ALICE);
@@ -202,8 +202,8 @@ contract GRETVaultRisksTest is GRETVaultCase {
         assertEq(vault.balanceOf(ALICE), 0);
     }
 
-    /// R-10: a transfer that reports success without moving anything still consumes the claim.
-    function test_R10_noOpTransferStillConsumesClaim() public {
+    /// A transfer that reports success without moving anything still consumes the claim.
+    function test_noOpTransferStillConsumesClaim() public {
         NoOpTransferToken token = new NoOpTransferToken();
         GRETVault single = _single(token, 100e18);
         vm.prank(GOVERNANCE);
@@ -218,9 +218,9 @@ contract GRETVaultRisksTest is GRETVaultCase {
         assertEq(single.pendingRights(ALICE, 0), 50e18); // Undelivered tokens are automatically reallocated.
     }
 
-    /// R-13: a surcharge the token takes from the sender comes out of the remaining holders'
+    /// A surcharge the token takes from the sender comes out of the remaining holders'
     /// backing, unlike in a rescue.
-    function test_R13_senderSurchargeComesOutOfRemainingBacking() public {
+    function test_senderSurchargeComesOutOfRemainingBacking() public {
         SenderSurchargeToken token = new SenderSurchargeToken();
         GRETVault single = _single(token, 100e18);
         token.enable();
@@ -235,8 +235,8 @@ contract GRETVaultRisksTest is GRETVaultCase {
         assertEq(single.balanceOf(BOB), SHARE);
     }
 
-    /// R-13: liquidation does not lift the sender surcharge's dead end for the last claimant.
-    function test_R13_senderSurchargeBlocksLastClaim() public {
+    /// Liquidation does not lift the sender surcharge's dead end for the last claimant.
+    function test_senderSurchargeBlocksLastClaim() public {
         SenderSurchargeToken token = new SenderSurchargeToken();
         GRETVault single = _single(token, 100e18);
         vm.prank(GOVERNANCE);
@@ -257,9 +257,9 @@ contract GRETVaultRisksTest is GRETVaultCase {
     }
 
 
-    /// R-16: a small mint in front of a sale of the whole reserve leaves dust behind, which keeps
+    /// A small mint in front of a sale of the whole reserve leaves dust behind, which keeps
     /// the component from being removed.
-    function test_R16_mintBeforeWholeSaleLeavesDustThatBlocksRemoval() public {
+    function test_mintBeforeWholeSaleLeavesDustThatBlocksRemoval() public {
         _appoint(vault, address(new MockPriceGuard()));
         uint256 whole = vault.reserves()[0];
         vm.prank(BOB);
@@ -274,9 +274,9 @@ contract GRETVaultRisksTest is GRETVaultCase {
         vault.removeComponent(address(healthy));
     }
 
-    /// R-21: rights converted separately cannot be pooled, so a balance where every payout rounds
+    /// Rights converted separately cannot be pooled, so a balance where every payout rounds
     /// to zero stays in the vault.
-    function test_R21_payoutsThatRoundToZeroLeaveUnclaimableDust() public {
+    function test_payoutsThatRoundToZeroLeaveUnclaimableDust() public {
         MockFaultyERC20 token = new MockFaultyERC20("Indivisible", "I", 0);
         IERC20[] memory basket = new IERC20[](1);
         basket[0] = token;
@@ -305,8 +305,9 @@ contract GRETVaultRisksTest is GRETVaultCase {
     }
 }
 
-/// @notice Recovery allocation remains a risk; empty-supply liquidation is now prohibited.
-contract GRETVaultRecoveryRisksTest is GRETVaultCase {
+/// @notice Late recoveries during liquidation are shared pro rata, not targeted to whoever took a
+/// cut, and a removed component cannot rejoin the liquidation.
+contract GRETVaultRecoveryLimitationsTest is GRETVaultCase {
     function _both() private {
         vm.prank(BOB);
         vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
@@ -318,7 +319,7 @@ contract GRETVaultRecoveryRisksTest is GRETVaultCase {
         vault.convertToClaims(SHARE);
     }
 
-    function test_R04_automaticRecoveryIsNotTargetedCompensation() public {
+    function test_automaticRecoveryIsNotTargetedCompensation() public {
         _both();
         uint256 aliceBefore = faulty.balanceOf(ALICE);
         uint256 bobBefore = faulty.balanceOf(BOB);
@@ -339,7 +340,7 @@ contract GRETVaultRecoveryRisksTest is GRETVaultCase {
         assertEq(faulty.balanceOf(BOB) - bobBefore, 3.75e18);
     }
 
-    function testFuzz_R04_recoveryRewardsPreviouslyPaidHolder(uint256 k, uint256 cutBps) public {
+    function testFuzz_recoveryRewardsPreviouslyPaidHolder(uint256 k, uint256 cutBps) public {
         k = bound(k, 1, 100);
         cutBps = bound(cutBps, 1, 9_999);
         vm.prank(BOB);
@@ -366,8 +367,7 @@ contract GRETVaultRecoveryRisksTest is GRETVaultCase {
         assertLe(faulty.balanceOf(address(vault)), 1);
     }
 
-
-    function test_R04_removedRecoveryCannotRejoinLiquidation() public {
+    function test_removedRecoveryCannotRejoinLiquidation() public {
         faulty.slash(address(vault), 5e18);
         vm.startPrank(GOVERNANCE);
         vault.removeComponent(address(faulty));

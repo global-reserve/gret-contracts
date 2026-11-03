@@ -91,7 +91,7 @@ contract ToggleNoOpToken is ERC20 {
     }
 }
 
-contract Review2ExitsTest is GRETVaultCase {
+contract GRETVaultExitsTest is GRETVaultCase {
     uint256 internal constant MAX = type(uint256).max;
 
     // ---------------------------------------------------------------------------------------------
@@ -136,10 +136,10 @@ contract Review2ExitsTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-L05: a positive redemption fee keeps the supply from ever returning to zero
+    // A positive redemption fee keeps the supply from ever returning to zero
     // ---------------------------------------------------------------------------------------------
 
-    function test_L05_soleHolderAndRecipientKeepsOneGret() public {
+    function test_soleHolderAndRecipientKeepsOneGret() public {
         vm.prank(ALICE);
         vault.mint(19e18, _pair(MAX, MAX), 0, 0);
         _setRedeemFee(vault, ALICE, 500);
@@ -169,7 +169,7 @@ contract Review2ExitsTest is GRETVaultCase {
         assertEq(vault.totalSupply(), 0, "supply empties only after the fee cut");
     }
 
-    function test_L05_handOverDoesNotFreeLastHolder() public {
+    function test_handOverDoesNotFreeLastHolder() public {
         vm.prank(ALICE);
         vault.mint(19e18, _pair(MAX, MAX), 0, 0);
         _setRedeemFee(vault, CAROL, 500);
@@ -187,7 +187,7 @@ contract Review2ExitsTest is GRETVaultCase {
         vault.redeem(1e18, _pair(0, 0), 0);
     }
 
-    function testFuzz_L05_positiveRedeemFeeNeverEmptiesSupply(uint256 fee, uint256 extra, uint256 x) public {
+    function testFuzz_positiveRedeemFeeNeverEmptiesSupply(uint256 fee, uint256 extra, uint256 x) public {
         fee = bound(fee, 1, 500);
         extra = bound(extra, 0, 1000e18);
         if (extra != 0) {
@@ -211,7 +211,7 @@ contract Review2ExitsTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-L01: try/catch catches a revert in balanceOf, not malformed return data or missing code
+    // try/catch catches a revert in balanceOf, not malformed return data or missing code
     // ---------------------------------------------------------------------------------------------
 
     function _redeemCall(GRETVault v) internal returns (bool ok, bytes memory ret) {
@@ -219,7 +219,7 @@ contract Review2ExitsTest is GRETVaultCase {
         (ok, ret) = address(v).call(abi.encodeCall(GRETVault.redeem, (SHARE, _pair(0, 0), 0)));
     }
 
-    function test_L01_redeemFailsClosedOnBrokenBalanceRead() public {
+    function test_redeemFailsClosedOnBrokenBalanceRead() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
         uint256 snap = vm.snapshotState();
 
@@ -267,7 +267,7 @@ contract Review2ExitsTest is GRETVaultCase {
         assertTrue(ok, "after the write-off, redeem works without M");
     }
 
-    function test_L01_liquidationClaimFailsClosedOnBrokenBalanceRead() public {
+    function test_liquidationClaimFailsClosedOnBrokenBalanceRead() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
         _liquidateBoth(v);
         uint256 snap = vm.snapshotState();
@@ -308,7 +308,7 @@ contract Review2ExitsTest is GRETVaultCase {
         assertFalse(ok, "claim reverts without code");
     }
 
-    function test_L01_guardMalformedBalanceStopsLossySwaps() public {
+    function test_guardMalformedBalanceStopsLossySwaps() public {
         OddBalanceToken m = new OddBalanceToken();
         MockERC20 b = new MockERC20("B", "B", 18);
         IERC20[] memory basket = new IERC20[](3);
@@ -372,7 +372,7 @@ contract Review2ExitsTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-L08: the caller's gas limit can force the catch branch of an expensive balanceOf
+    // The caller's gas limit can force the catch branch of an expensive balanceOf
     // ---------------------------------------------------------------------------------------------
 
     function _scanClaim(GRETVault v, OddBalanceToken m, uint256 from, uint256 to, uint256 step, bool cool)
@@ -402,7 +402,7 @@ contract Review2ExitsTest is GRETVaultCase {
         }
     }
 
-    function test_L08_expensiveBalanceOfClaimCannotOverpay() public {
+    function test_expensiveBalanceOfClaimCannotOverpay() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
         _liquidateBoth(v);
         m.slash(address(v), 5e18); // shortfall: 5e18 left for 10e18 of rights
@@ -415,7 +415,7 @@ contract Review2ExitsTest is GRETVaultCase {
         assertEq(highestFull, 0);
     }
 
-    function test_L08_expensiveBalanceOfClaimCannotOverpayColdState() public {
+    function test_expensiveBalanceOfClaimCannotOverpayColdState() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
         _liquidateBoth(v);
         m.slash(address(v), 5e18);
@@ -428,7 +428,7 @@ contract Review2ExitsTest is GRETVaultCase {
         assertEq(highestFull, 0);
     }
 
-    function test_L08_realisticBalanceOfCannotBeStarved() public {
+    function test_realisticBalanceOfCannotBeStarved() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
         _liquidateBoth(v);
         m.slash(address(v), 5e18);
@@ -439,7 +439,7 @@ contract Review2ExitsTest is GRETVaultCase {
         assertGt(proRata + proRata2, 0);
     }
 
-    function test_L08_expensiveBalanceOfRedeemCannotSkipLoss() public {
+    function test_expensiveBalanceOfRedeemCannotSkipLoss() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
         m.slash(address(v), 5e18); // loss: the current balance is only 5e18
         m.setBurn(12_000_000);
@@ -472,7 +472,7 @@ contract Review2ExitsTest is GRETVaultCase {
 
     /// @dev 11 components (10 mocks + the expensive one last, the attacker's best position): the
     /// expensive balance reads must fail closed, while a skipping exit stays available.
-    function test_L08_elevenComponentRedeemNeedsMoreThanTheCap() public {
+    function test_elevenComponentRedeemNeedsMoreThanTheCap() public {
         OddBalanceToken m = new OddBalanceToken();
         IERC20[] memory basket = new IERC20[](11);
         uint256[] memory initial = new uint256[](11);
@@ -533,10 +533,10 @@ contract Review2ExitsTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-I01: P-2 cannot see a claim that a no-op transfer left undelivered
+    // A claim that a no-op transfer left undelivered looks fully paid
     // ---------------------------------------------------------------------------------------------
 
-    function test_I01_noOpClaimIsInvisibleToP2() public {
+    function test_noOpClaimLooksFullyPaid() public {
         ToggleNoOpToken n = new ToggleNoOpToken();
         GRETVault v = new GRETVault(_oneToken(n), _one(100e18), GOVERNANCE);
         for (uint256 i; i < 2; ++i) {
@@ -587,7 +587,7 @@ contract Review2ExitsTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-L04: a JIT mint before the last holder's redeemSkipping takes the skipped share
+    // A JIT mint before the last holder's redeemSkipping takes the skipped share
     // ---------------------------------------------------------------------------------------------
 
     function _aliceSkipsF() internal returns (uint256[] memory paid) {
@@ -597,7 +597,7 @@ contract Review2ExitsTest is GRETVaultCase {
         paid = vault.redeemSkipping(SHARE, _pair(0, 0), skipped, 0);
     }
 
-    function test_L04_jitMintCapturesSkippedShare() public {
+    function test_jitMintCapturesSkippedShare() public {
         faulty.setBlocked(ALICE, true); // the issuer blocks Alice, the only holder
         uint256 snap = vm.snapshotState();
 
@@ -637,7 +637,7 @@ contract Review2ExitsTest is GRETVaultCase {
         assertEq(faulty.rawBalanceOf(address(vault)), 5e18);
     }
 
-    function test_L04_jitShareWhenSkipperIsNotLast() public {
+    function test_jitShareWhenSkipperIsNotLast() public {
         vm.prank(BOB);
         vault.mint(SHARE, _pair(MAX, MAX), SHARE, 0);
         faulty.setBlocked(ALICE, true);

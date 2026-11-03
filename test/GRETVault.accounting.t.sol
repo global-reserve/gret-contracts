@@ -13,11 +13,11 @@ import {MockFaultyERC20} from "../contracts/mocks/MockFaultyERC20.sol";
 import {MockAggregator} from "../contracts/mocks/MockAggregator.sol";
 import {ChainlinkPriceGuard, IChainlinkFeed} from "../contracts/ChainlinkPriceGuard.sol";
 
-/// @dev Audit-only model: transfers debit the requested amount and deliver up to ten units less.
-contract AuditShortfallToken is ERC20 {
+/// @dev Test model: transfers debit the requested amount and deliver up to ten units less.
+contract ShortfallToken is ERC20 {
     uint256 public shortfall;
 
-    constructor() ERC20("Audit shortfall", "ASF") {}
+    constructor() ERC20("Shortfall", "SHF") {}
 
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
@@ -42,9 +42,9 @@ contract AuditShortfallToken is ERC20 {
 }
 
 /// @notice Economic properties across receipt rounding, live losses, donations and fees.
-/// @dev Complements the existing invariant handler, whose transfer models deliver exact amounts
+/// @dev Complements the invariant handler, whose transfer models deliver exact amounts
 /// and whose losses are recognized immediately. These tokens are hypothetical, not issuer models.
-contract GRETVaultAuditAccountingTest is Test {
+contract GRETVaultAccountingTest is Test {
     address private constant GOVERNANCE = address(0x60F);
     address private constant ALICE = address(0xA11CE);
     address private constant BOB = address(0xB0B);
@@ -53,7 +53,7 @@ contract GRETVaultAuditAccountingTest is Test {
 
     GRETVault private vault;
     MockERC20 private healthy;
-    AuditShortfallToken private rounding;
+    ShortfallToken private rounding;
 
     function testFuzz_shortfallsLossesDonationsAndFeesNeverDiluteOrProfit(
         uint256 initial,
@@ -101,8 +101,8 @@ contract GRETVaultAuditAccountingTest is Test {
     }
 
     function _deploy(uint256 initial) private {
-        healthy = new MockERC20("Audit healthy", "AHL", 18);
-        rounding = new AuditShortfallToken();
+        healthy = new MockERC20("Healthy", "HLT", 18);
+        rounding = new ShortfallToken();
         IERC20[] memory basket = new IERC20[](2);
         basket[0] = healthy;
         basket[1] = rounding;

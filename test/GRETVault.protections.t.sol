@@ -76,8 +76,8 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(vault.balanceOf(ALICE), SHARE);
     }
 
-    // Controls for stable risk IDs closed by live-balance accounting.
-    function test_R08_controlLiveDividendCannotBeCaptured() public {
+    // Issues that live-balance accounting closes.
+    function test_liveDividendCannotBeCaptured() public {
         healthy.mint(address(vault), 100e18);
         uint256 before = healthy.balanceOf(BOB);
         vm.startPrank(BOB);
@@ -88,7 +88,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(vault.reserves()[0], 102e18);
     }
 
-    function test_R14_controlBrokenBalanceCannotOverpayFirstRedeemer() public {
+    function test_brokenBalanceCannotOverpayFirstRedeemer() public {
         vm.prank(BOB);
         vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0);
         faulty.slash(address(vault), 5e18);
@@ -100,7 +100,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(vault.balanceOf(ALICE), SHARE);
     }
 
-    function test_R25_controlEmptyLiquidationIsRejected() public {
+    function test_emptyLiquidationIsRejected() public {
         vm.prank(ALICE);
         vault.redeem(SHARE, _pair(0, 0), 0);
         vm.expectRevert(GRETVault.NoSupply.selector);

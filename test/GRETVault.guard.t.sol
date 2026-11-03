@@ -97,7 +97,7 @@ contract SwitchableGuard is IPriceGuard {
     }
 }
 
-contract Review2GuardTest is GRETVaultCase {
+contract GRETVaultGuardTest is GRETVaultCase {
     uint256 internal constant W = 7 days;
     MockAggregator internal hFeed;
     MockAggregator internal fFeed;
@@ -190,11 +190,11 @@ contract Review2GuardTest is GRETVaultCase {
     }
 
     // ------------------------------------------------------------------------------------------
-    // REVIEW2-M01: a replacement guard starts a fresh weekly budget
+    // A replacement guard starts a fresh weekly budget
     // ------------------------------------------------------------------------------------------
 
     /// Control: one guard, one fixed week.
-    function test_M01_control_singleGuardOneWeek() public {
+    function test_singleGuardOneWeek() public {
         _feeds();
         vm.warp((block.timestamp / W + 1) * W + 1 hours);
         ChainlinkPriceGuard a = _guard();
@@ -207,7 +207,7 @@ contract Review2GuardTest is GRETVaultCase {
     }
 
     /// Control: one guard, across the change of week (documented 4% in a row).
-    function test_M01_control_singleGuardAcrossWeekChange() public {
+    function test_singleGuardAcrossWeekChange() public {
         _feeds();
         vm.warp((block.timestamp / W + 1) * W);
         ChainlinkPriceGuard a = _guard();
@@ -225,7 +225,7 @@ contract Review2GuardTest is GRETVaultCase {
 
     /// The rebalancer drains guard A, applies the ready replacement B itself, and drains B, in the
     /// same block and fixed week.
-    function test_M01_replacementSecondBudgetSameFixedWeek() public {
+    function test_replacementSecondBudgetSameFixedWeek() public {
         _feeds();
         vm.warp((block.timestamp / W + 1) * W + 1 hours);
         ChainlinkPriceGuard a = _guard();
@@ -264,7 +264,7 @@ contract Review2GuardTest is GRETVaultCase {
     }
 
     /// A's budget and B's budget at the end of week N, then B's budget again at the start of N+1.
-    function test_M01_replacementThreeBudgetsAcrossWeekChange() public {
+    function test_replacementThreeBudgetsAcrossWeekChange() public {
         _feeds();
         vm.warp((block.timestamp / W + 1) * W);
         ChainlinkPriceGuard a = _guard();
@@ -295,7 +295,7 @@ contract Review2GuardTest is GRETVaultCase {
 
     /// Back-to-back replacements (C proposed in the block B is applied): a closed 7-day window
     /// holds four budgets (A and B in week N, B and C in week N+1). One guard: at most two.
-    function test_M01_chainedReplacementsFourBudgetsInSevenDays() public {
+    function test_chainedReplacementsFourBudgetsInSevenDays() public {
         _feeds();
         vm.warp((block.timestamp / W + 1) * W);
         ChainlinkPriceGuard a = _guard();
@@ -328,10 +328,10 @@ contract Review2GuardTest is GRETVaultCase {
     }
 
     // ------------------------------------------------------------------------------------------
-    // REVIEW2-L02: token decimals are read once, at deployment
+    // Token decimals are read once, at deployment
     // ------------------------------------------------------------------------------------------
 
-    function test_L02_decimalsDownLetsReserveGoForDust() public {
+    function test_decimalsDownLetsReserveGoForDust() public {
         MockERC20 h = new MockERC20("H", "H", 18);
         RedenominatingToken r = new RedenominatingToken(18);
         GRETVault target = _twoTokenVault(h, MockERC20(address(r)), 2e18, 5e18);
@@ -359,7 +359,7 @@ contract Review2GuardTest is GRETVaultCase {
         assertEq(g.weeklyLoss(), 0);
     }
 
-    function test_L02_decimalsUpLetsOtherReservesGoForDust() public {
+    function test_decimalsUpLetsOtherReservesGoForDust() public {
         MockERC20 h = new MockERC20("H", "H", 18);
         RedenominatingToken u = new RedenominatingToken(6);
         GRETVault target = _twoTokenVault(h, MockERC20(address(u)), 2e18, 5e6);
@@ -386,7 +386,7 @@ contract Review2GuardTest is GRETVaultCase {
     }
 
     // ------------------------------------------------------------------------------------------
-    // REVIEW2-L06: swap can buy a written-off component
+    // A written-off component cannot be bought back
     // ------------------------------------------------------------------------------------------
 
     function _writtenOffSetup()
@@ -412,7 +412,7 @@ contract Review2GuardTest is GRETVaultCase {
         assertTrue(target.writtenOff(address(s)));
     }
 
-    function test_L06_writtenOffComponentCannotBeBoughtAtFeedPrice() public {
+    function test_writtenOffComponentCannotBeBoughtAtFeedPrice() public {
         (GRETVault target, MockERC20 h, SenderFreezeToken s, ChainlinkPriceGuard g) = _writtenOffSetup();
         vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentExcluded.selector, address(s)));
         vm.prank(REBALANCER);
@@ -422,7 +422,7 @@ contract Review2GuardTest is GRETVaultCase {
         assertEq(target.reserves()[1], 0);
     }
 
-    function test_L06_threeWeiPurchaseCannotUndoWriteOff() public {
+    function test_threeWeiPurchaseCannotUndoWriteOff() public {
         (GRETVault target, MockERC20 h, SenderFreezeToken s,) = _writtenOffSetup();
         vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentExcluded.selector, address(s)));
         vm.prank(REBALANCER);
@@ -434,7 +434,11 @@ contract Review2GuardTest is GRETVaultCase {
         assertEq(paid[1], 0);
     }
 
-    function test_L07_laggingFeedLossIsOnTopOfTheWeeklyLimit() public {
+    // ------------------------------------------------------------------------------------------
+    // A feed that lags the market adds its error to the guard's limits
+    // ------------------------------------------------------------------------------------------
+
+    function test_laggingFeedLossIsOnTopOfTheWeeklyLimit() public {
         _feeds();
         vm.warp((block.timestamp / W + 1) * W + 1 hours);
         ChainlinkPriceGuard g = _guard();
@@ -471,7 +475,7 @@ contract Review2GuardTest is GRETVaultCase {
 
     /// One swap inside the per-swap limit at the feed loses about 3.9% of the value sold at market
     /// prices when the bought token's feed is 1.9% above its market.
-    function test_L07_perSwapLimitAtMarketPrices() public {
+    function test_perSwapLimitAtMarketPrices() public {
         _feeds();
         ChainlinkPriceGuard g = _guard();
         _appoint(vault, address(g));
@@ -486,10 +490,10 @@ contract Review2GuardTest is GRETVaultCase {
     }
 
     // ------------------------------------------------------------------------------------------
-    // REVIEW2-I04: the notice binds an address, not behavior
+    // The notice binds an address, not behavior
     // ------------------------------------------------------------------------------------------
 
-    function test_I04_switchableGuardLoosensAfterNotice() public {
+    function test_switchableGuardLoosensAfterNotice() public {
         _feeds();
         SwitchableGuard sw = new SwitchableGuard(address(vault));
         ChainlinkPriceGuard inner = _guardFor(GRETVault(address(sw)), address(healthy), address(faulty), hFeed, fFeed);
@@ -508,7 +512,7 @@ contract Review2GuardTest is GRETVaultCase {
         assertEq(vault.reserves()[0], 0);
     }
 
-    function test_I04_delegationDesignatorPassesCodeCheck() public {
+    function test_delegationDesignatorPassesCodeCheck() public {
         address eoa = address(0x7702);
         vm.etch(eoa, abi.encodePacked(hex"ef0100", address(0xBEEF)));
         assertEq(eoa.code.length, 23);
@@ -517,7 +521,7 @@ contract Review2GuardTest is GRETVaultCase {
         assertEq(vault.pendingPriceGuard(), eoa);
     }
 
-    function test_I04_eip7702DelegatedGuardRuns() public {
+    function test_eip7702DelegatedGuardRuns() public {
         _feeds();
         address eoa = makeAddr("guard-eoa");
         SwitchableGuardImpl impl = new SwitchableGuardImpl();

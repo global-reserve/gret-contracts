@@ -37,26 +37,22 @@ time as the deep, fork or rehearsal tests.
   invariant and case tests.
 - Mocks do not prove compatibility with the real issuers; the mainnet fork tests do.
 - A design decision is not closed until [docs/SPECIFICATION.md](docs/SPECIFICATION.md) says
-  so. A risk is accepted only with an entry in [docs/ACCEPTED_RISKS.md](docs/ACCEPTED_RISKS.md)
-  and a test named after its ID in `test/GRETVault.risks.t.sol`; a fixed issue gets a test in
-  `test/GRETVault.protections.t.sol`.
+  so. A limitation is accepted only when the specification describes it under "Known
+  limitations" and a test in `test/GRETVault.limitations.t.sol` reproduces it; a fixed issue
+  gets a test in `test/GRETVault.protections.t.sol`.
 
 ## Recording security reviews
 
-Keep internal review results in the existing documents and tests, rather than creating a
-dated report and a new test file for each pass:
+References go one way: a review cites the specification and the code it reviewed; the
+specification and the code never cite a review.
 
-- `docs/ACCEPTED_RISKS.md` is the canonical finding register. Compare against existing entries
-  before adding a finding; extend an existing risk when appropriate. Keep confirmed findings
-  pending a decision separate from accepted risks, with stable IDs, prerequisites, impact,
-  proposed mitigation and links to executable evidence. Record the review date, source
-  revision, scope, limitations and checks alongside the findings.
-- `docs/SPECIFICATION.md` describes the current behavior and closed design decisions. Link
-  to the register for finding details instead of copying a review report into it.
-- Add reproduction tests and controls to existing files by subject. Risk reproductions,
-  including pending findings, belong in `test/GRETVault.risks.t.sol`; use another existing
-  subject-specific suite when it fits better. Preserve the distinction between reproducing
-  an issue and testing its fix.
-- Preserve existing dated reports as historical records. New internal review passes should
-  update the register and existing suites; a separate report needs a specific reason, such
-  as an external auditor's deliverable or an explicit request.
+- Each review is one report in `docs/audits/`, named with its date and reviewer. It states
+  the commit it reviewed, its scope, method and limitations, and its findings with their
+  evidence. Once published, a report is not rewritten to follow later code: a later review
+  writes a new report.
+- An accepted finding becomes a known limitation in the specification, written in its own
+  words, without report or finding IDs. A finding judged invalid needs no entry.
+- Add tests to the existing suites by subject: reproductions of accepted limitations in
+  `test/GRETVault.limitations.t.sol`, regression tests of fixed issues in
+  `test/GRETVault.protections.t.sol`. Preserve the distinction between reproducing an issue
+  and testing its fix.

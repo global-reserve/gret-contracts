@@ -11,9 +11,6 @@ import {MockFaultyERC20} from "../contracts/mocks/MockFaultyERC20.sol";
 import {MockPriceGuard} from "../contracts/mocks/MockPriceGuard.sol";
 import {GRETVaultCase} from "./helpers/GRETVaultCase.sol";
 
-/// @dev Governance and economics findings of the second security review
-/// (docs/audits/2026-10-28-GRETVault-review.md).
-
 /// Executes a ready write-off and mints in the same transaction.
 contract WriteOffBundler {
     function bundle(GRETVault vault, address token, uint256 shares) external returns (uint256 minted) {
@@ -58,9 +55,9 @@ contract Junk {
     function balanceOf(address) external pure returns (uint256) { return 0; }
 }
 
-contract Review2GovernanceTest is GRETVaultCase {
+contract GRETVaultGovernanceTest is GRETVaultCase {
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-L03: a ready write-off executed atomically with a mint
+    // A ready write-off executed atomically with a mint
     // ---------------------------------------------------------------------------------------------
 
     function _freezeAndProposeWriteOff() internal returns (uint256 readyAt) {
@@ -74,7 +71,7 @@ contract Review2GovernanceTest is GRETVaultCase {
         readyAt = vault.writeOffReadyAt(address(faulty));
     }
 
-    function test_L03_atomicWriteOffAndMintBeatsReactivePause() public {
+    function test_atomicWriteOffAndMintBeatsReactivePause() public {
         uint256 readyAt = _freezeAndProposeWriteOff();
         vm.warp(readyAt);
         WriteOffBundler entrant = new WriteOffBundler();
@@ -105,7 +102,7 @@ contract Review2GovernanceTest is GRETVaultCase {
     }
 
     /// The entry is a free option: if F never recovers, the entrant leaves with exactly what it paid.
-    function test_L03_entrantLosesNothingIfNoRecovery() public {
+    function test_entrantLosesNothingIfNoRecovery() public {
         uint256 readyAt = _freezeAndProposeWriteOff();
         vm.warp(readyAt);
         WriteOffBundler entrant = new WriteOffBundler();
@@ -117,7 +114,7 @@ contract Review2GovernanceTest is GRETVaultCase {
     }
 
     /// An entrant who mints k times the supply takes k/(k+1) of the recovered component.
-    function testFuzz_L03_captureIsKOverKPlusOne(uint256 k) public {
+    function testFuzz_captureIsKOverKPlusOne(uint256 k) public {
         k = bound(k, 1, 1000);
         uint256 readyAt = _freezeAndProposeWriteOff();
         vm.warp(readyAt);
@@ -134,7 +131,7 @@ contract Review2GovernanceTest is GRETVaultCase {
 
     /// Control: a pause before readyAt stops the bundle; the write-off can still be executed alone,
     /// and reactivation returns all of F to Alice.
-    function test_L03_controlPauseBeforeReadyAt() public {
+    function test_pauseBeforeReadyAtStopsBundle() public {
         uint256 readyAt = _freezeAndProposeWriteOff();
         vm.warp(readyAt - 1);
         vm.prank(GOVERNANCE);
@@ -155,7 +152,7 @@ contract Review2GovernanceTest is GRETVaultCase {
     }
 
     /// Variant: F recovers after readyAt and governance's public cancelWriteOff is front-run.
-    function test_L03_frontRunsCancelAfterRecovery() public {
+    function test_frontRunsCancelAfterRecovery() public {
         uint256 readyAt = _freezeAndProposeWriteOff();
         vm.warp(readyAt + 1 days);
         faulty.setBlocked(address(vault), false); // recovered; the write-off is still pending and ready
@@ -172,7 +169,7 @@ contract Review2GovernanceTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-L09: basketVersion bumps revert prepared redemptions during a notice
+    // basketVersion bumps revert prepared redemptions during a notice
     // ---------------------------------------------------------------------------------------------
 
     function _announceJunk(uint256 n) internal returns (address[] memory junk) {
@@ -185,7 +182,7 @@ contract Review2GovernanceTest is GRETVaultCase {
         vm.stopPrank();
     }
 
-    function test_L09_versionBumpsRevertPreparedRedemptions() public {
+    function test_versionBumpsRevertPreparedRedemptions() public {
         vm.prank(BOB);
         vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
         uint256 n = 10;
@@ -231,7 +228,7 @@ contract Review2GovernanceTest is GRETVaultCase {
 
     /// Junk added inside its execution window can sit in the basket with no reserve and be removed
     /// at once at any later time, so the bump capacity can be stockpiled long before a notice.
-    function test_L09_stockpiledJunkBumpsLongAfter() public {
+    function test_stockpiledJunkBumpsLongAfter() public {
         vm.prank(BOB);
         vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
         address[] memory junk = _announceJunk(3);
@@ -257,7 +254,7 @@ contract Review2GovernanceTest is GRETVaultCase {
 
     /// Mitigation check: a wallet that reads the version at execution is not affected by bumps in
     /// earlier transactions.
-    function test_L09_walletReadingVersionAtExecutionIsImmune() public {
+    function test_walletReadingVersionAtExecutionIsImmune() public {
         VersionReadingWallet wallet = new VersionReadingWallet();
         healthy.mint(address(wallet), 2e18);
         faulty.mint(address(wallet), 5e18);
@@ -273,7 +270,7 @@ contract Review2GovernanceTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-I02: redeem before a losing swap and mint after it
+    // Redeem before a losing swap and mint after it
     // ---------------------------------------------------------------------------------------------
 
     function _gretValue(ChainlinkPriceGuard guard, uint256 shares) internal view returns (uint256) {
@@ -293,7 +290,7 @@ contract Review2GovernanceTest is GRETVaultCase {
         vault.swap(address(healthy), 1e18, address(faulty), 246e16);
     }
 
-    function test_I02_swapLossSharedWithoutDodge() public {
+    function test_swapLossSharedWithoutDodge() public {
         vm.prank(BOB);
         vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
         ChainlinkPriceGuard guard = _chainlinkGuard();
@@ -305,7 +302,7 @@ contract Review2GovernanceTest is GRETVaultCase {
         assertEq(guard.weeklyLoss(), 2e15);
     }
 
-    function test_I02_swapLossDodgedByRedeemThenMint() public {
+    function test_swapLossDodgedByRedeemThenMint() public {
         vm.prank(BOB);
         vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
         ChainlinkPriceGuard guard = _chainlinkGuard();
@@ -323,10 +320,10 @@ contract Review2GovernanceTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-I03 control: live balances follow addresses after an index shift
+    // Control: live balances follow addresses after an index shift
     // ---------------------------------------------------------------------------------------------
 
-    function test_I03_liveBalancesFollowComponentsAfterRemoval() public {
+    function test_liveBalancesFollowComponentsAfterRemoval() public {
         MockFaultyERC20 a = new MockFaultyERC20("A", "A", 18);
         MockFaultyERC20 b = new MockFaultyERC20("B", "B", 18);
         MockFaultyERC20 c = new MockFaultyERC20("C", "C", 18);
@@ -357,10 +354,10 @@ contract Review2GovernanceTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-I05: the six proposal events and their readyAt
+    // The six proposal events and their readyAt
     // ---------------------------------------------------------------------------------------------
 
-    function test_I05_proposalEventsCarryReadyAt() public {
+    function test_proposalEventsCarryReadyAt() public {
         uint256 readyAt = block.timestamp + 7 days;
         MockPriceGuard guard = new MockPriceGuard();
         Junk token = new Junk();

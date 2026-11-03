@@ -384,3 +384,30 @@ contract GRETVaultInvariantTest is Test {
         if (!vault.liquidationActive()) assertTrue(shares == 0 || shares >= vault.MIN_SUPPLY());
     }
 }
+
+/// @notice Start in liquidation with two converted holders, an excluded component and
+/// a consumed claim, so every generated sequence exercises recovery and pending rights.
+contract GRETVaultLiquidationInvariantTest is GRETVaultInvariantTest {
+    function setUp() public override {
+        super.setUp();
+        handler.mint(1, 1e18);
+        handler.component(2, 2);
+        handler.liquidate(0);
+        handler.convert(0, 1e18);
+        handler.convert(1, 1e18);
+        handler.claim(0, 0);
+    }
+}
+
+/// @notice Start with income, a loss, an exclusion and a new inactive component; later
+/// operations must conserve physical assets.
+contract GRETVaultChangedBalancesInvariantTest is GRETVaultInvariantTest {
+    function setUp() public override {
+        super.setUp();
+        handler.donate(0, 50e18);
+        handler.slash(1, 40_000);
+        handler.component(2, 2);
+        handler.changeBasket(true);
+        handler.donate(3, 1e18);
+    }
+}

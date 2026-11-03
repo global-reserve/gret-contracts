@@ -8,10 +8,10 @@ import {GRETVault} from "../contracts/GRETVault.sol";
 import {MockERC20} from "../contracts/mocks/MockERC20.sol";
 import {MockPriceGuard} from "../contracts/mocks/MockPriceGuard.sol";
 
-/// @notice Audit regression: removing any position must preserve token-address accounting.
+/// @notice Removing any position must preserve token-address accounting.
 /// @dev The permissive guard isolates basket bookkeeping; this does not test swap pricing or
 /// compatibility with the real issuers. The expected ledger never reads the vault's reserves.
-contract GRETVaultAuditGovernanceTest is Test {
+contract GRETVaultComponentsTest is Test {
     address private constant GOVERNANCE = address(0x60F);
     address private constant REBALANCER = address(0x5EB);
     address private constant ALICE = address(0xA11CE);
@@ -27,7 +27,7 @@ contract GRETVaultAuditGovernanceTest is Test {
         IERC20[] memory basket = new IERC20[](4);
         uint256[] memory initial = new uint256[](4);
         for (uint256 i; i < 4; ++i) {
-            MockERC20 token = new MockERC20("Audit component", "AC", 18);
+            MockERC20 token = new MockERC20("Component", "CMP", 18);
             basket[i] = token;
             order.push(address(token));
             initial[i] = (i + 1) * SHARE;

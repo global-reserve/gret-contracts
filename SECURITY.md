@@ -29,12 +29,12 @@ Out of scope:
 
 - The test mocks in `contracts/mocks/` and the test suites.
 - Vulnerabilities in the component tokens themselves, which belong to their issuers.
-- The risks already accepted and documented in
-  [`docs/ACCEPTED_RISKS.md`](docs/ACCEPTED_RISKS.md).
+- The known limitations described in
+  [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md#known-limitations).
 
 ## Status
 
 The contracts have had internal reviews, not an independent audit. Issues that were fixed
-are not listed; every risk that was accepted, with its reason and mitigation, is in
-[`docs/ACCEPTED_RISKS.md`](docs/ACCEPTED_RISKS.md). Nothing so far clears the vault for
-material third-party capital.
+are not listed; the limitations accepted by design are described in
+[`docs/SPECIFICATION.md`](docs/SPECIFICATION.md#known-limitations). Nothing so far clears the
+vault for material third-party capital.

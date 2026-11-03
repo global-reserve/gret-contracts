@@ -7,8 +7,7 @@
 Smart contracts for **Global Reserve Token (GRET)**: an ERC-20 share of a basket of tokenized
 assets on Ethereum, minted and redeemed in kind.
 
-**[Website](https://grt.finance)** · **[Guide (PDF)](docs/GRETVault-explained.pdf)** ·
-[Specification](docs/SPECIFICATION.md) · [Accepted risks](docs/ACCEPTED_RISKS.md)
+**[Website](https://grt.finance)** · [Specification](docs/SPECIFICATION.md)
 
 > [!WARNING]
 > **Not independently audited.** The vault is deployed on Ethereum mainnet as a pilot with the
@@ -59,8 +58,7 @@ flowchart TB
 
 Only `GRETVault` holds funds. The price guard can only refuse a swap. Governance and the
 rebalancer are addresses to the vault, so what stands behind them can change without
-touching it. The [guide](docs/GRETVault-explained.pdf) has a diagram of every contract
-involved; the [specification](docs/SPECIFICATION.md) is authoritative for current code.
+touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the current code.
 
 | Contract | Description |
 | --- | --- |
@@ -72,13 +70,8 @@ involved; the [specification](docs/SPECIFICATION.md) is authoritative for curren
 
 | Document | Contents |
 | --- | --- |
-| [Specification](docs/SPECIFICATION.md) | Design, rules, implementation details, tests and the pilot |
-| [Accepted risks](docs/ACCEPTED_RISKS.md) | Every accepted risk with its reason and mitigation, and governance's operating policy |
-| [Guide (PDF)](docs/GRETVault-explained.pdf) | How the contracts work, in plain language, with diagrams and examples |
-| [Mainnet pilot](docs/PILOT.md) | Steps to deploy the vault and make the first mint |
-| [Security review](docs/audits/2026-10-27-GRETVault-review.md) | AI-assisted internal review of October 27, 2026: scope, method, results and the tests it added |
-| [Second security review](docs/audits/2026-10-28-GRETVault-review.md) | AI-assisted internal review of October 28, 2026, made apart from the first: 15 findings and how each was resolved |
-| [Third security review](docs/audits/2026-10-29-GRETVault-review.md) | AI-assisted review of October 29, 2026, by Gemini: accounting, liquidation and governance, with no high-severity defects found |
+| [Specification](docs/SPECIFICATION.md) | Design, rules, implementation details and known limitations |
+| [Mainnet pilot](docs/PILOT.md) | Steps to deploy the vault and make the first mint, and the record of the October 27 deployment |
 | [Security policy](SECURITY.md) | How to report a vulnerability |
 | [Contributing](CONTRIBUTING.md) | Setup, what to run for each change and conventions |
 | [Code of conduct](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
@@ -91,7 +84,7 @@ involved; the [specification](docs/SPECIFICATION.md) is authoritative for curren
 
 Basket at deployment, in the order of `components()`, with the amounts in the first GRET from
 `initialAmounts()`. Addresses verified against each issuer's official sources; see the
-[specification](docs/SPECIFICATION.md#mainnet-pilot).
+[pilot guide](docs/PILOT.md#october-27-2026-deployment).
 
 | # | Token | Asset | Address | In 1 GRET |
 | ---: | --- | --- | --- | ---: |
@@ -231,12 +224,16 @@ test/ChainlinkPriceGuard.fuzz.t.sol  Fuzzing of the weekly loss limit
 test/GRETVault.fees.ts               Mint and redemption fees
 test/GRETVault.adversarial.ts        Reentrancy, non-standard tokens and issuer actions
 test/GRETVault.protections.t.sol     Attacks and failures the vault refuses or lets holders get around
-test/GRETVault.risks.t.sol           One case per accepted risk, named after its ID
+test/GRETVault.limitations.t.sol     One case per known limitation in the specification
+test/GRETVault.accounting.t.sol      Live balances with short deliveries, losses, donations and fees
+test/GRETVault.components.t.sol      Component removal keeps balances tied to token addresses
+test/GRETVault.exits.t.sol           Exits with a redemption fee, unreadable balances and skipped components
+test/GRETVault.governance.t.sol      Write-offs, basket versions, swap losses and proposal events
+test/GRETVault.guard.t.sol           Guard replacement, decimals, written-off components and lagging feeds
+test/GRETVault.liquidation.t.sol     Liquidation conservation and shortfall claims under fuzzing
 test/GRETVault.fuzz.t.sol            Property fuzzing in Solidity
-test/GRETVault.invariant.t.sol       Invariants over random sequences of every operation
+test/GRETVault.invariant.t.sol       Invariants over random sequences of every operation, from several starting states
 test/GRETVault.invariants.ts         Deterministic random sequences with invariants
-test/GRETVault.audit-*.t.sol         Property tests added by the October 27, 2026 security review
-test/GRETVault.review2-*.t.sol       Tests of the October 28, 2026 review's findings and new invariants
 test/MockERC20.ts                    Tests of the mocks with 18 and 8 decimals
 test/helpers/basket.ts               Test basket shared by the vault tests
 test/helpers/GRETVaultCase.sol       Setup and adverse tokens shared by the Solidity cases
@@ -248,11 +245,8 @@ scripts/pilot/plan.ts                Pilot transactions and checks
 scripts/pilot/server.ts, index.html  Local page to sign the pilot with MetaMask
 assets/gret-logo.svg, -256.png       GRET logo (SVG, and 256 px PNG for wallets and explorers)
 hardhat.config.ts                    Compiler, plugins and local networks
-docs/SPECIFICATION.md                Specification: design, rules, implementation details, tests and the pilot
-docs/ACCEPTED_RISKS.md               Accepted risks, their reasons and governance's operating policy
-docs/GRETVault-explained.pdf, .html  Plain-language guide to the contracts (PDF and its HTML source)
-docs/PILOT.md                        Mainnet pilot guide
-docs/audits/                         Security reviews and the mainnet state they checked
+docs/SPECIFICATION.md                Specification: design, rules, implementation details and known limitations
+docs/PILOT.md                        Mainnet pilot guide and record of the October 27 deployment
 .github/workflows/ci.yml             Continuous integration: compile, type-check and test
 CONTRIBUTING.md                      Setup, what to run for each change and conventions
 CODE_OF_CONDUCT.md                   Contributor Covenant 2.1
@@ -291,13 +285,9 @@ it for reentrancy guards that are cleared at the end of the call is safe.
 
 ## Security
 
-The contracts have had internal reviews, not an independent audit; the three latest, all
-AI-assisted, are in [docs/audits/](docs/audits/): of
-[October 27](docs/audits/2026-10-27-GRETVault-review.md),
-[October 28](docs/audits/2026-10-28-GRETVault-review.md) and
-[October 29, 2026](docs/audits/2026-10-29-GRETVault-review.md). Report vulnerabilities
-privately as described in [SECURITY.md](SECURITY.md); the risks that were consciously
-accepted are in [docs/ACCEPTED_RISKS.md](docs/ACCEPTED_RISKS.md).
+The contracts have had internal AI-assisted reviews, not an independent audit. Report
+vulnerabilities privately as described in [SECURITY.md](SECURITY.md); the limitations accepted
+by design are described in the [specification](docs/SPECIFICATION.md#known-limitations).
 
 ## License
 

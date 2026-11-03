@@ -23,8 +23,8 @@ import {IPriceGuard} from "./IPriceGuard.sol";
 /// be written off after the same wait.
 /// Governance can charge mint and redemption fees in GRET, at most 5% each; raising them waits too.
 /// It can pause minting at once, but never redemption.
-/// @dev Not independently audited. The specification is in docs/SPECIFICATION.md and the
-/// accepted risks in docs/ACCEPTED_RISKS.md.
+/// @dev Not independently audited. The specification, including the known limitations, is in
+/// docs/SPECIFICATION.md.
 contract GRETVault is ERC20, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
@@ -469,7 +469,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// @dev Both components must be active. The vault measures receipts with mint
     /// tolerance and the guard prices them. Selling a whole balance
     /// stops mint from asking for that component. Removal still requires the empty/dust rule;
-    /// a donation arriving before removal can prevent it (R-16).
+    /// a donation arriving before removal can prevent it.
     function swap(address sell, uint256 sellAmount, address buy, uint256 buyAmount)
         external
         nonReentrant
