@@ -26,7 +26,7 @@ describe("GRETVault: governance evolves without changing the vault", async () =>
     const basket = await deployBasket(viem);
     await basket.vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: basket.alice.account });
     // Only the multisig proposes and executes; the timelock administers itself. Executing must not
-    // be open: anyone could otherwise wrap a ready sync between their own mint and redemption.
+    // be open: anyone could otherwise wrap a ready activation between their own mint and redemption.
     const timelock = await viem.deployContract("TimelockController", [
       TIMELOCK_DELAY,
       [basket.governance.account.address],
@@ -74,7 +74,7 @@ describe("GRETVault: governance evolves without changing the vault", async () =>
 
     assert.equal(await vault.read.governance(), getAddress(timelock.address));
     await viem.assertions.revertWithCustomError(
-      vault.write.sync([tokens[0].address], { account: multisig.account }),
+      vault.write.activateComponent([tokens[0].address], { account: multisig.account }),
       vault,
       "NotGovernance",
     );
@@ -113,23 +113,23 @@ describe("GRETVault: governance evolves without changing the vault", async () =>
     assert.equal(await vault.read.liquidationActive(), true);
   });
 
-  it("only the multisig executes a ready sync, so nobody can wrap it in their own transaction", async () => {
+  it("only the multisig executes a ready activation, so nobody can wrap it in their own transaction", async () => {
     const { vault, tokens, multisig, timelock, bob } = await networkHelpers.loadFixture(timelockFixture);
     await tokens[0].write.mint([vault.address, 10n]);
-    const sync = encodeFunctionData({ abi: vault.abi, functionName: "sync", args: [tokens[0].address] });
+    const activation = encodeFunctionData({ abi: vault.abi, functionName: "activateComponent", args: [tokens[0].address] });
     const operationSalt = toHex(++salt, { size: 32 });
-    await timelock.write.schedule([vault.address, 0n, sync, zeroHash, operationSalt, TIMELOCK_DELAY], {
+    await timelock.write.schedule([vault.address, 0n, activation, zeroHash, operationSalt, TIMELOCK_DELAY], {
       account: multisig.account,
     });
     await networkHelpers.time.increase(TIMELOCK_DELAY);
 
     await viem.assertions.revertWithCustomError(
-      timelock.write.execute([vault.address, 0n, sync, zeroHash, operationSalt], { account: bob.account }),
+      timelock.write.execute([vault.address, 0n, activation, zeroHash, operationSalt], { account: bob.account }),
       timelock,
       "AccessControlUnauthorizedAccount",
     );
-    await timelock.write.execute([vault.address, 0n, sync, zeroHash, operationSalt], { account: multisig.account });
-    assert.equal(await vault.read.componentSurplus([0n]), 0n);
+    await timelock.write.execute([vault.address, 0n, activation, zeroHash, operationSalt], { account: multisig.account });
+    assert.equal(await vault.read.excluded([tokens[0].address]), false);
   });
 
   it("only the timelock's proposers can schedule vault actions", async () => {
@@ -169,9 +169,9 @@ describe("GRETVault: governance evolves without changing the vault", async () =>
       setup,
       carol,
       vault.address,
-      encodeFunctionData({ abi: vault.abi, functionName: "sync", args: [tokens[0].address] }),
+      encodeFunctionData({ abi: vault.abi, functionName: "activateComponent", args: [tokens[0].address] }),
     );
-    assert.equal(await vault.read.componentSurplus([0n]), 0n);
+    assert.equal(await vault.read.excluded([tokens[0].address]), false);
     assert.equal(await vault.read.governance(), getAddress(timelock.address));
   });
 });

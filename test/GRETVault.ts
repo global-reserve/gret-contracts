@@ -16,10 +16,34 @@ import {
   NO_MIN,
 } from "./helpers/basket.js";
 
-describe("GRETVault: basket, mint, normal redemption and sync", async () => {
+describe("GRETVault: basket, mint, normal redemption and live income", async () => {
   const connection = await network.create("hardhat");
   const { viem, networkHelpers } = connection;
   after(() => connection.close());
+
+  it("pilot reports unreadable backing without substituting a zero quote", async () => {
+    const { walletStatus, mintTransactions, redeemTransaction } = await import("../scripts/pilot/plan.js");
+    const [actor] = await viem.getWalletClients();
+    const unavailable = new Error("component balance unavailable");
+    const client = {
+      getBalance: async () => 1n,
+      getCode: async () => "0x" as const,
+      readContract: async ({ functionName }: { functionName: string }) => {
+        if (["reserves", "previewMint", "previewRedeem"].includes(functionName)) throw unavailable;
+        if (functionName === "hasMinted") return true;
+        return 1n;
+      },
+    } as unknown as import("../scripts/pilot/plan.js").Reader;
+    for (const operation of [
+      () => walletStatus(client, actor.account.address, actor.account.address),
+      () => mintTransactions(client, actor.account.address, actor.account.address),
+      () => redeemTransaction(client, actor.account.address, actor.account.address),
+    ]) {
+      await assert.rejects(operation, (error: unknown) => error instanceof Error &&
+        error.cause === unavailable && error.message.includes("previewRedeemSkipping/redeemSkipping") &&
+        error.message.includes("forfeits"));
+    }
+  });
 
   async function basketFixture() {
     return deployBasket(viem);
@@ -397,15 +421,15 @@ describe("GRETVault: basket, mint, normal redemption and sync", async () => {
       assert.deepEqual(await vault.read.previewRedeem([INITIAL_SHARES]), [reserves[0] / 2n, reserves[1] / 2n, reserves[2]]);
     });
 
-    it("redeemSkipping by the last holder turns the skipped share into surplus", async () => {
+    it("redeemSkipping by the last holder leaves the skipped balance for a restart", async () => {
       const basket = await networkHelpers.loadFixture(bootstrappedFixture);
       const { vault, faulty, alice } = basket;
       await faulty.write.setFault([Fault.RevertOnTransfer]);
       await vault.write.redeemSkipping([INITIAL_SHARES, NO_MIN, [faulty.address], 0n], { account: alice.account });
 
       assert.equal(await vault.read.totalSupply(), 0n);
-      assert.deepEqual(await vault.read.reserves(), [0n, 0n, 0n]);
-      assert.equal(await vault.read.componentSurplus([2n]), INITIAL_AMOUNTS[2]);
+      assert.deepEqual(await vault.read.reserves(), [0n, 0n, INITIAL_AMOUNTS[2]]);
+      assert.equal(await faulty.read.balanceOf([vault.address]), INITIAL_AMOUNTS[2]);
     });
 
     it("redeemSkipping checks the skipped list, the minima and who may redeem", async () => {
@@ -537,27 +561,14 @@ describe("GRETVault: basket, mint, normal redemption and sync", async () => {
   });
 
   describe("losses", () => {
-    it("recognizing a loss lowers the reserve to the balance and shares it among all holders", async () => {
-      const { vault, faulty, alice, carol } = await networkHelpers.loadFixture(bootstrappedFixture);
+    it("losses immediately change backing and both quotes without a transaction", async () => {
+      const { vault, faulty } = await networkHelpers.loadFixture(bootstrappedFixture);
       const loss = INITIAL_AMOUNTS[2] / 5n;
       await faulty.write.slash([vault.address, loss]);
-      assert.deepEqual(await vault.read.previewRedeem([INITIAL_SHARES]), INITIAL_AMOUNTS);
-
-      // Anyone may record it; carol holds no GRET.
-      await viem.assertions.emitWithArgs(
-        vault.write.recognizeLoss([2n], { account: carol.account }),
-        vault,
-        "LossRecognized",
-        [2n, loss, INITIAL_AMOUNTS[2] - loss],
-      );
-      assert.equal((await vault.read.reserves())[2], INITIAL_AMOUNTS[2] - loss);
-      assert.deepEqual(await vault.read.previewRedeem([INITIAL_SHARES]), [
-        INITIAL_AMOUNTS[0],
-        INITIAL_AMOUNTS[1],
-        INITIAL_AMOUNTS[2] - loss,
-      ]);
-      const { result } = await vault.simulate.recognizeLoss([2n], { account: alice.account.address });
-      assert.equal(result, 0n);
+      const expected = [INITIAL_AMOUNTS[0], INITIAL_AMOUNTS[1], INITIAL_AMOUNTS[2] - loss];
+      assert.deepEqual(await vault.read.reserves(), expected);
+      assert.deepEqual(await vault.read.previewRedeem([INITIAL_SHARES]), expected);
+      assert.deepEqual(await vault.read.previewMint([INITIAL_SHARES]), expected);
     });
 
     it("mint and redemption recognize losses by themselves before computing amounts", async () => {
@@ -588,7 +599,6 @@ describe("GRETVault: basket, mint, normal redemption and sync", async () => {
       const basket = await networkHelpers.loadFixture(bootstrappedFixture);
       const { vault, faulty, alice, bob } = basket;
       await faulty.write.slash([vault.address, INITIAL_AMOUNTS[2]]);
-      await vault.write.recognizeLoss([2n]);
 
       // Mint no longer asks for the lost component, so a new holder can still enter and exit.
       assert.deepEqual(await vault.read.previewMint([INITIAL_SHARES]), [INITIAL_AMOUNTS[0], INITIAL_AMOUNTS[1], 0n]);
@@ -614,86 +624,46 @@ describe("GRETVault: basket, mint, normal redemption and sync", async () => {
     });
   });
 
-  describe("sync", () => {
-    it("recognizes donations only after governance syncs them, for every holder", async () => {
-      const { vault, tokens, governance } = await networkHelpers.loadFixture(bootstrappedFixture);
-      const donation = INITIAL_AMOUNTS[0] / 2n;
-      await tokens[0].write.mint([vault.address, donation]);
-
-      assert.deepEqual(await vault.read.reserves(), INITIAL_AMOUNTS);
-      assert.deepEqual(await vault.read.previewRedeem([INITIAL_SHARES]), INITIAL_AMOUNTS);
-
-      await viem.assertions.emitWithArgs(
-        vault.write.sync([tokens[0].address], { account: governance.account }),
-        vault,
-        "Synced",
-        [getAddress(tokens[0].address), donation, INITIAL_AMOUNTS[0] + donation],
-      );
-      assert.deepEqual(await vault.read.previewRedeem([INITIAL_SHARES]), [
-        INITIAL_AMOUNTS[0] + donation,
-        INITIAL_AMOUNTS[1],
-        INITIAL_AMOUNTS[2],
-      ]);
-      assert.deepEqual(await vault.read.previewMint([INITIAL_SHARES]), [
-        INITIAL_AMOUNTS[0] + donation,
-        INITIAL_AMOUNTS[1],
-        INITIAL_AMOUNTS[2],
-      ]);
+  describe("automatic income and component activation", () => {
+    it("incorporates income into mint and redemption immediately", async () => {
+      const { vault, tokens } = await networkHelpers.loadFixture(bootstrappedFixture);
+      await tokens[0].write.mint([vault.address, INITIAL_AMOUNTS[0] / 2n]);
+      const expected = [INITIAL_AMOUNTS[0] * 3n / 2n, INITIAL_AMOUNTS[1], INITIAL_AMOUNTS[2]];
+      assert.deepEqual(await vault.read.reserves(), expected);
+      assert.deepEqual(await vault.read.previewMint([INITIAL_SHARES]), expected);
+      assert.deepEqual(await vault.read.previewRedeem([INITIAL_SHARES]), expected);
     });
 
-    it("only governance can sync", async () => {
+    it("only governance can activate or deactivate a component", async () => {
       const { vault, tokens, alice } = await networkHelpers.loadFixture(bootstrappedFixture);
-      await tokens[0].write.mint([vault.address, 1n]);
-
-      await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.sync([tokens[0].address], { account: alice.account }),
-        vault,
-        "NotGovernance",
-        [getAddress(alice.account.address)],
-      );
-      assert.deepEqual(await vault.read.reserves(), INITIAL_AMOUNTS);
+      for (const action of ["activateComponent", "deactivateEmptyComponent"] as const) {
+        await viem.assertions.revertWithCustomErrorWithArgs(
+          vault.write[action]([tokens[0].address], { account: alice.account }), vault,
+          "NotGovernance", [getAddress(alice.account.address)],
+        );
+      }
     });
 
-    it("is a no-op without surplus", async () => {
+    it("cannot deactivate material backing without a delayed write-off", async () => {
       const { vault, tokens, governance } = await networkHelpers.loadFixture(bootstrappedFixture);
-
-      const { result } = await vault.simulate.sync([tokens[1].address], { account: governance.account.address });
-      assert.equal(result, 0n);
-      await vault.write.sync([tokens[1].address], { account: governance.account });
-      assert.deepEqual(await vault.read.reserves(), INITIAL_AMOUNTS);
-    });
-
-    it("a failing component does not block sync of the others", async () => {
-      const { vault, tokens, faulty, governance } = await networkHelpers.loadFixture(bootstrappedFixture);
-      await faulty.write.setFault([Fault.RevertOnBalanceOf]);
-      await tokens[1].write.mint([vault.address, 10n]);
-
-      await viem.assertions.revertWithCustomError(
-        vault.write.sync([faulty.address], { account: governance.account }),
-        faulty,
-        "BalanceOfBlocked",
-      );
-      await vault.write.sync([tokens[1].address], { account: governance.account });
-      assert.equal((await vault.read.reserves())[1], INITIAL_AMOUNTS[1] + 10n);
-    });
-
-    it("requires a positive supply and a component of the basket", async () => {
-      const { vault, tokens, governance, alice } = await networkHelpers.loadFixture(basketFixture);
-      await tokens[0].write.mint([vault.address, 1n]);
-
-      await viem.assertions.revertWithCustomError(
-        vault.write.sync([tokens[0].address], { account: governance.account }),
-        vault,
-        "NoSupply",
-      );
-
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.sync([alice.account.address], { account: governance.account }),
-        vault,
-        "NotAComponent",
-        [getAddress(alice.account.address)],
+        vault.write.deactivateEmptyComponent([tokens[0].address], { account: governance.account }),
+        vault, "ComponentHasReserve", [getAddress(tokens[0].address), INITIAL_AMOUNTS[0]],
       );
+    });
+
+    it("quotes an exit without reading a skipped failing component", async () => {
+      const { vault, faulty } = await networkHelpers.loadFixture(bootstrappedFixture);
+      await faulty.write.setFault([Fault.RevertOnBalanceOf]);
+      assert.deepEqual(await vault.read.previewRedeemSkipping([INITIAL_SHARES, [faulty.address]]),
+        [INITIAL_AMOUNTS[0], INITIAL_AMOUNTS[1], 0n]);
+    });
+
+    it("a pre-bootstrap receipt belongs to the first share if it is not rescued", async () => {
+      const { vault, tokens, alice } = await networkHelpers.loadFixture(basketFixture);
+      await tokens[0].write.mint([vault.address, 123n]);
+      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
+      assert.equal((await vault.read.reserves())[0], INITIAL_AMOUNTS[0] + 123n);
     });
   });
 });

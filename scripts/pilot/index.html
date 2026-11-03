@@ -294,7 +294,15 @@ async function sendPlan(path, mainnetQuestion) {
   const { txs } = await api(`${path}?${query}`);
   if (txs.length === 0) return log("Nothing to send.");
   if (state.chainId === 1 && !confirm(`${mainnetQuestion}\n\n${txs.map((tx) => `• ${tx.label}`).join("\n")}`)) return;
-  for (const tx of txs) await send(tx);
+  for (const [i, tx] of txs.entries()) {
+    if (path === "/api/mint" && i === txs.length - 1) {
+      const fresh = await api(`${path}?${query}`);
+      if (fresh.txs.length !== 1 || fresh.txs[0].data !== tx.data) {
+        throw new Error("Basket amounts changed while approvals were pending. Review the updated amounts and try Mint again.");
+      }
+    }
+    await send(tx);
+  }
 }
 
 $("connect").onclick = () => run(connect);

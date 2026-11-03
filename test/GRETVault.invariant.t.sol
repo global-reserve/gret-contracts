@@ -1,577 +1,293 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.38;
 
-import {CommonBase} from "forge-std/Base.sol";
-import {StdUtils} from "forge-std/StdUtils.sol";
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-
 import {GRETVault} from "../contracts/GRETVault.sol";
-import {MockERC20} from "../contracts/mocks/MockERC20.sol";
 import {MockFaultyERC20} from "../contracts/mocks/MockFaultyERC20.sol";
 import {MockPriceGuard} from "../contracts/mocks/MockPriceGuard.sol";
 
-/// @notice Runs random sequences of every vault operation. Keeps its own ledger of each component
-/// movement and records any mismatch with the amounts the vault should have produced.
-/// @dev A, B and C stay in the basket at indexes 0 to 2. D starts outside and governance adds it as
-/// index 3 and removes it again, so the vault index of every token always equals its ledger index.
-contract GRETVaultHandler is CommonBase, StdUtils {
-    /// @dev Tokens tracked by the ledger: the three permanent components and D.
-    uint256 internal constant TOKENS = 4;
-    /// @dev actors[3] never mints: it only receives GRET, like a secondary-market buyer.
-    uint256 internal constant MINTERS = 3;
-    uint256 internal constant MAX_AMOUNT = 1e24;
+/// @notice Stateful live-balance operations with an independent physical-supply ledger.
+/// Tokens use exact transfers or explicit failures; short deliveries have separate fuzz tests.
+contract GRETVaultHandler is Test {
+    GRETVault public vault;
+    MockFaultyERC20[4] public tokens;
+    address[5] public actors;
+    uint256[4] public issued;
+    uint256[4] public lost;
+    uint256[4] public liquidationInflow;
+    mapping(address => mapping(uint256 => uint256)) public receivedInClaims;
+    mapping(address => mapping(uint256 => uint256)) public successfulClaims;
 
-    GRETVault public immutable vault;
-    MockERC20 public immutable tokenA;
-    MockERC20 public immutable tokenB;
-    MockFaultyERC20 public immutable tokenC;
-    MockERC20 public immutable tokenD;
-    address public constant GOVERNANCE = address(0x60F);
-    address public constant REBALANCER = address(0x5EB);
-    address public constant FEE_RECIPIENT = address(0xFEE);
-    address[4] public actors;
-    mapping(address account => bool) public everMinted;
-
-    // Independent ledger of token movements, per ledger index.
-    uint256[TOKENS] public minted;
-    uint256[TOKENS] public donated;
-    uint256[TOKENS] public synced;
-    uint256[TOKENS] public redeemed;
-    uint256[TOKENS] public claimedOut;
-    uint256[TOKENS] public rescued;
-    uint256[TOKENS] public slashed;
-    uint256[TOKENS] public lossRecognized;
-    uint256[TOKENS] public swappedIn;
-    uint256[TOKENS] public swappedOut;
-    uint256[TOKENS] public writtenOffAmount;
-    /// @dev Skipped shares that left the reserve because the redemption emptied the supply.
-    uint256[TOKENS] public skippedToSurplus;
-
-    // Violations detected while operating; the invariants require all of them to stay false.
-    bool public wrongAmount;
-    bool public valuePerShareDecreased;
-    bool public redeemedWithoutMint;
-    bool public governanceChangedWhatIsOwed;
-    bool public rescuedBeyondSurplus;
-    bool public activationFailed;
-    bool public supplyBelowMinimum;
-    bool public vaultAcceptedShares;
-    bool public swapChangedOtherReserves;
-    bool public removedWithReserve;
-    bool public rescuedWrittenOff;
-    bool public wrongFee;
-    bool public mintedWhilePaused;
-
-    /// @notice Successful calls per operation, to check that sequences reach every path.
-    mapping(bytes32 operation => uint256) public successes;
+    struct Flow {
+        uint256 supply;
+        uint256 actorShares;
+        uint256 recipientShares;
+        uint256[4] backing;
+        uint256[4] actorTokens;
+    }
+    mapping(address => bool) public everMinted;
+    mapping(bytes32 => uint256) public successes;
+    bool public violation;
 
     constructor() {
-        tokenA = new MockERC20("Mock A", "MA", 18);
-        tokenB = new MockERC20("Mock B", "MB", 8);
-        tokenC = new MockFaultyERC20("Mock C", "MC", 18);
-        tokenD = new MockERC20("Mock D", "MD", 6);
-
-        IERC20[] memory components = new IERC20[](3);
-        components[0] = IERC20(address(tokenA));
-        components[1] = IERC20(address(tokenB));
-        components[2] = IERC20(address(tokenC));
-        uint256[] memory initialAmounts = new uint256[](3);
-        initialAmounts[0] = 2e18;
-        initialAmounts[1] = 1e5;
-        initialAmounts[2] = 5e18;
-        vault = new GRETVault(components, initialAmounts, GOVERNANCE);
-
-        // Swaps are priced by a guard that accepts all of them: the accounting must hold anyway.
-        MockPriceGuard guard = new MockPriceGuard();
-        vm.startPrank(GOVERNANCE);
-        vault.proposeRebalancer(REBALANCER);
-        vault.proposePriceGuard(address(guard));
-        vm.stopPrank();
-        vm.warp(block.timestamp + vault.BASKET_CHANGE_DELAY());
-        vm.prank(REBALANCER);
+        IERC20[] memory basket = new IERC20[](3);
+        uint256[] memory initial = new uint256[](3);
+        for (uint256 i; i < 4; ++i) {
+            tokens[i] = new MockFaultyERC20("Invariant", "INV", i == 1 ? 8 : 18);
+            if (i < 3) { basket[i] = tokens[i]; initial[i] = i == 1 ? 100_000 : 100e18; }
+        }
+        for (uint256 k; k < 5; ++k) actors[k] = address(uint160(0xA000 + k));
+        vault = new GRETVault(basket, initial, address(this));
+        for (uint256 i; i < 4; ++i) {
+            tokens[i].approve(address(vault), type(uint256).max);
+            for (uint256 k; k < 5; ++k) {
+                _fund(i, actors[k], 1e36);
+                vm.prank(actors[k]);
+                tokens[i].approve(address(vault), type(uint256).max);
+            }
+        }
+        vm.prank(actors[0]);
+        vault.mint(1e18, initial, 1e18, 0);
+        everMinted[actors[0]] = true;
+        vault.setFeeRecipient(actors[4]);
+        vault.proposeRebalancer(address(this));
+        vault.proposePriceGuard(address(new MockPriceGuard()));
+        vm.warp(block.timestamp + 7 days);
         vault.acceptRebalancer();
         vault.applyPriceGuard();
-        vm.prank(GOVERNANCE);
-        vault.setFeeRecipient(FEE_RECIPIENT);
-
-        for (uint256 k; k < actors.length; ++k) {
-            actors[k] = address(uint160(0xA11CE0 + k));
-        }
-        for (uint256 i; i < TOKENS; ++i) {
-            for (uint256 k; k < actors.length; ++k) {
-                vm.prank(actors[k]);
-                _token(i).approve(address(vault), type(uint256).max);
-            }
-            vm.prank(REBALANCER);
-            _token(i).approve(address(vault), type(uint256).max);
-        }
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Normal operation
-    // ---------------------------------------------------------------------------------------------
-
-    function mint(uint256 actorSeed, uint256 shares) external {
+    function mint(uint256 who, uint256 seed) external {
         if (vault.liquidationActive()) return;
-        address actor = actors[actorSeed % MINTERS];
-        (uint256[TOKENS] memory reservesBefore, uint256 supplyBefore) = _snapshot();
-        shares = supplyBefore == 0 ? vault.INITIAL_SHARES() : bound(shares, 1, MAX_AMOUNT);
-        uint256 count = vault.componentCount();
-
-        uint256[] memory expected;
-        try vault.previewMint(shares) returns (uint256[] memory amounts) {
-            expected = amounts;
-        } catch {
-            return;
+        address actor = actors[who % 3]; // Two secondary holders never qualify by minting.
+        uint256 shares = vault.totalSupply() == 0 ? 1e18 : bound(seed, 1, 10e18);
+        uint256[] memory limits = new uint256[](vault.componentCount());
+        for (uint256 i; i < limits.length; ++i) limits[i] = type(uint256).max;
+        uint256 version = vault.basketVersion();
+        Flow memory before_ = _flow(actor);
+        uint256[] memory expected = vault.initialAmounts();
+        uint256 fee = shares * vault.mintFee() / 10_000;
+        for (uint256 i; i < expected.length; ++i) {
+            if (vault.excluded(address(tokens[i]))) expected[i] = 0;
+            else if (before_.supply != 0) {
+                uint256 product = shares * before_.backing[i];
+                expected[i] = product / before_.supply + (product % before_.supply == 0 ? 0 : 1);
+            }
         }
-        for (uint256 i; i < count; ++i) {
-            if (expected[i] > 1e40) return;
-            _fund(actor, i, expected[i]);
-        }
-
-        // Built before the prank: reading the component count is itself a call to the vault.
-        uint256[] memory maxAmountsIn = _filled(type(uint256).max);
-        uint256 fee = Math.mulDiv(shares, vault.mintFee(), 10_000);
-        uint256 feesBefore = vault.balanceOf(FEE_RECIPIENT);
-        bool paused = vault.mintPaused();
-        // A prank for the whole statement, since the version is read in the arguments (one more
-        // local would not fit in the stack); everything else the vault is asked below is a view.
-        vm.startPrank(actor);
-        try vault.mint(shares, maxAmountsIn, 0, vault.basketVersion()) returns (uint256 issued, uint256[] memory paid) {
-            if (paused) mintedWhilePaused = true;
-            successes[fee == 0 ? bytes32("mint") : bytes32("mintWithFee")]++;
+        vm.prank(actor);
+        try vault.mint(shares, limits, 1, version) returns (uint256 minted, uint256[] memory received) {
+            if (minted + fee != shares || vault.totalSupply() != before_.supply + shares ||
+                vault.balanceOf(actor) != before_.actorShares + shares - fee ||
+                vault.balanceOf(actors[4]) != before_.recipientShares + fee) violation = true;
+            for (uint256 i; i < expected.length; ++i) {
+                if (received[i] != expected[i] ||
+                    tokens[i].rawBalanceOf(address(vault)) != before_.backing[i] + expected[i] ||
+                    tokens[i].rawBalanceOf(actor) + expected[i] != before_.actorTokens[i]) violation = true;
+            }
             everMinted[actor] = true;
-            // Every mock delivers exactly what is requested, so exactly `shares` are issued, of
-            // which the fee goes to the recipient.
-            if (issued != shares - fee) wrongAmount = true;
-            if (vault.balanceOf(FEE_RECIPIENT) - feesBefore != fee) wrongFee = true;
-            bool contributed;
-            for (uint256 i; i < count; ++i) {
-                minted[i] += paid[i];
-                // Zero for a component with no reserve (or no initial amount): mint skips it.
-                uint256 fair = supplyBefore == 0
-                    ? vault.initialAmounts()[i]
-                    : Math.mulDiv(shares, reservesBefore[i], supplyBefore, Math.Rounding.Ceil);
-                if (paid[i] != fair) wrongAmount = true;
-                if (paid[i] != 0) contributed = true;
-            }
-            if (!contributed) wrongAmount = true;
-            _checkValuePerShare(reservesBefore, supplyBefore);
+            successes["mint"]++;
+            if (vault.mintPaused()) violation = true;
+            _checkNoDilution(before_.backing, before_.supply);
         } catch {}
-        vm.stopPrank();
     }
 
-    function redeem(uint256 actorSeed, uint256 shares) external {
+    function redeem(uint256 who, uint256 seed, bool skip) external {
         if (vault.liquidationActive()) return;
-        address actor = actors[actorSeed % actors.length];
+        address actor = actors[who % 5];
         uint256 balance = vault.balanceOf(actor);
         if (balance == 0) return;
-        shares = bound(shares, 1, balance);
-        (uint256[TOKENS] memory reservesBefore, uint256 supplyBefore) = _snapshot();
-
-        uint256[] memory minAmountsOut = _filled(0);
-        uint256 fee = Math.mulDiv(shares, vault.redeemFee(), 10_000);
-        uint256 feesBefore = vault.balanceOf(FEE_RECIPIENT);
+        uint256 shares = bound(seed, 1, balance);
+        address[] memory skipped = new address[](skip ? 1 : 0);
+        if (skip) skipped[0] = address(tokens[2]);
+        uint256[] memory limits = new uint256[](vault.componentCount());
         uint256 version = vault.basketVersion();
-        vm.prank(actor);
-        try vault.redeem(shares, minAmountsOut, version) returns (uint256[] memory out) {
-            successes[fee == 0 ? bytes32("redeem") : bytes32("redeemWithFee")]++;
-            if (!everMinted[actor]) redeemedWithoutMint = true;
-            // The fee moves to the recipient; only the rest is burned and paid out.
-            uint256 burned = shares - fee;
-            uint256 remaining = supplyBefore - burned;
-            if (remaining != 0 && remaining < vault.MIN_SUPPLY()) supplyBelowMinimum = true;
-            if (vault.balanceOf(FEE_RECIPIENT) - feesBefore != fee) wrongFee = true;
-            for (uint256 i; i < out.length; ++i) {
-                redeemed[i] += out[i];
-                if (out[i] != Math.mulDiv(burned, reservesBefore[i], supplyBefore)) wrongAmount = true;
+        Flow memory before_ = _flow(actor);
+        uint256 fee = shares * vault.redeemFee() / 10_000;
+        uint256 burned = shares - fee;
+        uint256[] memory expected = new uint256[](limits.length);
+        for (uint256 i; i < expected.length; ++i) {
+            if (!vault.excluded(address(tokens[i])) && !(skip && i == 2)) {
+                expected[i] = burned * before_.backing[i] / before_.supply;
             }
-            _checkValuePerShare(reservesBefore, supplyBefore);
-        } catch {}
-    }
-
-    /// @notice Like `redeem`, leaving out component C, which is never called and whose share stays
-    /// in the reserve unless the supply empties.
-    function redeemSkipping(uint256 actorSeed, uint256 shares) external {
-        if (vault.liquidationActive()) return;
-        address actor = actors[actorSeed % actors.length];
-        uint256 balance = vault.balanceOf(actor);
-        if (balance == 0) return;
-        shares = bound(shares, 1, balance);
-        (uint256[TOKENS] memory reservesBefore, uint256 supplyBefore) = _snapshot();
-
-        uint256[] memory minAmountsOut = _filled(0);
-        address[] memory skipped = new address[](1);
-        skipped[0] = address(tokenC);
-        uint256 fee = Math.mulDiv(shares, vault.redeemFee(), 10_000);
-        uint256 version = vault.basketVersion();
-        vm.prank(actor);
-        try vault.redeemSkipping(shares, minAmountsOut, skipped, version) returns (uint256[] memory out) {
-            successes["redeemSkipping"]++;
-            if (!everMinted[actor]) redeemedWithoutMint = true;
-            uint256 burned = shares - fee;
-            uint256 remaining = supplyBefore - burned;
-            if (remaining != 0 && remaining < vault.MIN_SUPPLY()) supplyBelowMinimum = true;
-            for (uint256 i; i < out.length; ++i) {
-                redeemed[i] += out[i];
-                uint256 share = Math.mulDiv(burned, reservesBefore[i], supplyBefore);
-                if (out[i] != (i == 2 ? 0 : share)) wrongAmount = true;
-            }
-            if (remaining == 0) skippedToSurplus[2] += Math.mulDiv(burned, reservesBefore[2], supplyBefore);
-            if (vault.reserves()[2] != (remaining == 0 ? 0 : reservesBefore[2])) wrongAmount = true;
-            _checkValuePerShare(reservesBefore, supplyBefore);
-        } catch {}
-    }
-
-    function transferShares(uint256 fromSeed, uint256 toSeed, uint256 amount) external {
-        address from = actors[fromSeed % actors.length];
-        uint256 balance = vault.balanceOf(from);
-        if (balance == 0) return;
-        amount = bound(amount, 1, balance);
-        // One destination in five is the vault itself: GRET sent there by mistake must revert.
-        if (toSeed % 5 == 4) {
-            vm.prank(from);
-            try vault.transfer(address(vault), amount) {
-                vaultAcceptedShares = true;
-            } catch {
-                successes["sharesToVaultRejected"]++;
-            }
-            return;
         }
-        vm.prank(from);
-        vault.transfer(actors[toSeed % actors.length], amount);
+        vm.prank(actor);
+        try vault.redeemSkipping(shares, limits, skipped, version) returns (uint256[] memory paid) {
+            if (vault.totalSupply() + burned != before_.supply ||
+                vault.balanceOf(actor) + shares != before_.actorShares + (actor == actors[4] ? fee : 0) ||
+                vault.balanceOf(actors[4]) + (actor == actors[4] ? shares : 0) != before_.recipientShares + fee) {
+                violation = true;
+            }
+            for (uint256 i; i < expected.length; ++i) {
+                if (paid[i] != expected[i] ||
+                    tokens[i].rawBalanceOf(address(vault)) + expected[i] != before_.backing[i] ||
+                    tokens[i].rawBalanceOf(actor) != before_.actorTokens[i] + expected[i]) violation = true;
+            }
+            successes[skip ? bytes32("skip") : bytes32("redeem")]++;
+            if (!everMinted[actor]) violation = true;
+            _checkNoDilution(before_.backing, before_.supply);
+        } catch {}
+    }
+
+    function transferShares(uint256 from, uint256 to, uint256 seed) external {
+        address sender = actors[from % 5];
+        uint256 amount = seed % (vault.balanceOf(sender) + 1);
+        vm.prank(sender);
+        vault.transfer(actors[to % 5], amount);
     }
 
     function donate(uint256 index, uint256 amount) external {
-        index %= TOKENS;
-        amount = bound(amount, 1, MAX_AMOUNT);
-        _fund(address(vault), index, amount);
-        donated[index] += amount;
+        index %= 4;
+        amount = bound(amount, 1, 1e22);
+        _fund(index, address(vault), amount);
+        if (vault.liquidationActive()) liquidationInflow[index] += amount;
+        successes["donate"]++;
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Governance
-    // ---------------------------------------------------------------------------------------------
+    function slash(uint256 index, uint256 seed) external {
+        index %= 4;
+        uint256 held = tokens[index].rawBalanceOf(address(vault));
+        uint256 amount = seed % (held + 1);
+        tokens[index].slash(address(vault), amount);
+        lost[index] += amount;
+        successes["slash"]++;
+    }
 
-    function sync(uint256 index) external {
-        index %= vault.componentCount();
-        vm.prank(GOVERNANCE);
-        try vault.sync(address(_token(index))) returns (uint256 added) {
-            if (added != 0) successes[vault.liquidationActive() ? bytes32("syncInLiquidation") : bytes32("sync")]++;
-            synced[index] += added;
+    function fault(uint256 seed) external {
+        MockFaultyERC20.Fault[4] memory modes = [MockFaultyERC20.Fault.None,
+            MockFaultyERC20.Fault.RevertOnTransfer, MockFaultyERC20.Fault.ReturnFalseOnTransfer,
+            MockFaultyERC20.Fault.RevertOnBalanceOf];
+        tokens[2].setFault(modes[seed % 4]);
+    }
+
+    function swap(uint256 sell, uint256 buy, uint256 seed) external {
+        if (vault.liquidationActive()) return;
+        sell %= vault.componentCount(); buy %= vault.componentCount();
+        if (sell == buy) return;
+        uint256 held = tokens[sell].rawBalanceOf(address(vault));
+        if (held == 0) return;
+        uint256 amount = bound(seed, 1, held);
+        _fund(buy, address(this), amount);
+        try vault.swap(address(tokens[sell]), amount, address(tokens[buy]), amount) {
+            successes["swap"]++;
         } catch {}
     }
 
-    function rescueComponent(uint256 index, uint256 amount, bool overshoot) external {
-        index %= TOKENS;
-        uint256[TOKENS] memory owedBefore = _owed();
-        address token = address(_token(index));
-        // D outside the basket: governance may take its whole balance.
-        if (index >= vault.componentCount()) {
-            uint256 held = tokenD.balanceOf(address(vault));
-            if (held == 0) return;
-            amount = bound(amount, 1, held);
-            vm.prank(GOVERNANCE);
-            vault.rescue(token, GOVERNANCE, amount);
-            successes["rescueOutsideBasket"]++;
-            rescued[index] += amount;
-            _checkOwedUnchanged(owedBefore);
-            return;
-        }
-        uint256 surplus;
-        try vault.componentSurplus(index) returns (uint256 value) {
-            surplus = value;
-        } catch {
-            return;
-        }
-
-        if (overshoot || surplus == 0) {
-            vm.prank(GOVERNANCE);
-            try vault.rescue(token, GOVERNANCE, surplus + bound(amount, 1, MAX_AMOUNT)) {
-                rescuedBeyondSurplus = true;
-            } catch {}
+    function component(uint256 index, uint256 action) external {
+        if (vault.liquidationActive()) return;
+        index %= vault.componentCount();
+        address token = address(tokens[index]);
+        if (action % 3 == 0) {
+            try vault.activateComponent(token) { successes["activateComponent"]++; } catch {}
+        } else if (action % 3 == 1) {
+            try vault.deactivateEmptyComponent(token) { successes["deactivate"]++; } catch {}
         } else {
-            amount = bound(amount, 1, surplus);
-            vm.prank(GOVERNANCE);
-            try vault.rescue(token, GOVERNANCE, amount) {
-                successes[vault.liquidationActive() ? bytes32("rescueInLiquidation") : bytes32("rescue")]++;
-                rescued[index] += amount;
-                if (vault.writtenOff(token)) rescuedWrittenOff = true;
+            vault.proposeWriteOff(token);
+            vm.warp(block.timestamp + 7 days);
+            try vault.writeOffComponent(token) { successes["writeOff"]++; } catch {}
+        }
+    }
+
+    function changeBasket(bool add) external {
+        if (vault.liquidationActive()) return;
+        if (add && vault.componentCount() == 3) {
+            vault.announceComponent(address(tokens[3]));
+            vm.warp(block.timestamp + 7 days);
+            vault.addComponent(address(tokens[3]));
+            successes["add"]++;
+        } else if (!add && vault.componentCount() == 4) {
+            uint256 balanceBefore = tokens[3].rawBalanceOf(address(vault));
+            bool wasWrittenOff = vault.writtenOff(address(tokens[3]));
+            try vault.removeComponent(address(tokens[3])) {
+                successes["remove"]++;
+                // Check eligibility independently of the vault's internal helper.
+                uint256 allowed = tokens[3].decimals() >= 18 ? 10 : 0;
+                if (balanceBefore > allowed || wasWrittenOff) violation = true;
             } catch {}
         }
-        _checkOwedUnchanged(owedBefore);
     }
 
-    /// @notice The issuer removes part of the vault's C, like a negative rebase or a fee. In normal
-    /// operation the loss is recognized right away; in liquidation claims absorb it by themselves.
-    function slashComponent(uint256 amount) external {
-        if (tokenC.fault() == MockFaultyERC20.Fault.RevertOnBalanceOf) return;
-        uint256 balance = tokenC.rawBalanceOf(address(vault));
-        if (balance == 0) return;
-        amount = bound(amount, 1, balance);
-        tokenC.slash(address(vault), amount);
-        slashed[2] += amount;
-        if (!vault.liquidationActive()) {
-            uint256 loss = vault.recognizeLoss(2);
-            lossRecognized[2] += loss;
-            if (loss != 0) successes["loss"]++;
-        } else {
-            successes["lossInLiquidation"]++;
-        }
+    function rescue(uint256 index, uint256 seed) external {
+        index %= 4;
+        uint256 amount = bound(seed, 1, 1e22);
+        bool forbidden = vault.writtenOff(address(tokens[index])) ||
+            (index < vault.componentCount() && (vault.liquidationActive() || vault.totalSupply() > 0));
+        try vault.rescue(address(tokens[index]), address(this), amount) {
+            successes["rescue"]++;
+            if (forbidden) violation = true;
+        } catch {}
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Rebalancing
-    // ---------------------------------------------------------------------------------------------
-
-    /// @notice The rebalancer delivers one component and takes part of another's reserve.
-    function swap(uint256 sellSeed, uint256 buySeed, uint256 sellAmount, uint256 buyAmount) external {
-        uint256 count = vault.componentCount();
-        uint256 sell = sellSeed % count;
-        uint256 buy = (sell + 1 + buySeed % (count - 1)) % count;
-        (uint256[TOKENS] memory reservesBefore,) = _snapshot();
-        if (reservesBefore[sell] == 0) return;
-        sellAmount = bound(sellAmount, 1, reservesBefore[sell]);
-        buyAmount = bound(buyAmount, 1, MAX_AMOUNT);
-        _fund(REBALANCER, buy, buyAmount);
-        uint256 rebalancerBefore = rawBalance(sell, REBALANCER);
-
-        vm.prank(REBALANCER);
-        try vault.swap(address(_token(sell)), sellAmount, address(_token(buy)), buyAmount) returns (uint256 received) {
-            successes["swap"]++;
-            swappedOut[sell] += sellAmount;
-            swappedIn[buy] += received;
-            if (received != buyAmount || rawBalance(sell, REBALANCER) - rebalancerBefore != sellAmount) {
-                wrongAmount = true;
-            }
-            (uint256[TOKENS] memory reservesAfter,) = _snapshot();
-            for (uint256 i; i < count; ++i) {
-                uint256 expected = reservesBefore[i];
-                if (i == sell) expected -= sellAmount;
-                if (i == buy) expected += buyAmount;
-                if (reservesAfter[i] != expected) swapChangedOtherReserves = true;
-            }
-        } catch {
-            // Unspent funding stays with the rebalancer, outside the vault's ledger.
-        }
-    }
-
-    /// @notice Governance proposes D, waits, and any holder adds it as index 3.
-    function addComponent(uint256 actorSeed) external {
-        if (vault.liquidationActive() || vault.componentCount() == TOKENS) return;
-        vm.prank(GOVERNANCE);
-        vault.announceComponent(address(tokenD));
-        vm.warp(block.timestamp + vault.BASKET_CHANGE_DELAY());
-        vm.prank(actors[actorSeed % actors.length]);
-        vault.addComponent(address(tokenD));
-        successes["addComponent"]++;
-    }
-
-    /// @notice Governance removes D, most often after the rebalancer sold all of it for A.
-    function removeComponent(bool sellFirst) external {
-        if (vault.liquidationActive() || vault.componentCount() != TOKENS) return;
-        uint256 reserve = vault.reserves()[3];
-        if (reserve != 0 && sellFirst) {
-            _fund(REBALANCER, 0, 1);
-            vm.prank(REBALANCER);
-            vault.swap(address(tokenD), reserve, address(tokenA), 1);
-            swappedOut[3] += reserve;
-            swappedIn[0] += 1;
-            reserve = 0;
-        }
-        vm.prank(GOVERNANCE);
-        try vault.removeComponent(address(tokenD)) {
-            successes["removeComponent"]++;
-            if (reserve != 0) removedWithReserve = true;
-        } catch {
-            if (reserve == 0) wrongAmount = true;
-        }
-    }
-
-    /// @notice Governance proposes writing off C while one of its faults stops the vault from
-    /// reading or sending it, and any holder executes it after the wait. Rare, so that C usually
-    /// stays in the basket.
-    function writeOff(uint256 seed) external {
-        if (vault.liquidationActive() || tokenC.fault() == MockFaultyERC20.Fault.None || seed % 4 != 0) return;
-        uint256 reserve = vault.reserves()[2];
-        if (reserve == 0) return;
-        vm.prank(GOVERNANCE);
-        vault.proposeWriteOff(address(tokenC));
-        vm.warp(block.timestamp + vault.BASKET_CHANGE_DELAY());
-        vm.prank(actors[seed % actors.length]);
-        vault.writeOffComponent(address(tokenC));
-        successes["writeOff"]++;
-        writtenOffAmount[2] += reserve;
-    }
-
-    /// @notice Governance sets both fees within the cap; a raise waits and any holder applies it.
-    function setFees(uint256 mintFee, uint256 redeemFee) external {
-        uint256 maxFee = vault.MAX_FEE();
-        mintFee = bound(mintFee, 0, maxFee);
-        redeemFee = bound(redeemFee, 0, maxFee);
-        vm.prank(GOVERNANCE);
-        vault.proposeFees(mintFee, redeemFee);
+    function fees(uint256 mintFee, uint256 redeemFee) external {
+        vault.proposeFees(mintFee % 501, redeemFee % 501);
         if (vault.pendingFeesReadyAt() != 0) {
-            vm.warp(block.timestamp + vault.FEE_INCREASE_DELAY());
-            vm.prank(actors[mintFee % actors.length]);
+            vm.warp(block.timestamp + 7 days);
             vault.applyFees();
         }
-        if (vault.mintFee() != mintFee || vault.redeemFee() != redeemFee) wrongFee = true;
-        if (mintFee > maxFee || redeemFee > maxFee) wrongFee = true;
     }
 
-    /// @notice Governance pauses minting now and then, and resumes it.
-    function setMintPaused(uint256 seed) external {
-        vm.prank(GOVERNANCE);
-        vault.setMintPaused(seed % 4 == 0);
-    }
+    function pause(bool value) external { vault.setMintPaused(value); }
 
-    function activateLiquidation(uint256 seed) external {
-        // Rare, so that sequences explore normal operation before liquidation.
-        if (vault.liquidationActive() || seed % 8 != 0) return;
-        vm.prank(GOVERNANCE);
+    function liquidate(uint256 seed) external {
+        // Keep most sequences in normal operation long enough to exercise mutations.
+        if (seed % 8 != 0 || vault.liquidationActive()) return;
+        uint256[4] memory before_ = _balances();
         try vault.activateLiquidation() {
-            successes["activate"]++;
+            liquidationInflow = before_;
+            successes["liquidate"]++;
         } catch {
-            activationFailed = true;
+            if (vault.totalSupply() != 0) violation = true;
         }
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Liquidation
-    // ---------------------------------------------------------------------------------------------
-
-    function convert(uint256 actorSeed, uint256 amount) external {
-        if (!vault.liquidationActive()) return;
-        address actor = actors[actorSeed % actors.length];
-        uint256 balance = vault.balanceOf(actor);
-        if (balance == 0) return;
+    function convert(uint256 who, uint256 seed) external {
+        address actor = actors[who % 5];
+        uint256 amount = seed % (vault.balanceOf(actor) + 1);
         vm.prank(actor);
-        vault.convertToClaims(bound(amount, 1, balance));
+        try vault.convertToClaims(amount) { successes["convert"]++; } catch {}
     }
 
-    function claim(uint256 actorSeed, uint256 index) external {
-        if (!vault.liquidationActive()) return;
-        address actor = actors[actorSeed % actors.length];
-        index %= vault.componentCount();
-        uint256 pending = vault.claimable(actor, index);
-        uint256 rights = entitlement(actor, index) - vault.claimed(actor, index);
-        if (vault.pendingRights(actor, index) != rights) wrongAmount = true;
-        // Paid in full while the vault covers every pending right, otherwise pro rata.
-        uint256 owed = vault.reserves()[index] - vault.rightsClaimed()[index];
-        if (tokenC.fault() != MockFaultyERC20.Fault.RevertOnBalanceOf || index != 2) {
-            uint256 held = rawBalance(index, address(vault));
-            uint256 expected = held >= owed ? rights : Math.mulDiv(rights, held, owed);
-            if (pending != expected) wrongAmount = true;
-        }
-        uint256 balanceBefore = rawBalance(index, actor);
-
+    function claim(uint256 who, uint256 index) external {
+        address actor = actors[who % 5]; index %= vault.componentCount();
+        uint256 before_ = tokens[index].rawBalanceOf(actor);
         vm.prank(actor);
-        try vault.claim(index, actor, 0) returns (uint256 amount) {
+        try vault.claim(index, actor, 0) returns (uint256 paid) {
+            uint256 delivered = tokens[index].rawBalanceOf(actor) - before_;
+            receivedInClaims[actor][index] += delivered;
+            successfulClaims[actor][index]++;
+            if (paid != delivered) violation = true;
             successes["claim"]++;
-            claimedOut[index] += amount;
-            if (amount != pending || rawBalance(index, actor) - balanceBefore != amount) wrongAmount = true;
-        } catch {
-            if (pending != 0) successes["failedClaimKeptRight"]++;
-            // A failed claim leaves the right exactly where it was.
-            if (vault.claimable(actor, index) != pending) wrongAmount = true;
-        }
+        } catch {}
     }
 
-    /// @notice Switches component C between faults that never change transferred amounts, so
-    /// the ledger stays exact.
-    function setComponentFault(uint256 mode) external {
-        MockFaultyERC20.Fault[4] memory modes = [
-            MockFaultyERC20.Fault.None,
-            MockFaultyERC20.Fault.RevertOnTransfer,
-            MockFaultyERC20.Fault.ReturnFalseOnTransfer,
-            MockFaultyERC20.Fault.RevertOnBalanceOf
-        ];
-        tokenC.setFault(modes[mode % modes.length]);
+    function _flow(address actor) private view returns (Flow memory result) {
+        result.supply = vault.totalSupply();
+        result.actorShares = vault.balanceOf(actor);
+        result.recipientShares = vault.balanceOf(actors[4]);
+        result.backing = _balances();
+        for (uint256 i; i < 4; ++i) result.actorTokens[i] = tokens[i].rawBalanceOf(actor);
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // Views for the invariants
-    // ---------------------------------------------------------------------------------------------
-
-    function rawBalance(uint256 index, address account) public view returns (uint256) {
-        return index == 2 ? tokenC.rawBalanceOf(account) : _token(index).balanceOf(account);
+    function _balances() private view returns (uint256[4] memory result) {
+        for (uint256 i; i < 4; ++i) result[i] = tokens[i].rawBalanceOf(address(vault));
     }
 
-    /// @notice What the ledger says the vault's recognized reserve of a token should be.
-    function ledgerReserve(uint256 index) public view returns (uint256) {
-        return minted[index] + synced[index] + swappedIn[index] - redeemed[index] - lossRecognized[index]
-            - swappedOut[index] - writtenOffAmount[index] - skippedToSurplus[index];
-    }
-
-    function entitlement(address account, uint256 index) public view returns (uint256) {
-        uint256 shares = vault.claimShares(account);
-        if (shares == 0) return 0;
-        return Math.mulDiv(shares, vault.reserves()[index], vault.liquidationSupply());
-    }
-
-    function actorCount() external view returns (uint256) {
-        return actors.length;
-    }
-
-    // ---------------------------------------------------------------------------------------------
-    // Internal
-    // ---------------------------------------------------------------------------------------------
-
-    function _token(uint256 index) internal view returns (IERC20) {
-        if (index == 0) return IERC20(address(tokenA));
-        if (index == 1) return IERC20(address(tokenB));
-        if (index == 2) return IERC20(address(tokenC));
-        return IERC20(address(tokenD));
-    }
-
-    function _fund(address account, uint256 index, uint256 amount) internal {
-        if (index == 0) tokenA.mint(account, amount);
-        else if (index == 1) tokenB.mint(account, amount);
-        else if (index == 2) tokenC.mint(account, amount);
-        else tokenD.mint(account, amount);
-    }
-
-    function _filled(uint256 value) internal view returns (uint256[] memory values) {
-        values = new uint256[](vault.componentCount());
-        for (uint256 i; i < values.length; ++i) {
-            values[i] = value;
-        }
-    }
-
-    /// @dev Reserves by ledger index; zero for D while it is outside the basket.
-    function _snapshot() internal view returns (uint256[TOKENS] memory reserves, uint256 supply) {
-        uint256[] memory current = vault.reserves();
-        for (uint256 i; i < current.length; ++i) {
-            reserves[i] = current[i];
-        }
-        supply = vault.totalSupply();
-    }
-
-    function _owed() internal view returns (uint256[TOKENS] memory owed) {
-        uint256[] memory reserves = vault.reserves();
-        uint256[] memory claimedTotals = vault.rightsClaimed();
-        for (uint256 i; i < reserves.length; ++i) {
-            owed[i] = reserves[i] - claimedTotals[i];
-        }
-    }
-
-    function _checkOwedUnchanged(uint256[TOKENS] memory owedBefore) internal {
-        uint256[TOKENS] memory owedAfter = _owed();
-        for (uint256 i; i < TOKENS; ++i) {
-            if (owedAfter[i] != owedBefore[i]) governanceChangedWhatIsOwed = true;
-        }
-    }
-
-    /// @dev Rounding favors holders: the amount behind each GRET never goes down.
-    function _checkValuePerShare(uint256[TOKENS] memory reservesBefore, uint256 supplyBefore) internal {
-        (uint256[TOKENS] memory reservesAfter, uint256 supplyAfter) = _snapshot();
+    /// @dev Economic property, independent of the vault's rounding implementation: an
+    /// ordinary mint or redemption must never lower active backing per remaining share.
+    function _checkNoDilution(uint256[4] memory before_, uint256 supplyBefore) private {
+        uint256 supplyAfter = vault.totalSupply();
         if (supplyBefore == 0 || supplyAfter == 0) return;
-        for (uint256 i; i < TOKENS; ++i) {
-            if (reservesAfter[i] * supplyBefore < reservesBefore[i] * supplyAfter) valuePerShareDecreased = true;
+        for (uint256 i; i < vault.componentCount(); ++i) {
+            if (vault.excluded(address(tokens[i]))) continue;
+            if (tokens[i].rawBalanceOf(address(vault)) * supplyBefore < before_[i] * supplyAfter) {
+                violation = true;
+            }
         }
+    }
+
+    function _fund(uint256 i, address to, uint256 amount) private {
+        tokens[i].mint(to, amount);
+        issued[i] += amount;
     }
 }
 
@@ -579,132 +295,92 @@ contract GRETVaultInvariantTest is Test {
     GRETVaultHandler internal handler;
     GRETVault internal vault;
 
-    function setUp() public {
+    function setUp() public virtual {
         handler = new GRETVaultHandler();
         vault = handler.vault();
-
-        bytes4[] memory selectors = new bytes4[](18);
-        selectors[0] = GRETVaultHandler.mint.selector;
-        selectors[1] = GRETVaultHandler.redeem.selector;
-        selectors[2] = GRETVaultHandler.transferShares.selector;
-        selectors[3] = GRETVaultHandler.donate.selector;
-        selectors[4] = GRETVaultHandler.sync.selector;
-        selectors[5] = GRETVaultHandler.rescueComponent.selector;
-        selectors[6] = GRETVaultHandler.activateLiquidation.selector;
-        selectors[7] = GRETVaultHandler.convert.selector;
-        selectors[8] = GRETVaultHandler.claim.selector;
-        selectors[9] = GRETVaultHandler.setComponentFault.selector;
-        selectors[10] = GRETVaultHandler.slashComponent.selector;
-        selectors[11] = GRETVaultHandler.swap.selector;
-        selectors[12] = GRETVaultHandler.addComponent.selector;
-        selectors[13] = GRETVaultHandler.removeComponent.selector;
-        selectors[14] = GRETVaultHandler.writeOff.selector;
-        selectors[15] = GRETVaultHandler.setFees.selector;
-        selectors[16] = GRETVaultHandler.redeemSkipping.selector;
-        selectors[17] = GRETVaultHandler.setMintPaused.selector;
-        targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
+        bytes4[] memory selectors = new bytes4[](15);
+        selectors[0] = handler.mint.selector; selectors[1] = handler.redeem.selector;
+        selectors[2] = handler.transferShares.selector; selectors[3] = handler.donate.selector;
+        selectors[4] = handler.slash.selector; selectors[5] = handler.fault.selector;
+        selectors[6] = handler.swap.selector; selectors[7] = handler.component.selector;
+        selectors[8] = handler.changeBasket.selector; selectors[9] = handler.rescue.selector;
+        selectors[10] = handler.fees.selector; selectors[11] = handler.pause.selector;
+        selectors[12] = handler.liquidate.selector; selectors[13] = handler.convert.selector;
+        selectors[14] = handler.claim.selector;
+        targetSelector(FuzzSelector(address(handler), selectors));
         targetContract(address(handler));
     }
 
-    /// Every unit that entered or left the vault is accounted for, D included while outside.
-    function invariant_componentBalancesMatchLedger() public view {
+    function invariant_physicalAssetsAreConserved() public view {
         for (uint256 i; i < 4; ++i) {
-            uint256 expected = handler.minted(i) + handler.donated(i) + handler.swappedIn(i) - handler.redeemed(i)
-                - handler.claimedOut(i) - handler.rescued(i) - handler.slashed(i) - handler.swappedOut(i);
-            assertEq(handler.rawBalance(i, address(vault)), expected, "component balance");
+            MockFaultyERC20 token = handler.tokens(i);
+            uint256 total = token.rawBalanceOf(address(vault)) + token.rawBalanceOf(address(handler));
+            for (uint256 k; k < 5; ++k) total += token.rawBalanceOf(handler.actors(k));
+            assertEq(total + handler.lost(i), handler.issued(i));
         }
     }
 
-    /// Reserves only change through mint, sync, swaps, normal redemption, recognized losses and
-    /// write-offs, and a token leaves the basket only with no reserve.
-    function invariant_reservesMatchLedger() public view {
-        uint256[] memory reserves = vault.reserves();
-        uint256[] memory claimedTotals = vault.totalClaimed();
-        for (uint256 i; i < reserves.length; ++i) {
-            assertEq(reserves[i], handler.ledgerReserve(i), "reserve");
-            assertEq(claimedTotals[i], handler.claimedOut(i), "total claimed");
-        }
-        if (reserves.length == 3) assertEq(handler.ledgerReserve(3), 0, "reserve outside the basket");
-    }
-
-    /// The vault always holds at least what it owes: its reserves in normal operation, and
-    /// everything that can still be claimed during liquidation.
-    function invariant_vaultCoversWhatItOwes() public view {
-        uint256[] memory reserves = vault.reserves();
-        uint256[] memory rights = vault.rightsClaimed();
-        uint256[] memory claimedTotals = vault.totalClaimed();
-        for (uint256 i; i < reserves.length; ++i) {
-            uint256 held = handler.rawBalance(i, address(vault));
-            assertLe(rights[i], reserves[i], "rights above reserve");
-            assertLe(claimedTotals[i], rights[i], "paid above rights");
-            if (!vault.liquidationActive()) {
-                assertGe(held, reserves[i], "insolvent");
-                continue;
-            }
-            if (i == 2 && handler.tokenC().fault() == MockFaultyERC20.Fault.RevertOnBalanceOf) continue;
-            uint256 claimableTotal;
-            for (uint256 k; k < handler.actorCount(); ++k) {
-                claimableTotal += vault.claimable(handler.actors(k), i);
-            }
-            assertLe(claimableTotal, held, "claimable above balance");
-        }
-    }
-
-    /// In normal operation reserves are empty when there is no GRET. Otherwise A, B and C stay
-    /// positive unless a loss wiped them, the rebalancer sold them or C was written off, swaps never
-    /// empty the whole basket, and the supply is either zero or at least MIN_SUPPLY.
-    function invariant_supplyAndReservesMoveTogether() public view {
-        if (vault.liquidationActive()) return;
-        uint256[] memory reserves = vault.reserves();
-        uint256 supply = vault.totalSupply();
-        assertTrue(supply == 0 || supply >= vault.MIN_SUPPLY(), "supply below minimum");
-        uint256 total;
-        for (uint256 i; i < reserves.length; ++i) {
-            total += reserves[i];
-            if (supply == 0) assertEq(reserves[i], 0, "reserve without supply");
-            else if (
-                i < 3 && handler.lossRecognized(i) == 0 && handler.swappedOut(i) == 0
-                    && handler.writtenOffAmount(i) == 0
-            ) {
-                assertGt(reserves[i], 0, "supply without reserve");
-            }
-        }
-        if (supply != 0 && handler.lossRecognized(2) == 0 && handler.writtenOffAmount(2) == 0) {
-            assertGt(total, 0, "supply without basket");
-        }
-    }
-
-    /// During liquidation, converted and unconverted GRET add up to the snapshot, and nobody has
-    /// been paid more than their share.
-    function invariant_liquidationRightsAddUp() public view {
+    function invariant_claimsNeverExceedAssets() public view {
         if (!vault.liquidationActive()) return;
         uint256 converted;
-        for (uint256 k; k < handler.actorCount(); ++k) {
-            address actor = handler.actors(k);
-            converted += vault.claimShares(actor);
-            for (uint256 i; i < vault.componentCount(); ++i) {
-                assertLe(vault.claimed(actor, i), handler.entitlement(actor, i), "claimed above entitlement");
-            }
+        for (uint256 k; k < 5; ++k) converted += vault.claimShares(handler.actors(k));
+        assertEq(converted + vault.totalSupply(), vault.liquidationSupply());
+        for (uint256 i; i < vault.componentCount(); ++i) {
+            if (i == 2 && handler.tokens(i).fault() == MockFaultyERC20.Fault.RevertOnBalanceOf) continue;
+            uint256 payableTotal;
+            for (uint256 k; k < 5; ++k) payableTotal += vault.claimable(handler.actors(k), i);
+            assertLe(payableTotal, handler.tokens(i).rawBalanceOf(address(vault)));
         }
-        assertEq(converted + vault.totalSupply(), vault.liquidationSupply(), "liquidation shares");
     }
 
-    function invariant_noViolationsDuringOperations() public view {
-        assertFalse(handler.wrongAmount(), "wrong amount");
-        assertFalse(handler.valuePerShareDecreased(), "value per share decreased");
-        assertFalse(handler.redeemedWithoutMint(), "redeemed without a previous mint");
-        assertFalse(handler.governanceChangedWhatIsOwed(), "governance changed what is owed");
-        assertFalse(handler.rescuedBeyondSurplus(), "rescued beyond surplus");
-        assertFalse(handler.activationFailed(), "activation failed");
-        assertFalse(handler.supplyBelowMinimum(), "supply below minimum");
-        assertFalse(handler.vaultAcceptedShares(), "vault accepted GRET");
-        assertFalse(handler.swapChangedOtherReserves(), "swap changed the wrong reserves");
-        assertFalse(handler.removedWithReserve(), "removed a component with reserve");
-        assertFalse(handler.rescuedWrittenOff(), "rescued a written-off token");
-        assertFalse(handler.wrongFee(), "wrong fee");
-        assertFalse(handler.mintedWhilePaused(), "minted while paused");
-        assertLe(vault.mintFee(), vault.MAX_FEE(), "mint fee above the cap");
-        assertLe(vault.redeemFee(), vault.MAX_FEE(), "redeem fee above the cap");
-        assertEq(vault.balanceOf(address(vault)), 0, "vault holds GRET");
+    function invariant_eachHolderStaysWithinItsLiquidationAllocation() public view {
+        if (!vault.liquidationActive()) return;
+        uint256 supply = vault.liquidationSupply();
+        uint256[] memory basis = vault.liquidationBasis();
+        for (uint256 i; i < vault.componentCount(); ++i) {
+            uint256 receivedTotal;
+            for (uint256 k; k < 5; ++k) {
+                address actor = handler.actors(k);
+                uint256 shares = vault.claimShares(actor);
+                // Nominal consumed rights cannot exceed this holder's established entitlement.
+                assertLe(vault.claimed(actor, i), shares * basis[i] / supply);
+                // Independent cash ceiling: activation balance plus subsequent external inflows.
+                // At most one base unit per successful claim accounts for sequential rounding.
+                uint256 received = handler.receivedInClaims(actor, i);
+                assertLe(received, shares * handler.liquidationInflow(i) / supply +
+                    handler.successfulClaims(actor, i));
+                receivedTotal += received;
+            }
+            assertEq(receivedTotal, vault.totalClaimed()[i]);
+        }
+    }
+
+    function invariant_claimLedgersMatchIndividualRights() public view {
+        uint256[] memory consumed = vault.rightsClaimed();
+        uint256[] memory paid = vault.totalClaimed();
+        uint256[] memory basis = vault.liquidationBasis();
+        for (uint256 i; i < vault.componentCount(); ++i) {
+            uint256 individual;
+            for (uint256 k; k < 5; ++k) individual += vault.claimed(handler.actors(k), i);
+            assertEq(individual, consumed[i]);
+            assertLe(paid[i], consumed[i]);
+            assertLe(consumed[i], basis[i]);
+            if (!vault.liquidationActive()) assertEq(basis[i], 0);
+        }
+        assertLe(vault.mintFee(), vault.MAX_FEE());
+        assertLe(vault.redeemFee(), vault.MAX_FEE());
+    }
+
+    function invariant_permissionsAndShareSupplyHold() public view {
+        assertFalse(handler.violation());
+        uint256 shares;
+        for (uint256 k; k < 5; ++k) {
+            address actor = handler.actors(k);
+            shares += vault.balanceOf(actor);
+            assertEq(vault.hasMinted(actor), handler.everMinted(actor));
+        }
+        assertEq(shares, vault.totalSupply());
+        assertEq(vault.balanceOf(address(vault)), 0);
+        if (!vault.liquidationActive()) assertTrue(shares == 0 || shares >= vault.MIN_SUPPLY());
     }
 }

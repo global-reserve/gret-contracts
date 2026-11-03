@@ -89,7 +89,7 @@ contract GRETVaultAuditGovernanceTest is Test {
         uint256 donation = 100 + random % 100;
         MockERC20(bought).mint(address(vault), donation);
         vm.prank(GOVERNANCE);
-        vault.sync(bought);
+        vault.activateComponent(bought);
         expectedReserve[bought] += donation;
         _assertAccounting();
 
@@ -113,7 +113,7 @@ contract GRETVaultAuditGovernanceTest is Test {
         // Give the re-added token a distinct reserve, so later removals exercise every position.
         MockERC20(sold).mint(address(vault), donation * 1e10);
         vm.prank(GOVERNANCE);
-        vault.sync(sold);
+        vault.activateComponent(sold);
         expectedReserve[sold] = donation * 1e10;
         _assertAccounting();
     }

@@ -66,7 +66,7 @@ describe("GRETVault: randomized sequences", async () => {
     assert.equal(current.holdings.reduce((sum, balance) => sum + balance, 0n), current.supply);
 
     for (const [i, reserve] of current.reserves.entries()) {
-      // Every surplus is synced right away in these sequences, so balances match reserves exactly.
+      // All components are active: their live balances are the normal reserves.
       assert.equal(current.vaultBalances[i], reserve, `component ${i} balance`);
       assert.equal(reserve > 0n, current.supply > 0n, `component ${i} reserve vs supply`);
       // Rounding favors holders: the amount behind each GRET never decreases.
@@ -81,7 +81,7 @@ describe("GRETVault: randomized sequences", async () => {
   }
 
   for (const seed of SEEDS) {
-    it(`seed ${seed}: mint, redeem, transfer and sync keep reserves consistent, then liquidation pays each right once`, async () => {
+    it(`seed ${seed}: mint, redeem, transfer and income keep reserves consistent, then liquidation pays each right once`, async () => {
       const basket = await networkHelpers.loadFixture(basketFixture);
       const { vault, tokens, faulty, deployer, governance, alice, bob, carol, dave, users } = basket;
       const random = createRandom(seed);
@@ -140,25 +140,15 @@ describe("GRETVault: randomized sequences", async () => {
             account: from.account,
           });
         } else {
-          // Governance either adds the surplus to the reserves or rescues it; never more than it.
+          // Income belongs to holders immediately; governance cannot rescue it.
           const index = random.int(tokens.length);
           const donation = random.amount();
           await tokens[index].write.mint([vault.address, donation]);
-          assert.equal(await vault.read.componentSurplus([BigInt(index)]), donation);
-          if (random.int(2) === 0) {
-            await vault.write.sync([tokens[index].address], { account: governance.account });
-          } else {
-            await viem.assertions.revertWithCustomError(
-              vault.write.rescue([tokens[index].address, deployer.account.address, donation + 1n], {
-                account: governance.account,
-              }),
-              vault,
-              "RescueExceedsSurplus",
-            );
-            await vault.write.rescue([tokens[index].address, deployer.account.address, donation], {
-              account: governance.account,
-            });
-          }
+          assert.equal((await vault.read.reserves())[index], state.reserves[index] + donation);
+          await viem.assertions.revertWithCustomError(
+            vault.write.rescue([tokens[index].address, deployer.account.address, donation], { account: governance.account }),
+            vault, "BackingToken",
+          );
         }
 
         state = await assertNormalInvariants(basket, state);
@@ -173,8 +163,8 @@ describe("GRETVault: randomized sequences", async () => {
       assert.equal(liquidationSupply, state.supply);
       assert.deepEqual(frozenReserves, state.reserves);
 
-      // A sync during liquidation raises the reserves, and with them every entitlement.
-      const syncedInLiquidation = tokens.map(() => 0n);
+      // Income during liquidation raises the effective basis and every entitlement.
+      const incomeInLiquidation = tokens.map(() => 0n);
       const entitlement = async (account: `0x${string}`, index: number) => {
         const shares = await vault.read.claimShares([account]);
         const reserve = (await vault.read.reserves())[index];
@@ -222,21 +212,16 @@ describe("GRETVault: randomized sequences", async () => {
             account: user.account,
           });
         } else if (roll < 55) {
-          // A donation after activation is surplus in full, and nothing owed to holders is.
-          // Governance either rescues it or syncs it into everyone's rights.
+          // A donation after activation belongs to the frozen shares.
+          // It automatically increases everyone's rights and remains non-rescuable.
           const index = random.int(2);
           const donation = random.amount();
           await tokens[index].write.mint([vault.address, donation]);
-          assert.equal(await vault.read.componentSurplus([BigInt(index)]), donation);
-          if (random.int(2) === 0) {
-            await vault.write.rescue([tokens[index].address, deployer.account.address, donation], {
-              account: governance.account,
-            });
-          } else {
-            await vault.write.sync([tokens[index].address], { account: governance.account });
-            syncedInLiquidation[index] += donation;
-          }
-          assert.equal(await vault.read.componentSurplus([BigInt(index)]), 0n);
+          incomeInLiquidation[index] += donation;
+          await viem.assertions.revertWithCustomError(
+            vault.write.rescue([tokens[index].address, deployer.account.address, donation], { account: governance.account }),
+            vault, "BackingToken",
+          );
         } else {
           await claimOnce(user, random.int(tokens.length));
         }
@@ -272,12 +257,12 @@ describe("GRETVault: randomized sequences", async () => {
 
       const finalReserves = await vault.read.reserves();
       for (const [index, reserve] of finalReserves.entries()) {
-        assert.equal(reserve, frozenReserves[index] + syncedInLiquidation[index]);
+        assert.equal(reserve, frozenReserves[index] + incomeInLiquidation[index]);
         const dust = reserve - claimedTotals[index];
         assert.ok(dust >= 0n && dust < BigInt(claimants), `component ${index} dust ${dust}`);
         assert.equal(
           vaultBalances[index],
-          balancesAtActivation[index] + syncedInLiquidation[index] - claimedTotals[index],
+          balancesAtActivation[index] + incomeInLiquidation[index] - claimedTotals[index],
         );
       }
     });

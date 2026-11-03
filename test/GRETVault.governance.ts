@@ -83,50 +83,23 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
       );
     });
 
-    it("takes only the surplus of a component, never its reserve", async () => {
-      const basket = await networkHelpers.loadFixture(holdersFixture);
-      const { vault, tokens, governance, carol } = basket;
-      const reserves = await vault.read.reserves();
-      const donation = parseUnits("1", 18);
-      await tokens[0].write.mint([vault.address, donation]);
-      assert.equal(await vault.read.componentSurplus([0n]), donation);
-
-      await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.rescue([tokens[0].address, carol.account.address, donation + 1n], {
-          account: governance.account,
-        }),
-        vault,
-        "RescueExceedsSurplus",
-        [getAddress(tokens[0].address), donation + 1n, donation],
-      );
-      await vault.write.rescue([tokens[0].address, carol.account.address, donation], {
-        account: governance.account,
-      });
+    it("cannot rescue any component income while holders exist", async () => {
+      const { vault, tokens, governance, carol } = await networkHelpers.loadFixture(holdersFixture);
+      const before = (await vault.read.reserves())[0];
+      await tokens[0].write.mint([vault.address, 123n]);
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.rescue([tokens[0].address, carol.account.address, 1n], { account: governance.account }),
-        vault,
-        "RescueExceedsSurplus",
-        [getAddress(tokens[0].address), 1n, 0n],
+        vault, "BackingToken", [getAddress(tokens[0].address)],
       );
-
-      assert.deepEqual(await vault.read.reserves(), reserves);
-      assert.deepEqual(await balancesOf(basket, vault.address), reserves);
+      assert.equal((await vault.read.reserves())[0], before + 123n);
     });
 
-    it("governance chooses between sync and rescue for each surplus", async () => {
+    it("component donations belong to holders without governance discretion", async () => {
       const { vault, tokens, governance, carol } = await networkHelpers.loadFixture(holdersFixture);
       await tokens[1].write.mint([vault.address, 500n]);
-      await tokens[2].write.mint([vault.address, 700n]);
-
-      await vault.write.sync([tokens[1].address], { account: governance.account });
-      await vault.write.rescue([tokens[2].address, carol.account.address, 700n], { account: governance.account });
-
-      assert.equal(await vault.read.componentSurplus([1n]), 0n);
-      assert.equal(await vault.read.componentSurplus([2n]), 0n);
       await viem.assertions.revertWithCustomError(
-        vault.write.rescue([tokens[1].address, carol.account.address, 1n], { account: governance.account }),
-        vault,
-        "RescueExceedsSurplus",
+        vault.write.rescue([tokens[1].address, carol.account.address, 500n], { account: governance.account }),
+        vault, "BackingToken",
       );
     });
 
@@ -134,7 +107,7 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
       const basket = await networkHelpers.loadFixture(basketFixture);
       const { vault, tokens, governance, alice, carol } = basket;
       await tokens[0].write.mint([vault.address, 123n]);
-      assert.equal(await vault.read.componentSurplus([0n]), 123n);
+      assert.equal((await vault.read.reserves())[0], 123n);
 
       await vault.write.rescue([tokens[0].address, carol.account.address, 123n], { account: governance.account });
       await vault.write.mint([INITIAL_SHARES, INITIAL_AMOUNTS, 0n, 0n], { account: alice.account });
@@ -142,41 +115,17 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
       assert.deepEqual(await balancesOf(basket, vault.address), INITIAL_AMOUNTS);
     });
 
-    it("during liquidation, takes only what exceeds the rights still pending", async () => {
-      const { vault, tokens, faulty, governance, alice, bob, carol } =
-        await networkHelpers.loadFixture(holdersFixture);
+    it("liquidation income remains protected even after a holder already claimed", async () => {
+      const { vault, tokens, governance, alice, carol } = await networkHelpers.loadFixture(holdersFixture);
       await vault.write.activateLiquidation({ account: governance.account });
-      assert.equal(await vault.read.componentSurplus([0n]), 0n);
-
-      // Claims lower the balance and the pending rights by the same amount.
       await vault.write.convertToClaims([INITIAL_SHARES], { account: alice.account });
       await vault.write.claim([0n, alice.account.address, 0n], { account: alice.account });
-      assert.equal(await vault.read.componentSurplus([0n]), 0n);
-
       await tokens[0].write.mint([vault.address, 50n]);
-      assert.equal(await vault.read.componentSurplus([0n]), 50n);
-      await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.rescue([tokens[0].address, carol.account.address, 51n], { account: governance.account }),
-        vault,
-        "RescueExceedsSurplus",
-        [getAddress(tokens[0].address), 51n, 50n],
-      );
-      await vault.write.rescue([tokens[0].address, carol.account.address, 50n], { account: governance.account });
-
-      // A component that fails blocks only its own rescue; pending rights stay payable.
-      await faulty.write.setFault([Fault.RevertOnBalanceOf]);
       await viem.assertions.revertWithCustomError(
-        vault.write.rescue([faulty.address, carol.account.address, 1n], { account: governance.account }),
-        faulty,
-        "BalanceOfBlocked",
+        vault.write.rescue([tokens[0].address, carol.account.address, 1n], { account: governance.account }),
+        vault, "BackingToken",
       );
-      const bobShares = await vault.read.balanceOf([bob.account.address]);
-      await vault.write.convertToClaims([bobShares], { account: bob.account });
-      for (const i of [0n, 1n, 2n]) {
-        await vault.write.claim([i, bob.account.address, 0n], { account: bob.account });
-      }
-      await vault.write.claim([1n, alice.account.address, 0n], { account: alice.account });
-      await vault.write.claim([2n, alice.account.address, 0n], { account: alice.account });
+      assert.ok((await vault.read.claimable([alice.account.address, 0n])) > 0n);
     });
 
     it("rejects zero amounts, the zero address and the vault itself", async () => {
@@ -261,7 +210,7 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
       await tokens[0].write.mint([vault.address, 10n]);
 
       for (const call of [
-        () => vault.write.sync([tokens[0].address], { account: governance.account }),
+        () => vault.write.activateComponent([tokens[0].address], { account: governance.account }),
         () => vault.write.activateLiquidation({ account: governance.account }),
         () => vault.write.proposeGovernance([governance.account.address], { account: governance.account }),
         () => vault.write.proposeRebalancer([governance.account.address], { account: governance.account }),
@@ -277,7 +226,7 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
         await viem.assertions.revertWithCustomError(call(), vault, "NotGovernance");
       }
 
-      await vault.write.sync([tokens[0].address], { account: carol.account });
+      await vault.write.activateComponent([tokens[0].address], { account: carol.account });
       await vault.write.activateLiquidation({ account: carol.account });
       assert.equal(await vault.read.liquidationActive(), true);
     });

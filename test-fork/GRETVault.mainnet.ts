@@ -170,7 +170,7 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
     }
   });
 
-  it("each component works in its own vault: mint, redemption, rescue and liquidation", async () => {
+  it("each component works in its own vault: mint, redemption, automatic income and liquidation", async () => {
     const results: Record<string, string>[] = [];
 
     for (const component of BASKET) {
@@ -226,14 +226,19 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
         assert.ok(got <= expected && got + ROUNDING >= expected, `got ${got} of ${expected}`);
         await assertAccounting();
       });
-      await step("rescue", async () => {
+      await step("automatic income", async () => {
+        const before = await balanceOf(token, vault.address);
         await erc20.write.transfer([vault.address, 1_000n], { account: alice.account });
-        const surplus = await vault.read.componentSurplus([0n]);
-        assert.ok(surplus + ROUNDING >= 1_000n, `surplus ${surplus}`);
-        await vault.write.rescue([token, bob.account.address, surplus], { account: governance.account });
-        // The outgoing transfer may also round, leaving a unit or two behind.
-        assert.ok((await vault.read.componentSurplus([0n])) <= ROUNDING);
-        await assertAccounting();
+        const held = await balanceOf(token, vault.address);
+        assert.ok(held - before + ROUNDING >= 1_000n);
+        assert.equal((await vault.read.reserves())[0], held);
+        const supply = await vault.read.totalSupply();
+        assert.equal((await vault.read.previewMint([INITIAL_SHARES]))[0],
+          (held * INITIAL_SHARES + supply - 1n) / supply);
+        await viem.assertions.revertWithCustomError(
+          vault.write.rescue([token, bob.account.address, 1n], { account: governance.account }),
+          vault, "BackingToken",
+        );
       });
       await step("liquidation", async () => {
         await vault.write.activateLiquidation({ account: governance.account });
@@ -351,22 +356,21 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
       await guard.write.checkSwap([paxg, sold, cbBTC, satoshisFor(10_000n) + 1n], { account: vault.address }),
     );
     assert.equal(await guard.read.weeklyLoss(), 0n);
-    const lossHash = await guard.write.checkSwap([paxg, sold, cbBTC, satoshisFor(9_810n)], { account: vault.address });
-    const lossGas = await gasOf(lossHash);
+    // Reconstruct the pre-trade value independently, then deliver the incoming buy token.
+    // checkSwap is called after that receipt and before the sell token leaves.
     let priced = 0n;
-    for (const [i, reserve] of (await vault.read.reserves()).entries()) {
-      const balance = await publicClient.readContract({
-        address: tokens[i],
-        abi: erc20Abi,
-        functionName: "balanceOf",
-        args: [vault.address],
-      });
+    for (const token of tokens) {
       try {
-        priced += await guard.read.valueOf([tokens[i], reserve < balance ? reserve : balance]);
+        priced += await guard.read.valueOf([token, await balanceOf(token, vault.address)]);
       } catch {
         // Unpriced or stale: left out of the vault's value.
       }
     }
+    const incoming = satoshisFor(9_810n);
+    const bitcoin = await viem.getContractAt("MockERC20", cbBTC);
+    await bitcoin.write.transfer([vault.address, incoming], { account: alice.account });
+    const lossHash = await guard.write.checkSwap([paxg, sold, cbBTC, incoming], { account: vault.address });
+    const lossGas = await gasOf(lossHash);
     const [recorded] = parseEventLogs({
       abi: guard.abi,
       eventName: "LossRecorded",
@@ -419,6 +423,7 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
     await vault.write.acceptRebalancer({ account: bob.account });
     await vault.write.applyPriceGuard();
     await vault.write.addComponent([tokens[joining]], { account: governance.account });
+    await vault.write.activateComponent([tokens[joining]], { account: governance.account });
 
     /** The vault holds every reserve it records, and the difference is rounding dust only. */
     const assertBacked = async () => {

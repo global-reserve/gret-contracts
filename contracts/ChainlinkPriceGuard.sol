@@ -20,7 +20,7 @@ interface IChainlinkFeed {
 interface IGRETVaultReserves {
     function components() external view returns (address[] memory);
 
-    function reserves() external view returns (uint256[] memory);
+    function excluded(address token) external view returns (bool);
 }
 
 /// @title Chainlink price guard of the GRET vault
@@ -111,9 +111,9 @@ contract ChainlinkPriceGuard is IPriceGuard {
             currentWeek = week;
             weeklyLoss = 0;
         }
-        // The vault calls before updating its reserves, so this is its value before the swap. It
-        // includes the reserve being sold, so it is positive whenever there is a loss.
-        uint256 vaultValue = _vaultValue();
+        // Buy tokens have arrived and sell tokens have not left. Exclude the receipt so the
+        // denominator is pre-swap backing, not both sides of the exchange.
+        uint256 vaultValue = _vaultValue(buy, received);
         uint256 total = weeklyLoss + Math.mulDiv(loss, 1e18, vaultValue, Math.Rounding.Ceil);
         if (total > WEEKLY_LIMIT) revert WeeklyLossTooHigh(total, WEEKLY_LIMIT);
         weeklyLoss = total;
@@ -144,19 +144,16 @@ contract ChainlinkPriceGuard is IPriceGuard {
         return Math.mulDiv(amount, uint256(answer) * 1e18, scale, rounding);
     }
 
-    /// @dev What backs GRET at current prices: each component at the lesser of its recognized
-    /// reserve and the vault's actual balance, so neither a loss nobody has recognized yet nor
-    /// tokens that are not reserve (a donation, what the swap just brought in) count. A component
-    /// the guard cannot price, or whose balance cannot be read, counts as zero, which only makes
-    /// each loss count for more.
-    function _vaultValue() private view returns (uint256 total) {
+    /// @dev Live active backing immediately before the swap: the incoming buy amount is
+    /// removed in token units before valuation. Each failed/unpriced component counts as zero.
+    function _vaultValue(address buy, uint256 received) private view returns (uint256 total) {
         address[] memory tokens = IGRETVaultReserves(vault).components();
-        uint256[] memory amounts = IGRETVaultReserves(vault).reserves();
         for (uint256 i; i < tokens.length; ++i) {
             address token = tokens[i];
-            if (amounts[i] == 0 || address(_feeds[token].feed) == address(0)) continue;
+            if (address(_feeds[token].feed) == address(0) || IGRETVaultReserves(vault).excluded(token)) continue;
             try IERC20Metadata(token).balanceOf(vault) returns (uint256 balance) {
-                try this.valueOf(token, Math.min(amounts[i], balance)) returns (uint256 value) {
+                if (token == buy) balance = Math.saturatingSub(balance, received);
+                try this.valueOf(token, balance) returns (uint256 value) {
                     total += value;
                 } catch {}
             } catch {}

@@ -2,6 +2,7 @@
 pragma solidity 0.8.38;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
@@ -11,7 +12,7 @@ import {IPriceGuard} from "./IPriceGuard.sol";
 
 /// @title Global Reserve Token vault
 /// @notice Basket of ERC-20 components whose shares are GRET. Mint and normal redemption are in
-/// kind and proportional to the recognized reserves, so no amount per GRET is set anywhere: it
+/// kind and proportional to the active components' actual balances, so no amount per GRET is set anywhere: it
 /// follows what the vault holds. Governance, an external contract whose voting lives outside the
 /// vault, can start an irreversible liquidation in which any holder exits component by component,
 /// decides what to do with tokens that are not backing GRET, and changes the basket: it adds and
@@ -32,6 +33,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// @notice Normal redemption cannot leave the supply above zero but below this amount, so
     /// rounding dust can never dominate the basket.
     uint256 public constant MIN_SUPPLY = INITIAL_SHARES;
+    /// @notice Maximum base-unit residue allowed when deactivating/removing an empty component.
+    uint256 public constant MAX_REMOVAL_DUST = 10;
     /// @notice Highest number of components. Mint and redemption visit every component in one
     /// transaction, so the cap keeps them within Ethereum's per-transaction gas limit.
     uint256 public constant MAX_COMPONENTS = 128;
@@ -54,7 +57,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     uint256 public constant FEE_INCREASE_DELAY = 7 days;
     uint256 private constant FEE_DENOMINATOR = 10_000;
 
-    /// @notice Starts the liquidation, syncs and rescues surplus, changes the basket and appoints
+    /// @notice Starts liquidation, manages component activation and changes the basket; appoints
     /// the rebalancer and its own successor.
     address public governance;
     address public pendingGovernance;
@@ -77,9 +80,11 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     mapping(address token => uint256) public componentReadyAt;
     /// @notice Earliest timestamp at which a proposed write-off may take effect; zero if none.
     mapping(address token => uint256) public writeOffReadyAt;
-    /// @notice Tokens whose reserve was written off. `rescue` can never take them; only `sync` can
-    /// return their balance to the reserves.
+    /// @notice Permanent write-off history. These tokens can never be rescued or removed,
+    /// even after governance reactivates them for normal operation.
     mapping(address token => bool) public writtenOff;
+    /// @notice Excluded components are never called by normal mint/redemption or the price guard.
+    mapping(address token => bool) public excluded;
 
     /// @notice Share of the GRET issued by a mint that goes to `feeRecipient`, in basis points.
     uint256 public mintFee;
@@ -97,10 +102,9 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// @dev Component index plus one; zero for tokens outside the basket.
     mapping(address token => uint256) private _componentSlot;
     uint256[] private _initialAmounts;
-    /// @dev Recognized balances: what entered through mint or sync, minus what left through
-    /// redemption and recognized losses. When liquidation starts they become the basis of every
-    /// claim, and only sync can still raise them. Rescue never reduces them.
-    uint256[] private _reserves;
+    /// @dev Established nominal liquidation basis. Zero throughout normal operation; initialized
+    /// separately for each component on its first successful claim and raised by later income.
+    uint256[] private _liquidationBasis;
     /// @dev Liquidation rights consumed per component, before any loss haircut.
     uint256[] private _rightsClaimed;
     /// @dev Component amounts actually paid out by claims.
@@ -127,8 +131,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
     event Minted(address indexed account, uint256 shares, uint256[] amounts);
     event Redeemed(address indexed account, uint256 shares, uint256[] amounts);
-    event Synced(address indexed token, uint256 added, uint256 reserve);
-    event LossRecognized(uint256 indexed index, uint256 loss, uint256 reserve);
+    event ComponentActivationChanged(address indexed token, bool active);
     event LiquidationActivated(uint256 supply);
     event MintPauseChanged(bool paused);
     event ConvertedToClaims(address indexed account, uint256 shares);
@@ -148,7 +151,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     event InitialAmountsSet(uint256[] amounts);
     event WriteOffProposed(address indexed token, uint256 readyAt);
     event WriteOffCancelled(address indexed token);
-    event ComponentWrittenOff(address indexed token, uint256 amount);
+    event ComponentWrittenOff(address indexed token);
     event FeesProposed(uint256 mintFee, uint256 redeemFee, uint256 readyAt);
     event FeesProposalCancelled();
     event FeesChanged(uint256 mintFee, uint256 redeemFee);
@@ -182,9 +185,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     error LiquidationNotActive();
     error NothingToClaim(address account, uint256 index);
     error ZeroAmount();
-    error RescueExceedsSurplus(address token, uint256 amount, uint256 surplus);
     error SharesBelowMin(uint256 shares, uint256 minShares);
-    error BackingReduced(address token, uint256 balance, uint256 owed);
     error NotGovernance(address caller);
     error NotPendingGovernance(address caller);
     error NoPendingGovernance();
@@ -205,7 +206,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     error EmptyBasket();
     error NoPendingWriteOff(address token);
     error WriteOffNotReady(address token, uint256 readyAt);
-    error NoReserve(address token);
+    error ComponentExcluded(address token);
+    error BackingToken(address token);
     error TokenWrittenOff(address token);
     error FeeAboveMax(uint256 fee);
     error NoPendingFees();
@@ -243,12 +245,11 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// @notice Contributes every component in proportion to the reserves and mints up to `shares`
     /// GRET: the mint fee goes to `feeRecipient` and the rest to the caller, reverting if the caller
     /// would get fewer than `minShares`. The first mint (supply zero) contributes the initial basket
-    /// for exactly 1 GRET in total. Components with no reserve (just added, sold off or lost) are not
-    /// asked for. `version` is the `basketVersion` that `maxAmountsIn` was prepared for.
+    /// for exactly 1 GRET in total. Excluded or zero-balance components are not asked for.
+    /// `version` is the `basketVersion` that `maxAmountsIn` was prepared for.
     /// @dev Contributions round up. GRET is issued for what actually arrived, rounded down, so a
     /// component that delivers a few units less costs the minter, never the existing holders;
-    /// `minShares` bounds that cost. Losses on any component are recognized first, so the minter
-    /// does not pay for them.
+    /// `minShares` bounds that cost. Snapshot every active balance before pulling any input.
     function mint(uint256 shares, uint256[] calldata maxAmountsIn, uint256 minShares, uint256 version)
         external
         nonReentrant
@@ -261,14 +262,17 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
         uint256 count = _components.length;
         uint256 supply = totalSupply();
+        if (supply == 0 && shares != INITIAL_SHARES) revert InvalidInitialMint(shares);
         uint256[] memory balancesBefore = new uint256[](count);
+        uint256[] memory amounts = new uint256[](count);
         for (uint256 i; i < count; ++i) {
-            if ((supply == 0 ? _initialAmounts[i] : _reserves[i]) == 0) continue;
+            if (excluded[address(_components[i])]) continue;
+            if (supply == 0 && _initialAmounts[i] == 0) continue;
             balancesBefore[i] = _components[i].balanceOf(address(this));
-            _recognizeLoss(i, balancesBefore[i]);
+            amounts[i] = supply == 0 ? _initialAmounts[i]
+                : Math.mulDiv(shares, balancesBefore[i], supply, Math.Rounding.Ceil);
         }
 
-        uint256[] memory amounts = previewMint(shares);
         received = new uint256[](count);
         minted = supply == 0 ? INITIAL_SHARES : shares;
         bool contributed;
@@ -276,7 +280,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
             if (amounts[i] == 0) continue;
             received[i] = _pull(i, amounts[i], maxAmountsIn[i], balancesBefore[i]);
             contributed = true;
-            if (supply != 0) minted = Math.min(minted, Math.mulDiv(received[i], supply, _reserves[i]));
+            if (supply != 0) minted = Math.min(minted, Math.mulDiv(received[i], supply, balancesBefore[i]));
         }
         // Without this, GRET backed by nothing could be minted after every reserve was lost.
         if (!contributed) revert EmptyBasket();
@@ -286,9 +290,6 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         minted -= fee;
         if (minted < minShares) revert SharesBelowMin(minted, minShares);
 
-        for (uint256 i; i < count; ++i) {
-            _reserves[i] += received[i];
-        }
         _mint(msg.sender, minted);
         if (fee != 0) _chargeFee(fee, true);
         hasMinted[msg.sender] = true;
@@ -300,7 +301,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// transfer fails the whole redemption reverts. The supply left must be zero or at least
     /// `MIN_SUPPLY`. `version` is the `basketVersion` that `minAmountsOut` was prepared for.
     /// @dev Only for wallets that completed a mint. Amounts round down, in favor of the vault.
-    /// Losses are recognized first, so every holder shares them in proportion.
+    /// Live balances include all income and losses before calculating proportional outputs.
     function redeem(uint256 shares, uint256[] calldata minAmountsOut, uint256 version)
         external
         nonReentrant
@@ -312,7 +313,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
     /// @notice Like `redeem`, but leaves out the `skipped` components, for when one of them cannot be
     /// sent: an issuer froze the vault, or a token was made to fail. The caller gives up its share
-    /// of them, which stays with the other holders, or becomes surplus if nobody is left. Their
+    /// of them, which stays with the other holders, or with a future bootstrap if nobody remains. Their
     /// `minAmountsOut` must be zero.
     /// @dev Skipped components are not called at all, so no token can block this exit. It keeps the
     /// 7-day notice of a new rebalancer meaningful: whoever minted can always leave with every
@@ -331,61 +332,60 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         return _redeem(shares, minAmountsOut, skip);
     }
 
-    /// @notice Adds to the reserve of one component the balance that arrived outside a mint
-    /// (donations, positive rebases, distributions), for the benefit of every holder. Only adds;
-    /// never lowers a reserve. Governance chooses between this and `rescue` for each surplus.
-    /// During liquidation it raises every holder's rights in proportion, including over what
-    /// they already claimed.
-    /// @dev Takes the token's address, not its index, so a call waiting in a timelock cannot land
-    /// on another component after a removal shifts the indexes. Touches a single component so a
-    /// failing token cannot block the others. Without mint during liquidation, nobody can enter
-    /// just before a sync to share in it.
-    function sync(address token) external onlyGovernance nonReentrant returns (uint256 added) {
-        if ((liquidationActive ? liquidationSupply : totalSupply()) == 0) revert NoSupply();
-        uint256 index = _indexOf(token);
-
-        added = componentSurplus(index);
-        if (added == 0) return 0;
-        uint256 reserve = _reserves[index] + added;
-        _reserves[index] = reserve;
-        emit Synced(token, added, reserve);
-    }
-
-    /// @notice Lowers the reserve of one component to its actual balance when the vault holds less
-    /// than it recorded (negative rebase, issuer fee or seizure), so every holder shares the loss
-    /// in proportion. Anyone may call it; mint and redemption also do it automatically.
-    function recognizeLoss(uint256 index) external nonReentrant returns (uint256 loss) {
+    /// @notice Activates a newly added or previously excluded component. Its whole balance then
+    /// backs current holders. This does not erase a historical write-off's rescue prohibition.
+    function activateComponent(address token) external onlyGovernance nonReentrant {
         _requireNotLiquidating();
-        _requireIndex(index);
-        loss = _recognizeLoss(index, _components[index].balanceOf(address(this)));
+        _indexOf(token);
+        if (!excluded[token]) return;
+        excluded[token] = false;
+        emit ComponentActivationChanged(token, true);
     }
 
-    /// @notice Amounts `mint` asks for; zero for components it does not ask for.
-    function previewMint(uint256 shares) public view returns (uint256[] memory amounts) {
-        uint256 supply = totalSupply();
-        amounts = new uint256[](_components.length);
-        if (supply == 0) {
-            if (shares != INITIAL_SHARES) revert InvalidInitialMint(shares);
-            for (uint256 i; i < amounts.length; ++i) {
-                amounts[i] = _initialAmounts[i];
-            }
-        } else {
-            for (uint256 i; i < amounts.length; ++i) {
-                amounts[i] = Math.mulDiv(shares, _reserves[i], supply, Math.Rounding.Ceil);
-            }
-        }
+    /// @notice Keeps an empty component inactive even if unsolicited dust later arrives. Larger
+    /// balances can only be excluded by the delayed write-off. Exclusion never permits rescue.
+    function deactivateEmptyComponent(address token) external onlyGovernance nonReentrant {
+        _requireNotLiquidating();
+        _indexOf(token);
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        _requireEmpty(token, balance);
+        excluded[token] = true;
+        emit ComponentActivationChanged(token, false);
     }
 
-    /// @notice Amounts `redeem(shares)` pays, after the redemption fee.
-    function previewRedeem(uint256 shares) public view returns (uint256[] memory amounts) {
+    /// @notice Live mint amounts. Excluded components are not called. Initial mint still uses
+    /// the configured basket; preexisting active balances belong to the new first share.
+    function previewMint(uint256 shares) public view nonReentrantView returns (uint256[] memory amounts) {
+        _requireNotLiquidating();
         uint256 supply = totalSupply();
-        if (shares > supply) revert SharesExceedSupply(shares, supply);
+        if (supply == 0 && shares != INITIAL_SHARES) revert InvalidInitialMint(shares);
         amounts = new uint256[](_components.length);
-        uint256 burned = shares - _fee(shares, redeemFee);
-        if (burned == 0) return amounts;
         for (uint256 i; i < amounts.length; ++i) {
-            amounts[i] = Math.mulDiv(burned, _reserves[i], supply);
+            if (excluded[address(_components[i])]) continue;
+            amounts[i] = supply == 0 ? _initialAmounts[i]
+                : Math.mulDiv(shares, _components[i].balanceOf(address(this)), supply, Math.Rounding.Ceil);
         }
+    }
+
+    /// @notice Live redemption amounts, after fees. Use previewRedeemSkipping for a broken token.
+    function previewRedeem(uint256 shares) public view nonReentrantView returns (uint256[] memory amounts) {
+        _requireNotLiquidating();
+        return _redemptionAmounts(shares, new bool[](_components.length));
+    }
+
+    /// @notice Quotes an exit without calling any skipped or excluded component.
+    function previewRedeemSkipping(uint256 shares, address[] calldata skipped)
+        external
+        view
+        nonReentrantView
+        returns (uint256[] memory amounts)
+    {
+        _requireNotLiquidating();
+        bool[] memory skip = new bool[](_components.length);
+        for (uint256 i; i < skipped.length; ++i) {
+            skip[_indexOf(skipped[i])] = true;
+        }
+        return _redemptionAmounts(shares, skip);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -393,13 +393,14 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     // ---------------------------------------------------------------------------------------------
 
     /// @notice Starts the irreversible liquidation: closes mint and normal redemption, and fixes
-    /// the reserves and the supply as the basis of every claim.
+    /// the share denominator. Each component establishes its own basis on its first claim.
     /// @dev Makes no external calls, so a failing component cannot prevent activation.
     function activateLiquidation() external onlyGovernance nonReentrant {
         _requireNotLiquidating();
 
-        liquidationActive = true;
         uint256 supply = totalSupply();
+        if (supply == 0) revert NoSupply();
+        liquidationActive = true;
         liquidationSupply = supply;
         emit LiquidationActivated(supply);
     }
@@ -427,11 +428,12 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         if (to == address(0)) revert ZeroAddress();
         if (to == address(this)) revert InvalidRecipient();
 
-        uint256 rights = pendingRights(msg.sender, index);
-        amount = _payout(index, rights);
+        (uint256 basis, uint256 rights, uint256 payout) = _claimQuote(msg.sender, index);
+        amount = payout;
         if (amount == 0) revert NothingToClaim(msg.sender, index);
         if (amount < minAmount) revert AmountOutBelowMin(index, amount, minAmount);
 
+        _liquidationBasis[index] = basis;
         claimed[msg.sender][index] += rights;
         _rightsClaimed[index] += rights;
         _totalClaimed[index] += amount;
@@ -439,19 +441,21 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         emit Claimed(msg.sender, index, to, amount, rights);
     }
 
-    /// @notice Amount of component `index` that `account` would receive by claiming now.
-    function claimable(address account, uint256 index) public view returns (uint256) {
-        return _payout(index, pendingRights(account, index));
+    /// @notice Current payout including automatically allocated income. Only this token is read.
+    function claimable(address account, uint256 index) public view nonReentrantView returns (uint256 amount) {
+        _requireIndex(index);
+        (,, amount) = _claimQuote(account, index);
     }
 
-    /// @notice Unclaimed liquidation rights of `account` over component `index`, before any loss.
-    /// @dev Computed on the account's total converted shares, so converting in several steps does
-    /// not accumulate rounding losses.
-    function pendingRights(address account, uint256 index) public view returns (uint256) {
+    /// @notice Nominal pending rights, including income since the last claim of this component.
+    function pendingRights(address account, uint256 index) public view nonReentrantView returns (uint256 rights) {
         _requireIndex(index);
-        uint256 shares = claimShares[account];
-        if (shares == 0) return 0;
-        return Math.mulDiv(shares, _reserves[index], liquidationSupply) - claimed[account][index];
+        (, rights,) = _claimQuote(account, index);
+    }
+
+    /// @notice The basis established by successful claims, without querying any external token.
+    function liquidationBasis() external view returns (uint256[] memory) {
+        return _liquidationBasis;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -462,9 +466,10 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// delivers first and receives after. The price guard must accept the exchange; without a
     /// guard there are no swaps. Mint and redemption follow the new reserves, so this is how the
     /// amounts per GRET change.
-    /// @dev Losses on both components are recognized first. The vault credits what actually
-    /// arrived, with the same tolerance as mint, and the guard prices that. Selling a whole reserve
-    /// stops mint from asking for that component and lets governance remove it.
+    /// @dev Both components must be active. The vault measures receipts with mint
+    /// tolerance and the guard prices them. Selling a whole balance
+    /// stops mint from asking for that component. Removal still requires the empty/dust rule;
+    /// a donation arriving before removal can prevent it (R-16).
     function swap(address sell, uint256 sellAmount, address buy, uint256 buyAmount)
         external
         nonReentrant
@@ -479,16 +484,16 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         IPriceGuard guard = priceGuard;
         if (address(guard) == address(0)) revert NoPriceGuard();
 
-        _recognizeLoss(sellIndex, IERC20(sell).balanceOf(address(this)));
+        if (totalSupply() == 0) revert NoSupply();
+        if (excluded[sell]) revert ComponentExcluded(sell);
+        if (excluded[buy]) revert ComponentExcluded(buy);
+        uint256 reserve = IERC20(sell).balanceOf(address(this));
         uint256 buyBalance = IERC20(buy).balanceOf(address(this));
-        _recognizeLoss(buyIndex, buyBalance);
-        uint256 reserve = _reserves[sellIndex];
         if (sellAmount > reserve) revert SwapExceedsReserve(sell, sellAmount, reserve);
 
         received = _pull(buyIndex, buyAmount, buyAmount, buyBalance);
+        // The guard excludes this measured receipt when reconstructing pre-swap backing.
         guard.checkSwap(sell, sellAmount, buy, received);
-        _reserves[sellIndex] = reserve - sellAmount;
-        _reserves[buyIndex] += received;
         IERC20(sell).safeTransfer(msg.sender, sellAmount);
         emit Swapped(sell, sellAmount, buy, received);
     }
@@ -497,29 +502,15 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     // Governance
     // ---------------------------------------------------------------------------------------------
 
-    /// @notice Sends to `to` tokens that do not back GRET. For a component, at most its surplus:
-    /// the balance above what is still owed to holders. Any other token in full, except one that
-    /// was written off. Works in normal operation and during liquidation.
-    /// @dev For a component, the balance left must still cover what is owed, so a token that
-    /// debits the sender more than `amount` cannot reduce the backing.
+    /// @notice Rescues foreign tokens, or ordinary components only while normal supply is zero.
+    /// Exclusion does not make a component rescuable; written-off tokens are permanently protected.
     function rescue(address token, address to, uint256 amount) external onlyGovernance nonReentrant {
         if (to == address(0)) revert ZeroAddress();
         if (to == address(this)) revert InvalidRecipient();
         if (amount == 0) revert ZeroAmount();
         if (writtenOff[token]) revert TokenWrittenOff(token);
-
-        uint256 slot = _componentSlot[token];
-        if (slot != 0) {
-            uint256 surplus = componentSurplus(slot - 1);
-            if (amount > surplus) revert RescueExceedsSurplus(token, amount, surplus);
-        }
-
+        if (_componentSlot[token] != 0 && (liquidationActive || totalSupply() != 0)) revert BackingToken(token);
         IERC20(token).safeTransfer(to, amount);
-        if (slot != 0) {
-            uint256 owed = _reserves[slot - 1] - _rightsClaimed[slot - 1];
-            uint256 balance = IERC20(token).balanceOf(address(this));
-            if (balance < owed) revert BackingReduced(token, balance, owed);
-        }
         emit Rescued(token, to, amount);
     }
 
@@ -622,8 +613,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     }
 
     /// @notice Adds an announced token once its wait has passed, as the last component. It joins
-    /// with no reserve and no initial amount, so mint does not ask for it until the rebalancer
-    /// buys some.
+    /// inactive and with no initial amount. Governance explicitly activates it before it can
+    /// back normal mint/redemption or participate in swaps.
     /// @dev Anyone may execute it: governance decided when it announced the token, and can cancel
     /// during the wait, so a voting governance needs one vote per change.
     function addComponent(address token) external nonReentrant {
@@ -637,20 +628,22 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
         delete componentReadyAt[token];
         _pushComponent(token, 0);
+        excluded[token] = true;
         ++basketVersion;
         emit ComponentAdded(token, count);
     }
 
-    /// @notice Removes a component with no reserve, for example once the rebalancer sold all of it.
+    /// @notice Removes an empty component. Only tokens with at least 18 decimals may leave up to
+    /// MAX_REMOVAL_DUST base units; lower-precision tokens must have a zero balance.
     /// The components after it move down one index. Any balance left becomes a token outside the
     /// basket, which `rescue` can take in full. A written-off component can never be removed.
-    /// @dev Keeping a written-off component in the basket lets `sync` return its balance as soon as
-    /// it recovers, also during liquidation, instead of after a new 7-day announcement.
+    /// @dev Written-off components retain recovery rights and can never be removed.
     function removeComponent(address token) external onlyGovernance nonReentrant {
         _requireNotLiquidating();
         uint256 index = _indexOf(token);
         if (writtenOff[token]) revert TokenWrittenOff(token);
-        if (_reserves[index] != 0) revert ComponentHasReserve(token, _reserves[index]);
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        _requireEmpty(token, balance);
         uint256 last = _components.length - 1;
         if (last == 0) revert InvalidComponentCount(0);
 
@@ -659,15 +652,15 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
             _components[i] = next;
             _componentSlot[address(next)] = i + 1;
             _initialAmounts[i] = _initialAmounts[i + 1];
-            _reserves[i] = _reserves[i + 1];
         }
         // Claim totals are zero outside liquidation, which never ends, so they need no shifting.
         _components.pop();
         _initialAmounts.pop();
-        _reserves.pop();
+        _liquidationBasis.pop();
         _rightsClaimed.pop();
         _totalClaimed.pop();
         delete _componentSlot[token];
+        delete excluded[token];
         delete writeOffReadyAt[token];
         ++basketVersion;
         emit ComponentRemoved(token, index);
@@ -682,7 +675,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         bool positive;
         for (uint256 i; i < amounts.length; ++i) {
             _initialAmounts[i] = amounts[i];
-            if (amounts[i] != 0) positive = true;
+            if (amounts[i] != 0 && !excluded[address(_components[i])]) positive = true;
         }
         if (!positive) revert EmptyBasket();
         emit InitialAmountsSet(amounts);
@@ -705,10 +698,9 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         emit WriteOffCancelled(token);
     }
 
-    /// @notice Drops the reserve and initial amount of the component once its wait has passed, so
-    /// mint and normal redemption continue without it. It stays in the basket for good, and its
-    /// balance stays in the vault: `rescue` can never take that token, and `sync` returns it to the
-    /// reserves if the token recovers or the write-off was a mistake.
+    /// @notice Excludes the component and clears its initial amount after the notice. Makes no
+    /// token calls. It stays in the basket permanently, protected from rescue and removal;
+    /// governance may reactivate it, and liquidation includes its recoveries automatically.
     /// @dev Anyone may execute it, as with `addComponent`. Governance should cancel the proposal if
     /// the token recovers during the wait.
     function writeOffComponent(address token) external nonReentrant {
@@ -718,14 +710,14 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         if (readyAt == 0) revert NoPendingWriteOff(token);
         if (block.timestamp < readyAt) revert WriteOffNotReady(token, readyAt);
         _requireNotExpired(readyAt);
-        uint256 reserve = _reserves[index];
-        if (reserve == 0) revert NoReserve(token);
+        if (excluded[token]) revert ComponentExcluded(token);
 
         delete writeOffReadyAt[token];
         writtenOff[token] = true;
-        _reserves[index] = 0;
+        excluded[token] = true;
         _initialAmounts[index] = 0;
-        emit ComponentWrittenOff(token, reserve);
+        emit ComponentWrittenOff(token);
+        emit ComponentActivationChanged(token, false);
     }
 
     /// @notice Sets the mint and redemption fees, in basis points, each at most `MAX_FEE` (5%).
@@ -781,7 +773,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
     /// @notice Pauses or resumes minting, at once. Wallets that minted can still redeem; a holder
     /// that never minted cannot qualify until minting resumes (an accepted risk). Useful during an
-    /// incident, or around a `sync` so nobody mints between the pause and it.
+    /// incident or throughout an exclusion/recovery period to prevent new entrants sharing it.
     function setMintPaused(bool paused) external onlyGovernance {
         mintPaused = paused;
         emit MintPauseChanged(paused);
@@ -824,15 +816,6 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     // Views
     // ---------------------------------------------------------------------------------------------
 
-    /// @notice Balance of component `index` above what is still owed to holders: the recognized
-    /// reserve minus the rights already claimed during liquidation.
-    function componentSurplus(uint256 index) public view returns (uint256) {
-        _requireIndex(index);
-        uint256 owed = _reserves[index] - _rightsClaimed[index];
-        uint256 balance = _components[index].balanceOf(address(this));
-        return balance > owed ? balance - owed : 0;
-    }
-
     function componentCount() external view returns (uint256) {
         return _components.length;
     }
@@ -845,8 +828,15 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         return _initialAmounts;
     }
 
-    function reserves() external view returns (uint256[] memory) {
-        return _reserves;
+    /// @notice Live active backing normally; effective nominal claim bases during liquidation.
+    /// Liquidation bases include consumed rights and are not the remaining token balances.
+    function reserves() external view nonReentrantView returns (uint256[] memory amounts) {
+        amounts = new uint256[](_components.length);
+        for (uint256 i; i < amounts.length; ++i) {
+            if (!liquidationActive && excluded[address(_components[i])]) continue;
+            uint256 balance = _components[i].balanceOf(address(this));
+            amounts[i] = liquidationActive ? _effectiveBasis(i, balance) : balance;
+        }
     }
 
     function totalClaimed() external view returns (uint256[] memory) {
@@ -876,37 +866,18 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         if (!hasMinted[msg.sender]) revert RedemptionNotEnabled(msg.sender);
         if (shares == 0) revert ZeroShares();
 
-        // A component whose balanceOf fails keeps its reserve; its transfer decides below. One with
-        // no reserve pays nothing, and neither it nor a skipped one is called.
-        uint256 count = _components.length;
-        for (uint256 i; i < count; ++i) {
-            if (_reserves[i] == 0 || skip[i]) continue;
-            try _components[i].balanceOf(address(this)) returns (uint256 balance) {
-                _recognizeLoss(i, balance);
-            } catch {}
-        }
-
-        amounts = previewRedeem(shares);
+        amounts = _redemptionAmounts(shares, skip);
         uint256 fee = _fee(shares, redeemFee);
         uint256 burned = shares - fee;
         uint256 remaining = totalSupply() - burned;
         if (remaining != 0 && remaining < MIN_SUPPLY) revert SupplyBelowMinimum(remaining);
-        for (uint256 i; i < count; ++i) {
-            if (!skip[i]) continue;
-            // The skipped share stays in the reserve for the other holders; with nobody left, it
-            // leaves the reserve and becomes surplus, since there are no reserves without supply.
-            if (remaining == 0) _reserves[i] -= amounts[i];
-            amounts[i] = 0;
-        }
+        uint256 count = _components.length;
         for (uint256 i; i < count; ++i) {
             if (amounts[i] < minAmountsOut[i]) revert AmountOutBelowMin(i, amounts[i], minAmountsOut[i]);
         }
 
         if (fee != 0) _chargeFee(fee, false);
         _burn(msg.sender, burned);
-        for (uint256 i; i < count; ++i) {
-            _reserves[i] -= amounts[i];
-        }
         for (uint256 i; i < count; ++i) {
             if (amounts[i] != 0) _components[i].safeTransfer(msg.sender, amounts[i]);
         }
@@ -931,33 +902,51 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         }
     }
 
-    /// @dev Normal operation only: lowers the reserve to the balance when the balance is lower.
-    function _recognizeLoss(uint256 index, uint256 balance) private returns (uint256 loss) {
-        uint256 reserve = _reserves[index];
-        if (balance >= reserve) return 0;
-        loss = reserve - balance;
-        _reserves[index] = balance;
-        emit LossRecognized(index, loss, balance);
+    function _redemptionAmounts(uint256 shares, bool[] memory skip) private view returns (uint256[] memory amounts) {
+        uint256 supply = totalSupply();
+        if (shares > supply) revert SharesExceedSupply(shares, supply);
+        amounts = new uint256[](_components.length);
+        uint256 burned = shares - _fee(shares, redeemFee);
+        if (burned == 0) return amounts;
+        for (uint256 i; i < amounts.length; ++i) {
+            if (skip[i] || excluded[address(_components[i])]) continue;
+            amounts[i] = Math.mulDiv(burned, _components[i].balanceOf(address(this)), supply);
+        }
     }
 
-    /// @dev Liquidation payout for `rights` over component `index`: in full while the balance covers
-    /// every pending right, otherwise the same fraction for everyone. The fraction recovers if the
-    /// balance does. If balanceOf fails the rights are paid in full and the transfer decides.
-    function _payout(uint256 index, uint256 rights) private view returns (uint256) {
-        if (rights == 0) return 0;
-        uint256 owed = _reserves[index] - _rightsClaimed[index];
-        try _components[index].balanceOf(address(this)) returns (uint256 balance) {
-            return balance >= owed ? rights : Math.mulDiv(rights, balance, owed);
-        } catch {
-            return rights;
+    /// @dev Only high-precision tokens may leave up to ten base units. Low-decimal assets must
+    /// be exactly empty, so ten whole indivisible assets cannot be discarded as rounding dust.
+    function _requireEmpty(address token, uint256 balance) private view {
+        if (balance == 0) return;
+        if (balance > MAX_REMOVAL_DUST || IERC20Metadata(token).decimals() < 18) {
+            revert ComponentHasReserve(token, balance);
         }
+    }
+
+    function _effectiveBasis(uint256 index, uint256 balance) private view returns (uint256) {
+        return Math.max(_liquidationBasis[index], balance + _rightsClaimed[index]);
+    }
+
+    /// @dev No cached-balance fallback: an unreadable token cannot consume claims or overpay.
+    /// Establish the basis lazily; later income increases all holders' rights automatically.
+    function _claimQuote(address account, uint256 index)
+        private view returns (uint256 basis, uint256 rights, uint256 amount)
+    {
+        uint256 shares = claimShares[account];
+        if (shares == 0) return (0, 0, 0);
+        uint256 balance = _components[index].balanceOf(address(this));
+        basis = _effectiveBasis(index, balance);
+        rights = Math.mulDiv(shares, basis, liquidationSupply) - claimed[account][index];
+        if (rights == 0) return (basis, 0, 0);
+        uint256 owed = basis - _rightsClaimed[index];
+        amount = balance >= owed ? rights : Math.mulDiv(rights, balance, owed);
     }
 
     function _pushComponent(address token, uint256 initialAmount) private {
         _components.push(IERC20(token));
         _componentSlot[token] = _components.length;
         _initialAmounts.push(initialAmount);
-        _reserves.push(0);
+        _liquidationBasis.push(0);
         _rightsClaimed.push(0);
         _totalClaimed.push(0);
     }

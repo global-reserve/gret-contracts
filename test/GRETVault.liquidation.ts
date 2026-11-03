@@ -78,6 +78,7 @@ describe("GRETVault: emergency liquidation", async () => {
       assert.deepEqual(mutating, [
         "acceptGovernance",
         "acceptRebalancer",
+        "activateComponent",
         "activateLiquidation",
         "addComponent",
         "announceComponent",
@@ -92,13 +93,13 @@ describe("GRETVault: emergency liquidation", async () => {
         "cancelWriteOff",
         "claim",
         "convertToClaims",
+        "deactivateEmptyComponent",
         "mint",
         "proposeFees",
         "proposeGovernance",
         "proposePriceGuard",
         "proposeRebalancer",
         "proposeWriteOff",
-        "recognizeLoss",
         "redeem",
         "redeemSkipping",
         "removeComponent",
@@ -108,7 +109,6 @@ describe("GRETVault: emergency liquidation", async () => {
         "setInitialAmounts",
         "setMintPaused",
         "swap",
-        "sync",
         "transfer",
         "transferFrom",
         "writeOffComponent",
@@ -377,33 +377,40 @@ describe("GRETVault: emergency liquidation", async () => {
         vault.write.claim([2n, alice.account.address, 0n], { account: alice.account }),
         vault,
         "Claimed",
-        [getAddress(alice.account.address), 2n, getAddress(alice.account.address), aliceGot, rights[0]],
+        [getAddress(alice.account.address), 2n, getAddress(alice.account.address), aliceGot, aliceGot],
       );
+      const supply = await vault.read.liquidationSupply();
+      const aliceShares = await vault.read.claimShares([alice.account.address]);
+      const bobShares = await vault.read.claimShares([bob.account.address]);
+      const reducedBasis = balance - (balance * 2n) / 5n;
       const bobGot = await vault.read.claimable([bob.account.address, 2n]);
-      assert.ok(bobGot * rights[0] >= aliceGot * rights[1], "later claimants are not worse off");
-      assert.equal(await vault.read.componentSurplus([2n]), 0n);
+      assert.equal(bobGot, mulDivDown(bobShares, reducedBasis, supply));
 
-      // The balance recovers: the remaining rights are paid in full again.
+      // This receipt raises the basis established by Alice's first claim for every holder.
       await tokens[2].write.mint([vault.address, balance]);
-      assert.equal(await vault.read.claimable([bob.account.address, 2n]), rights[1]);
+      const increasedBasis = reducedBasis + balance;
+      assert.equal(await vault.read.claimable([bob.account.address, 2n]), mulDivDown(bobShares, increasedBasis, supply));
       await vault.write.claim([2n, bob.account.address, 0n], { account: bob.account });
       await vault.write.claim([2n, dave.account.address, 0n], { account: dave.account });
       assert.equal(await vault.read.pendingRights([dave.account.address, 2n]), 0n);
-      assert.ok((await vault.read.componentSurplus([2n])) > 0n);
+      assert.equal(await vault.read.claimable([alice.account.address, 2n]),
+        mulDivDown(aliceShares, increasedBasis, supply) - aliceGot);
     });
 
-    it("rights are fixed at activation: later donations do not change them by themselves", async () => {
+    it("later donations increase rights automatically", async () => {
       const basket = await networkHelpers.loadFixture(liquidatingFixture);
       const { vault, tokens, dave } = basket;
       await vault.write.convertToClaims([INITIAL_SHARES / 4n], { account: dave.account });
-      const before = await vault.read.claimable([dave.account.address, 0n]);
-
+      const balance = await tokens[0].read.balanceOf([vault.address]);
+      const supply = await vault.read.liquidationSupply();
+      const shares = INITIAL_SHARES / 4n;
+      assert.equal(await vault.read.claimable([dave.account.address, 0n]), mulDivDown(shares, balance, supply));
       await tokens[0].write.mint([vault.address, 10n ** 24n]);
-
-      assert.equal(await vault.read.claimable([dave.account.address, 0n]), before);
+      assert.equal(await vault.read.claimable([dave.account.address, 0n]),
+        mulDivDown(shares, balance + 10n ** 24n, supply));
     });
 
-    it("a sync during liquidation raises every right in proportion, also over what was claimed", async () => {
+    it("income during liquidation raises every right automatically, also over what was claimed", async () => {
       const basket = await networkHelpers.loadFixture(liquidatingFixture);
       const { vault, tokens, governance, alice, bob } = basket;
       for (const holder of [alice, bob]) {
@@ -414,17 +421,11 @@ describe("GRETVault: emergency liquidation", async () => {
       await vault.write.claim([0n, alice.account.address, 0n], { account: alice.account });
       assert.equal(await vault.read.pendingRights([alice.account.address, 0n]), 0n);
 
-      // A distribution arrives as balance, as with the xStocks multiplier, and governance syncs it.
+      // A distribution arrives as balance, as with the xStocks multiplier, and every frozen share participates automatically.
       const reserve = (await vault.read.reserves())[0];
       const gain = reserve / 10n;
       await tokens[0].write.mint([vault.address, gain]);
-      await viem.assertions.emitWithArgs(
-        vault.write.sync([tokens[0].address], { account: governance.account }),
-        vault,
-        "Synced",
-        [getAddress(tokens[0].address), gain, reserve + gain],
-      );
-      assert.equal(await vault.read.componentSurplus([0n]), 0n);
+      assert.equal((await vault.read.reserves())[0], reserve + gain);
 
       const supply = await vault.read.liquidationSupply();
       for (const holder of [alice, bob]) {

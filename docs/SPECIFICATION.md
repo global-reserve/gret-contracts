@@ -1,649 +1,407 @@
 # GRET specification
 
-Updated on October 29, 2026.
+Updated on November 2, 2026. **Live-balance accounting is the implemented design.** The
+October 27 mainnet pilot is immutable and still runs the previous recognized-reserve design.
+This change does not upgrade, migrate, deploy, or transact with that pilot.
 
 ## Overview
 
-`contracts/GRETVault.sol` is the GRET token and the vault in a single contract: proportional
-mint and normal redemption, per-component emergency liquidation, basket changes and
-rebalancing, and the permissions of an external governance (activating liquidation, deciding
-on surpluses, changing the basket, appointing the rebalancer, the price guard and its own
-successor). `contracts/ChainlinkPriceGuard.sol` is the price guard that limits what swaps can
-lose.
+`contracts/GRETVault.sol` is both the GRET ERC-20 and its basket vault. It supports proportional
+in-kind mint/redemption, per-component emergency claims, basket changes, fees and guarded
+rebalancing. There are no upgrades. `ChainlinkPriceGuard.sol` limits swaps using Chainlink
+prices. Mint, redemption and liquidation use token quantities, not prices.
 
-- GRET represents proportional shares in a reserve of several ERC-20 tokens, minted and
-  redeemed in kind over every component.
-- Mint, redemption and liquidation use no price oracles, and the reserve is normally passive.
-- Governance-authorized rebalancing goes through a single exchange primitive in the vault
-  (see [Basket changes and rebalancing](#basket-changes-and-rebalancing)), priced by an
-  external guard with Chainlink feeds that limits what swaps can lose.
-- Ethereum mainnet is the target network.
+The scope remains a mainnet pilot with the project's own funds, not an offering to third
+parties. The current basket has 11 components; configuration and verified addresses are in
+`scripts/pilot/config.ts`. Target dollar weights do not fix quantities per GRET. The current
+pilot governance is a wallet. The proposed progression remains Safe, then a timelock,
+then a Governor with a separate VORA voting token; those contracts and voting parameters
+are not implemented or decided. GRET carries no votes. See [accepted risks](ACCEPTED_RISKS.md) and [pilot procedure](PILOT.md).
 
-Both contracts are tested with mocks on the local Hardhat network and against the 11 real
-components on an Ethereum mainnet fork (see [Tests and results](#tests-and-results)). They
-have not been independently audited. A mainnet pilot with the project's own funds was
-deployed on October 27, 2026 (see [Mainnet pilot](#mainnet-pilot)). The governance
-contracts (voting, timelock) and any rebalancing mechanism beyond the vault's `swap` and the
-price guard, such as auctions or trading bots, are outside this repository.
-
-The current basket, with its weights, verified addresses and pilot amounts, is in
-[Mainnet pilot](#mainnet-pilot) and in
-[`scripts/pilot/config.ts`](../scripts/pilot/config.ts). Target weights are value
-percentages, not initial amounts per share.
+The contracts have internal tests and reviews, not an independent audit. Mocks are not proof
+of issuer compatibility; fork results are specific to their recorded block and code versions.
 
 ## Core rules
 
-- No upgrades. Fees start at zero and governance can set them within hard-coded caps (see
-  [Fees](#fees)). The basket changes only through governance, with the limits in
-  [Basket changes and rebalancing](#basket-changes-and-rebalancing).
-  Nobody can withdraw the reserves backing GRET without delivering another component in
-  exchange, within the limits of the price guard; governance also decides on what exceeds
-  those reserves (see
-  [Governance](#governance)).
-- The initial amount of each component is set when the vault is created. The first
-  successful mint contributes that basket and issues exactly **1 GRET** in total. This does
-  not fix a price of 1 dollar; the pilot's amounts are in [Mainnet pilot](#mainnet-pilot).
-- Later mints are computed in proportion to the reserves and the supply.
-- The same wallet contributes the components and receives its GRET. There is no dollar
-  minimum and no identity requirement. To enable normal redemption, a mint must complete a
-  positive contribution of every component with a positive reserve and issue a positive
-  amount of GRET; zero, or a rounding that skips a component, does not prove access to the
-  whole basket.
-- The mint history stays with that wallet and is not transferred with GRET. The enabled
-  wallet can also redeem GRET bought or received later.
-- Normal redemption is atomic: if any transfer fails, the whole operation reverts and the
-  wallet keeps its GRET.
-- **Pausing the mint, never the redemption.** Governance can
-  pause and resume minting at once (`setMintPaused`). It helps during an incident and around
-  a `sync`. Wallets that already minted can still redeem; a holder who never minted cannot
-  qualify while the pause lasts (R-07 in [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md)). There is
-  no explicit pause of redemptions: it is
-  exactly the power to trap holders during the notice of a new rebalancer, and the emergency
-  tools are liquidation and write-offs.
-- **Redeeming without a failing component.**
-  `redeemSkipping(shares, minAmountsOut, skipped)` is the same redemption but leaves out the
-  listed components, which are not called at all. The caller gives up its share of them: it
-  stays in the reserve for the other holders or, when the redemption empties the supply,
-  becomes surplus. Whoever holds GRET at that moment shares it, including someone who mints
-  just before the skipping redemption, which keeps the supply from emptying, and redeems after
-  it; if the one skipping was the last holder, that entrant takes all of it (R-08). Without
-  it, a single component that cannot be sent (an issuer freeze, or a
-  token a captured governance syncs in and makes fail) blocks every redemption, so the
-  7-day notice of a new rebalancer would give nobody an exit. Keeping the skipped share as a
-  pending right for the caller was rejected: it would bring liquidation-style accounting
-  into normal operation for an emergency exit.
-- **Minimum supply:** a normal redemption cannot leave the supply between 0 and 1 GRET
-  (`MIN_SUPPLY`). Either everyone leaves or at least 1 GRET remains. Without this floor,
-  whoever held almost the whole supply could redeem down to 1 wei, and the rounding
-  leftovers distorted the basket (1 GRET came to require 1e18 units of an 8-decimal
-  component), making minting unusable. The last holders with less than 1 GRET between them
-  must gather their GRET in one wallet to leave (R-09). While the redemption fee is positive,
-  redemption never empties the supply: the fee stays in it, so at least 1 GRET always remains
-  until governance cuts the fee to zero, which applies at once, or liquidates; with
-  governance's key lost, it remains for good.
-- **Mint by what arrived:** the vault measures what arrives of each component and issues
-  GRET for the minimum proportion received, rounded down. It tolerates up to
-  `MAX_RECEIPT_SHORTFALL` (10 base units) per component, which covers tokens that convert
-  amounts into internal shares (xStocks lose 2–3 wei per transfer). A larger shortfall,
-  such as a fee, reverts. The minter absorbs the shortfall; existing holders never lose
-  value. `minShares` lets the minter refuse a mint that issues too little (R-11).
-- **Recognized losses:** if the vault holds less of a component than its recorded reserve
-  (a negative rebase, an issuer fee or seizure), the reserve drops to the actual balance
-  with the `LossRecognized` event, and the loss is shared by every holder in proportion.
-  Mint and redemption do this automatically before computing, and anyone can call
-  `recognizeLoss(i)`. After a total loss of a component, mint stops asking for it, and mint
-  and redemption continue without it.
-- Tokens that reach the vault outside a mint (donations, positive rebases, distributions)
-  are not recognized on their own. Governance decides, surplus by surplus, whether to add
-  them to the reserves with `sync(token)`, for the benefit of every holder, or to withdraw
-  them with `rescue`. `sync` also works during liquidation. Issuer distributions belong to
-  the holders and are synced (P-3 in [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md#operating-policy)).
-- The vault does not accept GRET: a GRET transfer to its address reverts, so a mistaken
-  transfer is not lost and governance never has GRET at its disposal.
-- GRET carries no votes. The voting mechanism lives outside the vault.
-- The code is public under the MIT license; the license identifier is part of the source
-  verified on Etherscan.
-  Internal handoff notes stay out of the repository.
+- **Normal backing is the live balance of each active component.** No normal reserve amounts
+  are stored. Positive rebases, issuer distributions and direct donations belong to holders
+  as soon as they arrive. Losses likewise affect the next quote/operation immediately.
+  There is no `sync`, `recognizeLoss`, `componentSurplus`, `Synced` or `LossRecognized` API.
+- **Bootstrap:** when supply is zero, the first mint requests exactly `INITIAL_SHARES = 1e18`
+  and contributes the configured initial basket, skipping excluded components. At least one
+  positive contribution is required. Preexisting balances of active components then belong
+  to that first GRET. This includes residues abandoned by a previous last skipping redeemer.
+  Ordinary components may be rescued while normal supply is zero; written-off tokens may not.
+  Blocking bootstrap on unsolicited balances was rejected because anyone could grief it.
+- **Later mints:** snapshot all active balances before any input transfer. For requested shares
+  `s`, supply `S` and each pre-input balance `B[i]`, ask for `ceil(s * B[i] / S)`. A zero balance
+  asks for nothing; an excluded component is not called. Measure receipts and issue at most
+  the minimum `floor(received[i] * S / B[i])` over contributing components. Fee shares come out
+  of this issuance. `maxAmountsIn` and `minShares` bound user cost and net issuance.
+- **Receipt tolerance:** each requested component must deliver a positive amount no larger
+  than requested and no more than ten base units short (`MAX_RECEIPT_SHORTFALL`). The minter
+  absorbs rounding, not existing holders. Larger transfer fees revert. Receipt measurement
+  remains necessary even though backing is live.
+- **Eligibility:** a wallet that completes a mint may redeem normally, including GRET acquired
+  later. Eligibility does not transfer with GRET. A mint must contribute every active nonzero
+  component; zero issuance and an empty backing basket are rejected.
+- **Normal redemption:** calculate outputs from all required live balances before sending any
+  token. The fee is transferred in GRET; the remainder is burned for
+  `floor(burnedShares * B[i] / S)` per component. Every transfer must succeed atomically.
+  Minimum outputs bound requested transfers, not the recipient's actual balance increase.
+- **Skipping:** `redeemSkipping` never calls listed tokens or excluded components, even for
+  `balanceOf`. Their outputs and minima must be zero. Skipped assets remain for other holders,
+  or a later bootstrap if supply empties; the exiting holder retains no separate right.
+  `previewRedeemSkipping` quotes this exit without calling skipped tokens.
+- **Supply floor:** normal redemption leaves either zero or at least `MIN_SUPPLY = 1e18`.
+  Fee shares remain outstanding, so a positive redemption fee prevents a full normal exit.
+  Liquidation permits conversion below that floor and eventually zero unconverted supply.
+- **Mint pause only:** governance can pause/resume minting immediately. Normal redemption is
+  never paused. A secondary-market holder who never minted cannot qualify while paused.
+- GRET transfers to the vault itself revert; otherwise shares are ordinary transferable ERC-20
+  tokens, including unconverted GRET during liquidation.
 
-## Basket changes and rebalancing
+A post-receipt minter now pays against the full increased backing, removing the old dividend
+capture window. Entering before a future gift, before an excluded token is reactivated, or
+before another holder skips an asset can still share that later allocation (R-08).
 
-The product must live in one contract for its whole life, whether the basket has 11
-components or 19, and be able to rebalance without migrating holders. Holders' GRET and the
-reserves stay protected by the rules below; the price of each exchange is chosen by the
-rebalancer and bounded by the price guard.
+Only tokens already in the basket are considered. Payments in another currency, airdrops
+outside the basket or income requiring an issuer-specific claim are not automatically handled.
 
-- **Nobody sets amounts per GRET.** Mint and redemption follow `reserves ÷ supply`, as
-  before. Governance cannot set the mint amounts directly: a mint basket different from
-  the reserves would move value between minters and holders, and without prices the vault
-  cannot tell whether two baskets are worth the same. Rebalancing means changing what the
-  vault holds, and the amounts per GRET follow.
-- **`swap(sell, sellAmount, buy, buyAmount)`**, only for the `rebalancer`: the vault first
-  pulls `buyAmount` of `buy`, measures what arrived (with mint's tolerance) and then sends
-  `sellAmount` of `sell`. It recognizes losses on both components first, sells only
-  recognized reserve, never surplus, requires two different components and is closed
-  during liquidation. The price guard must accept it (next points).
-- **Rebalancer.** None at deployment. Governance proposes one; the proposed address accepts
-  after `BASKET_CHANGE_DELAY` (7 days). A new proposal restarts the wait and governance can
-  cancel it. Governance revokes the rebalancer at once, which also discards a pending one:
-  taking the power away needs no notice. The role is separate from governance so that a
-  timelocked governance can appoint a contract that trades at market prices, such as an
-  auction.
-- **Price guard.** Every
-  `swap` must pass `priceGuard.checkSwap(sell, sellAmount, buy, received)`, called with what
-  actually arrived and before the reserves change; if it reverts, so does the swap. There is
-  none at deployment, and without one there are no swaps. Governance proposes it
-  (`proposePriceGuard`, which must be a contract) and, after `BASKET_CHANGE_DELAY`, anyone
-  applies it (`applyPriceGuard`), within `EXECUTION_WINDOW`; governance can cancel a pending
-  one. There is no way to remove it: to stop swaps, governance revokes the rebalancer. Mint,
-  redemption and liquidation never call it, so a guard that fails or misbehaves can block
-  rebalancing, never an exit. The vault holds no prices or limits: they live in the guard,
-  since a guard that lies about prices would defeat any limit, wherever it lived. A
-  misbehaving guard brings back the earlier situation, a rebalancer trusted with the price,
-  and replacing the guard waits the same 7 days as replacing the rebalancer. The notice
-  covers the guard's address, not its code: a guard behind an upgradeable proxy, or an
-  EIP-7702 account, could change its behavior later without notice (R-18).
-- **`ChainlinkPriceGuard`**, the first guard. It values both sides of a swap in US dollars
-  with one Chainlink feed per token and refuses:
-  - a token without a feed, or whose price is older than its `maxAge`, in the future, zero
-    or negative (fail closed: the swap reverts);
-  - a swap that loses more than 2% of the value sold (`MAX_SWAP_LOSS`);
-  - a swap that would make the week's swaps take more than 2% of the vault's value
-    (`MAX_WEEKLY_LOSS`). Each loss counts as its share of the vault's value just before that
-    swap, and the week adds those shares (`weeklyLoss`). Each priced component is valued at
-    the lesser of its recognized reserve and the vault's actual balance, so neither a loss
-    nobody has recognized yet nor tokens that are not reserve (a donation, what the swap just
-    brought in) count; components it cannot price, or whose `balanceOf` reverts, count as
-    zero. A `balanceOf` that succeeds with malformed return data (fewer than 32 bytes) is not
-    caught: every swap with a loss reverts until that component is written off or a guard
-    without its feed is applied (R-15). That share is what every GRET loses, so mints
-    and redemptions in between change nothing: capital present only when a loss is recorded
-    cannot stretch the limit, and after large exits the limit shrinks with what is left. A
-    dollar budget fixed once a week was rejected for that reason. Weeks are fixed 7-day
-    periods from the Unix epoch, and the count carries on if the vault empties and starts
-    again within the week. A per-swap limit alone lets the same value be traded back and
-    forth, losing up to 2% each time: 50 such swaps take 64%. Swaps that lose nothing do not
-    count. Around the change of week, up to 4% can be lost in a row; a limit that refills
-    gradually would avoid that, but it was rejected as more code. The count lives in each
-    guard, and a newly applied guard starts at zero: in the week of a replacement the old and
-    the new guard together allow up to 4%, and about 6% in a row across the change of week.
-    If governance proposes the next guard as soon as one is applied, chained replacements
-    allow about 7.8% within 7 days. Anyone can apply a ready guard, so a rebalancer can choose
-    that moment (R-02).
-  - What leaves is valued rounded up and what arrives rounded down, so rounding never hides
-    a loss.
-  - It has no owner and nothing can be changed after deployment: tokens, feeds, `maxAge`
-    and both limits are fixed, and each token's decimals are read once, at deployment. If an
-    issuer changed a token's decimals, the guard would misvalue it by that power of ten and
-    neither limit would hold for swaps that sell or buy it. Changing any of them means
-    deploying another guard, with the 7-day notice. Only the vault can call `checkSwap`;
-    otherwise anyone could use up the weekly limit.
-  - Each feed must quote one whole token, with nothing to convert. The proposed feeds are in
-    [`scripts/pilot/config.ts`](../scripts/pilot/config.ts) (`PRICE_FEEDS`), checked on
-    October 26, 2026: Chainlink's "Calculated" feeds for SGOVon and BILon (the underlying
-    fund's price times Ondo's multiplier), SPY's for SPYx (one SPYx is one SPY share; its
-    multiplier only turns internal shares into balance), and those of PAXG and cbBTC.
-    ITOTon, EFAon, IEMGon, JAAAx, VNQon and DBCon have no Ethereum feed (the "JAAA NAV" feed
-    belongs to a different fund token), so half of the basket's weight cannot be swapped
-    until Chainlink adds feeds and a new guard is appointed. The equity feeds follow US
-    market hours: on weekends they go stale and those swaps stop.
-  - Limits of what it protects: a feed of the underlying does not see a token that loses
-    its peg, and a swap that buys such a token at the feed price records no loss, so neither
-    limit applies; feeds update on a deviation threshold (0.5%; 2% for cbBTC), and a swap at
-    a feed price that is off by up to that threshold loses the difference without the guard
-    recording it, on top of both limits. Between two feeds the gap can reach the sum of their
-    thresholds, and it can be taken again on every swap while a feed lags, so it is bounded by
-    the volume swapped, not by the weekly limit; a written-off component can still be bought,
-    and the swap gives it a reserve again without a `sync`; and up to the weekly limit, a stolen
-    rebalancer key still takes value until governance revokes it. Watching `LossRecorded`
-    and each token's market price against its feed is policy, not code (R-02, R-03 and P-8
-    in [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md)).
-- **Adding a component.** Governance announces a token (`announceComponent`, named apart from
-  a Governor's `propose`) and, after 7 days, anyone can add it as
-  the last component, with no reserve and no initial amount. Mint does not ask for it until the
-  rebalancer buys some, or governance syncs a donation of it. The wait lets holders see a
-  new token coming before it can be bought with the reserves.
-- **Removing a component.** Only with no reserve: sold entirely, or lost and recognized. The
-  components after it move down one index. What is left of its balance becomes a token
-  outside the basket, which governance can rescue in full.
-- **Amounts by position are bound to the basket version.** `basketVersion` grows by one with
-  every addition and every removal. `mint`, `redeem`, `redeemSkipping` and
-  `setInitialAmounts` take the version their arrays were prepared for and revert with
-  `BasketChanged(expected, current)` if the basket changed in between: a removal and an
-  addition keep the length, and a minimum written for one token would otherwise apply to
-  whichever token moved into its position. A write-off does not change the version, because
-  the component keeps its position. Clients read `basketVersion()` together with
-  `components()` and the previews; a call waiting in a Safe or a timelock fails instead of
-  landing on another token. Announced tokens let the version change again and again: anyone
-  can add each one once within its window, and governance can remove one at once, at any later
-  time, while it has no reserve, so zero-reserve components added long before can be kept for
-  that. A hostile governance can use them to make prepared redemptions revert during a notice.
-  A redemption sent from a contract that reads `basketVersion()` when it executes is not
-  affected; a signed transaction with a fixed version must be prepared again (R-01).
-- **`sync` takes the token's address**, not an index, so a `sync` waiting in a timelock cannot
-  land on another component if a removal shifts the indexes in between.
-- Between 1 and 128 components (`MAX_COMPONENTS`), fixed in the code. Mint and redemption visit every component in one transaction, so the cap keeps them
-  within Ethereum's per-transaction gas limit (2^24, about 16.7M, since EIP-7825): with 128
-  mock components, mint takes 4.2M and redemption 3.5M; with tokens like the current ones,
-  about 8.7M is expected. A governance-set cap was rejected: a captured
-  governance could raise it until no redemption fits in a transaction. Components that were
-  sold and removed free their place; written-off ones keep it but are never called. Basket
-  changes are closed during liquidation.
-- **Initial amounts.** Governance can change them with `setInitialAmounts`, which takes the
-  basket version it was prepared for, like mint and redemption. They apply only
-  while the supply is zero, when no holder is affected; zero leaves a component out of the
-  first mint, and at least one must be positive. Adding, removing and writing off components
-  do not update them (a new component starts at zero; a written-off one is set to zero), so
-  after basket changes they can be stale or all zero, and a restart from zero supply would
-  need governance. Policy: update them as part of every basket change (R-19, P-9).
-- **No weekly cap per component.** Rejected: it would limit the damage of a stolen key, but
-  also a large rebalance. The price guard's weekly limit caps losses against the feeds, not
-  volume: selling a whole component near its
-  price uses almost none of it.
-- **One decision per change.** Once its wait has passed, anyone
-  can execute an added component, a write-off or a fee raise (`addComponent`,
-  `writeOffComponent`, `applyFees`): governance decided when it proposed and can cancel
-  during the wait. A Governor therefore needs one vote per change, not two.
-- **Proposals expire.** Every proposal with a
-  wait (an announced component, a write-off, a fee raise, a new rebalancer, a new
-  governance) can be executed or accepted only during the 7 days after its wait ends
-  (`EXECUTION_WINDOW`); after that it reverts with `ProposalExpired` and must be proposed
-  again. So an old notice cannot be used at any moment later, for example a fee raise
-  forgotten for a year. A timelocked governance can still accept a transfer if its own
-  delay is up to 14 days and it schedules the acceptance right away.
-- **Writing off a broken component.** If an issuer freezes the vault, or a component's
-  `balanceOf` stops working, mint and normal redemption stop, and the component can neither
-  be sold nor removed: without a write-off, only liquidation would be left, which ends the
-  product. Governance proposes the write-off (`proposeWriteOff`) and, after 7
-  days, anyone can execute it (`writeOffComponent`): the component's reserve and initial amount drop
-  to zero and mint and redemption continue without it. Holders bear that component's share
-  as a loss unless the token recovers.
-  - Governance judges whether the component is broken; the vault only enforces the 7-day
-    wait (R-06). A check by the vault itself (a probe that tried to read and send the
-    balance) was rejected: it could be fooled both ways, and it protected little, since a
-    governance that wants to harm holders already has the rebalancer.
-  - Because anyone can execute it, a contract can execute a ready write-off and mint in the
-    same transaction, without the component. Minting must already be paused when the
-    write-off becomes executable; a pause sent after it comes too late (R-06, P-5).
-  - What was written off never goes to governance: `rescue` refuses that token forever.
-    Besides `sync`, a `swap` that buys the token gives it a reserve again; the vault does
-    not refuse it (R-03).
-  - A written-off component stays in the basket for good and can never be removed: if the
-    token recovers, `sync` returns its balance to the reserves at once, also during
-    liquidation with a positive `liquidationSupply`, without a new 7-day announcement that
-    would let late minters capture it. Without normal supply, a fresh mint is needed before
-    syncing; after liquidation starts with zero supply, neither a fresh mint nor a sync is
-    possible, stranding the written-off recovery (R-25, prevented operationally by P-13).
-    It keeps its place among the 128 (R-17).
-  - Closed during liquidation, which already handles broken components per claim.
+## Component lifecycle
 
-How the rebalancer evolves (proposed, not decided):
+Between 1 and 128 unique deployed token contracts can be registered. Constructor components
+are active and have positive initial amounts. Governance announces additions; anyone may add
+one after seven days and before the following seven-day execution window expires. A new
+component enters **excluded**, with zero initial amount. Even donations cannot make it active.
 
-1. Pilot: the pilot wallet, appointed with the 7-day wait when a rebalance is needed, together
-   with a `ChainlinkPriceGuard` deployed with `PRICE_FEEDS`.
-2. Later: a bot or contract that finds the best execution, still within the guard's limits.
-3. Each change of rebalancer or guard goes through the same 7-day wait, without changing the
-   vault.
+`activateComponent(token)`, only governance in normal mode, makes the entire balance active
+without making a token call. It is explicit, immediate and idempotent. Calling it for an
+already active token returns without emitting a change event. The original addition or
+write-off already had its notice; reactivation does not require another wait. Keep minting closed
+throughout a relevant exclusion/recovery period if new entrants must not share recovery.
+Pausing only when reactivation is announced does not undo prior entry.
 
-## Fees
+`deactivateEmptyComponent(token)` excludes an empty component immediately. A nonzero residue
+is allowed only if it is at most `MAX_REMOVAL_DUST = 10` base units and the token reports at
+least 18 decimals. Tokens with fewer decimals must be exactly empty: a few whole indivisible
+assets must not be discarded as dust. This prevents incidental receipts from reactivating a
+sold-out token. An active zero-balance token otherwise becomes required again when it receives
+anything; that may block a minter unable to transfer it.
 
-- **Mint and redemption fees**, in basis points of the GRET issued or redeemed, each at most
-  5% (`MAX_FEE`, fixed in the code). Both are zero at deployment.
-- **Charged in GRET**, which costs one movement instead of one per component. On mint, the
-  minter contributes the basket for every share issued and the fee's share of that GRET goes
-  to the recipient. On redemption, the fee's share of the GRET goes to the recipient and only
-  the rest is burned and paid out. Either way the payer bears the fee: the value behind each
-  GRET does not drop.
-- **Raises wait 7 days** (`FEE_INCREASE_DELAY`), so holders see them coming; lowering both
-  fees applies at once and discards a pending raise. After the wait, anyone can apply the
-  raise (`applyFees`), and only once there is a recipient.
-- **The recipient** is set by governance, at once: it changes who earns the fee, not what a
-  holder pays. It can never return to zero nor be the vault. Its GRET gives no right to
-  normal redemption unless it mints, like any other wallet.
-- **Never on liquidation exits** (`convertToClaims`, `claim`), on swaps or on GRET transfers.
-- `mint`'s `shares` is the gross amount and `minShares` bounds what the caller gets after the
-  fee; `previewRedeem` already discounts the redemption fee.
-- **The recipient's GRET stays in the supply.** If the recipient holds less than 1 GRET, the
-  last holders cannot take the supply below 1 GRET, even with both fees at zero, unless the
-  recipient hands its GRET over or governance liquidates (R-09). With a positive redemption
-  fee not even that helps: every redemption leaves its fee in the supply, so at least 1 GRET
-  remains until the fee is cut to zero. In the pilot the recipient is the pilot wallet, which
-  can consolidate.
-- **Events report net amounts.** `Minted.shares` and `mint`'s return are what the
-  caller got; `Redeemed.shares` is what was burned. The GRET issued by a mint, or taken by a
-  redemption, is that plus `FeeCharged.shares`. A recipient that mints or redeems pays itself a
-  fee that moves nothing, and the event still shows it. A cut that discards a pending raise
-  emits `FeesProposalCancelled`.
+For a materially funded or unreadable component, governance proposes a **write-off**. After
+seven days anyone may execute within the execution window. Execution makes no token calls:
+it excludes the component, clears its initial amount and permanently sets `writtenOff`.
+A previously excluded component cannot be written off again until reactivated. Governance
+judges whether a write-off is warranted; the contract does not prove the issuer is broken.
 
-## Emergency liquidation
+The permanent history and reversible exclusion are separate. A written-off token:
 
-- Only governance can activate an irreversible liquidation. It has the power to close
-  normal operation, but not to choose recipients, alter rights or withdraw reserves.
-  There is no fast guardian: activation takes as long as the governance's timelock, and
-  that delay is accepted.
-- New deposits close and exits become per component, with independent operations and
-  rights proportional to the shares held.
-- Any holder can exit, even one that never minted. The prior-mint condition applies only
-  to normal redemption.
-- Withdrawing available components does not extinguish the right over blocked ones. Each
-  right can be claimed only once; if a transfer fails, the corresponding right must stay
-  pending.
-- Liquidation cannot force an external token to allow transfers. Keeping a right does
-  not guarantee recovering a token that fails permanently.
+- can be reactivated for normal backing by governance;
+- can never be rescued or removed, including after reactivation;
+- remains available for per-token liquidation claims automatically if transfers/readability
+  recover, without reactivation or another governance operation.
 
-### Liquidation accounting
+Governance may remove an ordinary component only under the same empty/dust rule. Exclusion
+alone never permits removal of meaningful funds. Removed residues become foreign tokens;
+subsequent issuer recovery of a removed token is outside the claim system (R-04/P-7).
+`basketVersion` increases on addition/removal, not activation or write-off. Positional limits
+must match this version and current array length. This is intentional: the version protects
+address/index mapping, not a frozen price or active set. `maxAmountsIn` and `minShares` protect
+mint economics; `minAmountsOut` protects redemption. Activating funded backing after a quote
+with a zero input cap reverts with `AmountInAboveMax`. Excluding a component after quoting a
+positive output minimum reverts with `AmountOutBelowMin`, even though the version matches.
+A caller supplying loose/zero limits accepts the corresponding changes. Initial amounts can be changed by governance,
+but affect only bootstrap; at least one active initial amount must be positive.
 
-- `activateLiquidation()` stores the GRET supply in `liquidationSupply` and fixes the
-  recognized reserves as the basis of every right; afterwards only `sync` can raise them.
-  It calls no external token. It accepts zero supply, irreversibly closing minting with
-  nobody able to acquire claim rights. Ordinary surplus can still be rescued, but a
-  written-off component cannot: its recovery has no exit through the vault (R-25 in
-  [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md#r-25--empty-liquidation-strands-a-written-off-recovery)).
-  P-13 requires positive supply and retaining a governance-controlled GRET position through
-  activation; the current vault does not enforce this operating rule.
-- `convertToClaims(shares)` burns GRET and credits non-transferable `claimShares`. It can
-  be done in several steps. Unconverted GRET stays transferable, so whoever receives it can
-  also exit.
-- Each holder's right over component `i` (`pendingRights`):
-  `floor(claimShares × reserve_i / liquidationSupply) − claimed_i`. It is computed on the
-  total converted, so converting in parts adds no rounding losses.
-- `claim(i, to, minAmount)` pays that right in full while the component's balance covers
-  every pending right. If it does not, it pays the same fraction (balance ÷ pending rights) to
-  everyone who has not claimed yet, in any order; if the balance recovers, the fraction
-  rises again for those who have not claimed yet. It only calls component `i`. If the
-  transfer fails, that call reverts and the right stays pending, without affecting the
-  other components. If less than `minAmount` would be paid, it reverts and the right stays
-  pending, so a cut that appears between quoting and execution can be refused.
-- **Claiming during a shortfall closes the position on that component:** the right is
-  consumed in full and the difference cannot be recovered through the contract. If the
-  balance comes back later, it first makes whole those who waited, who bore the risk of
-  further losses, and what is left becomes surplus (R-04 and P-2 in
-  [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md)). The `Claimed` event records `amount` and
-  `rights`, so every cut can be reconstructed. A transfer that reports success without moving
-  the tokens is not a cut and does not show there (P-2). P-2's external compensation through
-  `rescue` is also unavailable for a token ever written off, even after a complete recovery:
-  the flag is permanent. Syncing that surplus allocates it to all holders, rather than only
-  those whose claims took a cut. This is accepted under R-04: P-2 requires an external
-  settlement ledger for that case; compensation depends on holder cooperation and is not
-  guaranteed by the vault.
-- `to` allows claiming to another address, for example if an issuer blocks the holder's.
-  It cannot be the vault itself.
-- Conservation: what is paid per component never exceeds the rights consumed or the
-  balance. Rounding dust stays in the vault.
-- Donations and distributions after activation do not change the rights on their own.
-  Governance can add them with `sync(token)`, which raises everyone's rights in proportion,
-  also over what was already claimed, or rescue them; it can never touch what is owed to
-  holders (see Governance). Sync requires a positive `liquidationSupply` and membership in
-  the basket; rescue is permanently unavailable for written-off tokens. A component removed
-  before liquidation cannot rejoin it. Its recovered balance can be rescued and distributed
-  externally under P-7's liquidation exception; its re-add-and-sync procedure applies only
-  before liquidation (R-04).
-- Known limits: if a component never transfers again, its right stays pending with no
-  recovery. GRET held by contracts that cannot call `convertToClaims` (for example, DEX
-  pools) stays unclaimed (R-22).
+Dust tolerance is bounded, not a general removal guarantee. Large donations can still obstruct
+removal; broken metadata or balance reads can also prevent an ordinary removal. The delayed
+write-off remains available and retains the token's slot permanently.
 
-## Governance
+## Rebalancing and price guard
 
-- The vault stores the `governance` address, currently the pilot wallet (an EOA). A future
-  governance contract is not defined or required by the vault: it only checks
-  `msg.sender == governance`; what can be done, and within which limits, is set by the vault.
-- Powers: activating liquidation, `sync(token)` (in normal operation and during liquidation),
-  `rescue(token, to, amount)`, appointing the next governance, changing the basket
-  (announcing, adding and removing components, setting the initial amounts), appointing and
-  revoking the rebalancer, appointing the price guard, writing off a broken component,
-  setting the fees and their recipient, and pausing minting. It cannot
-  withdraw reserves or pending rights, pause redemptions, reverse liquidation or redirect
-  claims, and it does not swap unless it appoints itself rebalancer with the 7-day wait.
-- `rescue` of a token outside the basket: the whole balance. Of a component: at most
-  `componentSurplus(i)`, that is, the balance minus what is still owed (the recognized
-  reserve minus the rights already claimed during liquidation). It works in normal
-  operation and during liquidation. The destination is free except for the zero address
-  and the vault itself. After rescuing a component, the balance left must still cover what
-  is owed, so a token that debits the sender more than the amount sent cannot reduce the
-  backing. The vault never holds GRET, so there is no GRET to rescue.
-- Two-step governance transfer: the current governance calls `proposeGovernance(next)`
-  and `next` calls `acceptGovernance()` once at least 7 days have passed
-  (`GOVERNANCE_TRANSFER_DELAY`) and before the proposal expires 7 days later. The vault
-  enforces the wait even if the governance contract has a bug; holders see the change
-  coming. A new proposal replaces the previous
-  one and restarts the wait; `cancelGovernanceProposal()` discards it. The zero address
-  cannot be appointed.
+Only the appointed rebalancer may `swap(sell, sellAmount, buy, buyAmount)`, and only in normal
+mode with positive supply. Both tokens must be registered and active. A swap cannot silently
+reactivate a written-off or newly added component. Sell amount cannot exceed its live balance.
+The vault pulls the buy token, measures the receipt with mint's tolerance, calls its guard,
+and sends the sell amount only after approval. Every failure reverts the entire exchange.
 
-### Accepted risks
+The vault and guard must be deployed as a compatible pair. `IPriceGuard.checkSwap` keeps the
+same arguments but its timing contract is explicit: buy tokens have arrived and sell tokens
+have not left. In `ChainlinkPriceGuard`, pre-swap value is reconstructed by subtracting the
+measured buy receipt **in token units before valuation**. Incoming purchase and outgoing
+inventory cannot both inflate the weekly denominator. Excluded components do not count.
+Donations received before the exchange do count, because they now back GRET.
 
-What these powers still allow, and every other risk that was accepted, is in
-[`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md), each with its reason and mitigation, together with
-governance's operating policy (P-1 to P-13), which the vault does not enforce. The October 29
-recovery findings are integrated into R-04 and R-25, with operational mitigations accepted
-by the owner and [reproducible evidence](ACCEPTED_RISKS.md#review-evidence--october-29-2026).
-The decision is to retain the current vault and manage these cases operationally; no vault
-code change was adopted. Preventing an invalid sequence does not make it reversible, and
-external settlement is not an on-chain compensation guarantee.
+The guard enumerates component addresses and reads each priced, active token separately.
+A reverting balance read or unusable price contributes zero, making the loss fraction more
+conservative. It does not call the aggregate `reserves()` view, which is unavailable during
+mutation. Malformed successful return data can still revert valuation; this is part of R-15.
+
+Guard limits and price assumptions are unchanged:
+
+- Sell value rounds up, buy value down. Missing, nonpositive, future or stale feeds reject
+  swaps involving that token. Each feed quotes a whole token in USD.
+- A trade may lose at most 2% of sell value. Each loss is divided by the priced pre-trade
+  backing, rounded up; the sum must be at most 2% during each fixed seven-day Unix epoch.
+  Fair/favorable trades do not consume the budget. Deposits/withdrawals do not reset it.
+- The guard has no owner; feeds, max ages, cached token decimals and limits are immutable.
+  Replacement creates a fresh weekly counter. Losses across week boundaries or replacements
+  can therefore exceed one period's budget; see R-02.
+- Feeds may lag, price an underlying rather than the token's market peg, or become stale on
+  weekends. Six current components lack configured Ethereum feeds; they cannot be traded by
+  this guard. Neither price accuracy nor issuer solvency is guaranteed (R-03).
+
+Rebalancer and guard appointments wait seven days and expire seven days later. Governance may
+revoke the rebalancer immediately; the notice gives eligible holders an exit using skipping
+if necessary. A captured governance can appoint a malicious guard after the notice (R-01).
+
+## Fees and governance
+
+Both fees start at zero and are capped at 500 basis points. Lowering both applies immediately;
+raising either requires a seven-day proposal and execution within the following seven days.
+Positive fees require a nonzero recipient distinct from the vault. Mint fees split the paid
+issuance; redemption fees transfer GRET to that recipient and only the remainder is burned.
+Liquidation has no fees. Fee rounding and the minimum supply can affect very small positions.
+
+Governance may pause minting, activate liquidation, manage component lifecycle and initial
+amounts, configure fees and their recipient, rescue permitted tokens, and appoint the guard,
+rebalancer or its own successor. Governance succession is two-step: the proposed address must
+accept after seven days and within the execution window. There is no governance-contract
+assumption beyond being able to call the vault. No arbitrary external-call or upgrade function
+exists. Proposals can be cancelled; revocation removes the pending rebalancer too.
+
+`rescue(token,to,amount)` may transfer foreign tokens. For a registered ordinary component it
+works only while normal supply is zero. It never rescues a component in liquidation or a
+historically written-off token. Active income, excluded balances and late claim distributions
+cannot be redirected by calling them surplus. Removing an eligible dust component explicitly
+changes that component to foreign status.
 
 ### How governance grows without changing the vault
 
-What governance **can do** in this vault is fixed: activate liquidation, `sync`, `rescue`,
-change the basket, write off components, set fees within their caps, appoint the
-rebalancer and the price guard, and appoint its successor. **How it decides** can
-change without redeploying or modifying the vault, because the vault only looks at one
-address:
+The vault fixes what governance can do: activate liquidation, manage activation/exclusion,
+rescue permitted tokens, change the basket, write off components, set bounded fees, and
+appoint the rebalancer, guard and successor. How governance decides can change independently.
+The following progression is a **proposal**, not a deployed governance system:
 
-1. Minimal start (proposed, not decided): a Safe multisig as `governance`. It needs no
-   code of its own and acts without delay, also in emergencies.
-2. Visible delay: the Safe appoints, with the vault's two steps, an OpenZeppelin
-   `TimelockController` in which it is the only proposer and the only executor (P-4 in
-   [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md#operating-policy)).
-3. Open voting or other actors: they are added as proposers inside the timelock (for
-   example, a `Governor` with its own voting token). The vault's address stays the
-   timelock.
-4. More complex rules, such as a fast path only for emergencies, live in a new governance
-   contract appointed with the same two steps.
+1. The pilot wallet initially governs. A Safe multisig is the proposed next step, with
+   threshold/signers and key recovery to be chosen; it can act immediately in emergencies.
+2. The Safe can appoint an OpenZeppelin `TimelockController` using the vault's seven-day,
+   two-step handover. The proposed Safe is its sole proposer and executor initially.
+3. A Governor using a separate **VORA** voting token may become a timelock proposer. VORA's
+   distribution, delegation, quorum, voting delay/period and timelock delay remain proposals.
+   GRET does not acquire votes; the vault still sees the timelock as its governance address.
+4. More complex rules, such as a fast emergency-only path, require a separate governance
+   contract appointed through the same handover, not a new power inside the vault.
 
-`test/GRETVault.timelock.ts` checks steps 2 and 3 with the real `TimelockController`, and
-that nobody but the Safe can execute a ready `sync`. While governance is only a timelock,
-activating the emergency also waits for its delay.
+`test/GRETVault.timelock.ts` exercises handover, delayed actions, restricted execution of
+reactivation and addition of another proposer with the actual `TimelockController` contract.
+Its "multisig" actor is a stand-in signer, not proof of a particular Safe configuration or
+an implemented Governor/VORA system. A timelock alone also delays emergency activation.
+The rebalancer and guard remain independently replaceable after their notice. A new vault
+is needed for new vault powers, not for changing who decides under existing powers.
 
-The rebalancer and the price guard evolve the same way: each new one is appointed with the
-7-day wait.
+## Emergency liquidation
 
-What requires a new vault is **new powers**, such as another kind of fee or a way to claim
-distributions that do not arrive as balance. The vault cannot transfer
-reserves to another contract except in exchange through `swap`, so a migration would be
-voluntary: each holder redeems from the old vault and mints in the new one.
+`activateLiquidation()` permanently closes minting, normal redemption, swaps and basket
+lifecycle changes. It requires positive supply and freezes that denominator in
+`liquidationSupply`; it performs no token calls. This closes the former R-25 empty-liquidation
+trap. Governance cannot reverse liquidation.
+
+Any holder, including one who never minted, may burn GRET with `convertToClaims(shares)`.
+`claimShares[account]` is cumulative and nontransferable. Unconverted GRET remains transferable.
+Each component can be claimed independently to a nonzero recipient other than the vault.
+Exclusion in normal mode does not waive liquidation rights over that component.
+
+The vault keeps **only liquidation** nominal bases and consumed rights; it does not snapshot
+all token balances at activation. For component `i`, let:
+
+- `L` be the basis established by prior successful claims (initially zero);
+- `Q` be aggregate nominal rights consumed, `B` its current balance;
+- `S0` be the frozen supply, `c` the claimant's cumulative converted shares and `q` their
+  previously consumed rights for that component.
+
+```
+nextBasis = max(L, B + Q)
+rights = floor(c * nextBasis / S0) - q
+owed = nextBasis - Q
+payout = rights                     when B >= owed
+         floor(rights * B / owed)   otherwise
+```
+
+A successful nonzero claim stores `nextBasis`, consumes `rights` in both ledgers, records the
+actual requested payout in `totalClaimed`, then transfers it. Failed reads, transfers or
+minimum-output checks revert all these changes. Zero converted shares return a zero quote
+without reading the token. A zero payout leaves the right unconsumed. `minAmount` lets a
+holder refuse a cut; a successful haircut consumes its full nominal right.
+
+This automatically incorporates later income for all frozen shares, including unconverted
+shares and accounts that already claimed. After everyone settles, a later receipt can open
+new proportional claims. No governance sync is needed. The basis is established per component
+at its first successful claim, not by a view and not at activation.
+
+Recovery is not targeted compensation. For example, Alice and Bob own halves of 100. Alice
+claims 50, the vault loses 25, Bob claims 25, then 25 is recovered. Automatic allocation gives
+12.5 more to each: cumulative payouts 62.5/37.5. No component rescue can correct this internally.
+Additional compensation requires external funding or voluntary settlement (R-04/P-2). A loss
+before the first successful claim establishes a smaller initial basis instead. This differs
+from the old fixed-at-activation reserve policy and is part of the implemented decision.
+
+A reverting or malformed `balanceOf` blocks that component's claim until repaired. The vault
+never substitutes a stale stored normal balance. Other components remain claimable. Rounding,
+outgoing token fees/no-op transfers, unavailable recipients and unconverted contract-held
+GRET remain limitations; no guaranteed recovery is promised.
+
+## Views, callbacks and integrations
+
+`reserves()` returns live active balances in normal mode. In liquidation it returns effective
+nominal bases, including consumed rights; it is **not** a remaining-token-balance view then.
+`liquidationBasis()` exposes only bases established by successful claims without token calls.
+`pendingRights`/`claimable` compute effective current rights/payouts for one component.
+
+`reserves`, both normal previews, the skipping preview, `pendingRights` and `claimable` use
+`nonReentrantView`: callback consumers cannot read an intermediate accounting state. Mutations
+use the existing transient reentrancy guard. Storage-only membership/exclusion views remain
+available to the price guard. Ordinary ERC-20 views alone are not a NAV oracle; integrations
+must not reconstruct prices from raw in-flight token balances and supply.
+
+The pilot reports a readable error when wallet balances, aggregate backing or quotes cannot
+be read. Its normal page does not implement skipping exits and never makes that forfeiture
+choice for the user. The explicit skipping and per-component liquidation contract APIs remain
+available independently of the page.
+
+The pilot signs exact input approvals and exact quoted maxima. It requotes after approvals;
+if the final transaction changes or another approval is needed, it stops and asks the user to
+review again. An income event can still race transaction inclusion, in which case the bounded
+mint reverts. There is no silently enlarged allowance or slippage tolerance. The pilot checks
+bytecode against the local build; the old mainnet vault is intentionally not a match for this
+version. Basket changes still require refreshing the pilot's configured component list.
 
 ## Implementation details
 
-Bootstrap:
-
-- The initial amounts are constructor parameters, and governance can change them later
-  (`setInitialAmounts`). `scripts/deploy-local.ts` uses one whole unit of each component as
-  a placeholder.
-- Any wallet can make the first mint and must request exactly `INITIAL_SHARES` (1 GRET).
-  With fixed amounts there is no inflation attack at bootstrap.
-- Redeeming the whole supply withdraws all reserves. With zero supply, the next mint goes
-  back to the initial basket for 1 GRET.
-
-Normal accounting:
-
-- Internal recognized reserves. `balanceOf` is queried in mint and redemption (to
-  recognize losses and measure what arrived), in claims (to detect shortfalls) and when
-  computing surpluses. If a component's `balanceOf` reverts, normal redemption and claims
-  go ahead without adjusting that component; mint and swaps that involve it revert. Mint
-  does not read components it does not ask for. Only a revert is tolerated: a `balanceOf`
-  that succeeds with malformed return data, or a component left without code, makes normal
-  redemption (`redeemSkipping` without it still works) and that component's claims and
-  `claimable` revert. Running out of gas counts as a revert, so a caller who chooses the gas
-  limit can force that path when a component's `balanceOf` costs millions of gas (R-14).
-- Mint contributions round up and redemption outputs round down, so rounding never lowers
-  the value behind each GRET. Every successful mint receives at least one base unit of each
-  component with a positive reserve and issues positive GRET, so it always meets the
-  condition that enables redemption. If every reserve was lost, mint reverts
-  (`EmptyBasket`) instead of issuing GRET backed by nothing.
-- `mint` returns `(minted, received)`: with exact tokens, `minted` is what was requested;
-  with tokens that round, it can be a few wei less.
-- Initial amounts should be at least ~10⁴ base units per component, so that a one-unit
-  rounding does not move the composition by more than 0.01% per operation.
-- `sync` is disabled with zero supply; in that case governance can use `rescue`. During
-  liquidation it remains available, with `liquidationSupply` as the supply.
-- User protection: `maxAmountsIn` and `minShares` on mint, `minAmountsOut` per component on
-  redemption and `minAmount` on each claim. There is no deadline: the ratio per GRET only
-  changes through rounding, `sync`, swaps or losses, fees rise only after 7 days, and the
-  limits bound the cost and the result.
-- A small redemption can round some component to zero; that component is not
-  transferred. The user prevents it with `minAmountsOut`.
-- Transient losses: if a token overstates a balance drop that later reverses, the already
-  recognized loss comes back as surplus and governance decides whether to sync it. It is
-  an accepted risk and the agreed policy is to sync it (R-04 and P-1 in
-  [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md)).
-
-Permissions and structure:
-
-- A single 18-decimal ERC-20, "Global Reserve Token" / "GRET", without upgrades.
-  `transfer` and `transferFrom` to the vault itself revert with `InvalidRecipient`.
-- Between 1 and 128 components, without duplicates and with deployed code. At deployment
-  every initial amount must be positive.
-- The initial governance is a constructor parameter; it cannot be the zero address. Only
-  minting can be paused; there is no pause of redemptions, no reversal of liquidation and
-  no withdrawal of reserves.
-- `hasMinted` is recorded for `msg.sender`. If a router or a contract wallet mints, the
-  contract is enabled, not the end user.
-- `ReentrancyGuardTransient` (EIP-1153, available on mainnet since Cancun) protects the
-  reserve and liquidation operations, including activation, both redemptions, swaps,
-  adding, removing and writing off components, setting initial amounts and applying fees,
-  so that none can happen in the middle of a mint. Proposals, cancellations and acceptances of
-  governance, rebalancer, price guard and components, and revoking the rebalancer, use their own
-  authorization checks and are not guarded: they do not touch reserves or the component
-  list. GRET transfers do not affect reserves or rights already converted.
-
-Gas with the 11 real components on the fork: mint 0.76M, normal redemption 0.64M, each
-claim 0.16M and each swap about 0.17M, plus what the price guard spends: `ChainlinkPriceGuard`
-adds about 58k with the real feeds to a swap without a loss, and 0.36M to one with a loss,
-since it then reads the balance and the price of every priced component. With 128 mock components: mint 4.17M and redemption 3.49M.
+- Solidity 0.8.38, Hardhat 3, TypeScript ESM, viem and `node:test`; Solidity cases/fuzzing use
+  forge-std. GRET is an immutable 18-decimal ERC-20, "Global Reserve Token" / "GRET".
+- Constructor amounts are positive and configurable later. Local demo amounts of one whole
+  unit per component are placeholders, not portfolio recommendations. Prefer initial amounts
+  of at least about 10,000 base units so one unit of rounding is a small relative change.
+- Initial issuance is exactly one GRET before fees. Subsequent receipts are measured; mint
+  returns net `minted` and actual `received`. Exact input tokens produce the requested gross
+  issuance; rounding tokens can reduce it. `hasMinted` belongs to the caller: a router's mint
+  qualifies the router, not its underlying user.
+- There is no normal reserve ledger. Every active required balance is read before input or
+  output transfers. Unreadable/reverting/malformed balances fail closed. Explicitly excluded
+  or skipped tokens are not called. Initial amounts of zero are omitted during bootstrap.
+- Contributions round up; withdrawals and fee shares round down. A component payout that
+  rounds to zero is not transferred. An empty contributing basket cannot issue shares.
+- No transaction deadline is enforced. Input/output/share limits bound economics despite
+  live income/losses, activation, fees or swaps changing a previously observed ratio. Tight
+  limits may revert; a quote is not a reservation of a balance or basket state.
+- `ReentrancyGuardTransient` relies on Cancun/EIP-1153. It guards reserve and liquidation
+  mutations, component list/state mutations, initial amounts and applying fees. Sensitive
+  accounting views reject callbacks. Authorized proposals, cancellations, appointments and
+  rebalancer revocation do not themselves transfer backing and retain their authorization
+  checks. GRET transfers cannot change already converted rights and cannot send GRET to the vault.
+- The liquidation denominator is frozen once, but bases are established separately at the
+  first successful claim. Storage for consumed nominal rights differs from actual requested
+  payouts; neither implies full compensation for a later issuer recovery. Failure reverts the
+  entire claim. An outgoing token's actual delivery may differ from requested payout (R-10).
+- `reserves()` is a bulk external-token read in this design and may revert if any required
+  balance is unreadable. Integrations that need partial availability must query per component;
+  they must not substitute zero as if it were a verified NAV. For exits use an explicit
+  `previewRedeemSkipping`/`redeemSkipping` choice or independent liquidation claims.
+- The pilot currently provides a normal mint/redemption flow. Its actionable error identifies
+  failed component wallet reads or unavailable aggregate backing/quotes and explains the
+  separate skipping path and forfeiture. It never silently skips an asset. A complete
+  emergency-exit page is still a separate integration task, not a capability of that page.
 
 ## Security requirements
 
-The project prioritizes avoiding a failure of its own that immobilizes the whole reserve,
-even when the external ERC-20 tokens allow transfers. An emergency boolean does not
-guarantee recoverability: activation and withdrawals can have bugs too.
+Avoiding a vault bug that immobilizes all working assets remains a design priority. An
+emergency boolean alone is not a recovery guarantee.
 
-- Activation must not query or transfer external tokens: a reverting `balanceOf` must not
-  prevent entering the emergency.
-- Establishing exit rights must not require every component to respond.
-- Claiming a component must not call the other components, nor depend on the global
-  mint/normal-redemption computation, oracles or an administrative authorization per
-  withdrawal.
-- A failed transfer must keep the pending right without affecting rights over other
-  components. Also protect against reentrancy and duplicate claims, including through GRET
-  transfers.
-- Do not add an arbitrary administrative withdrawal as a supposed universal remedy: it
-  would give discretionary custody and would not guarantee recoverability against every
-  bug either. Governance's `rescue` is bounded to surpluses and does not serve that
-  purpose, and `swap` always requires delivering a component in exchange.
-- Before using real funds: invariant tests and random sequences, adverse token scenarios
-  and an independent review of the whole contract. These checks reduce risk; they do not
-  justify promising the absence of bugs.
+- Activation must not query or transfer external tokens. Conversion into rights must not
+  require any component to respond. Zero-supply liquidation must be rejected atomically.
+- A component claim must call only that component, independently of the normal basket
+  computation, prices, other holders and administrative permission per withdrawal.
+- Failed reads/transfers/minimum checks must preserve shares or pending rights. Prevent
+  duplicate claims and reentrancy, including sequences with share transfers and conversion.
+- Verify both global solvency and individual allocation, with independent actual-receipt
+  records; do not rely only on totals or on the same formula used by the implementation.
+- Mint/redemption must move the correct quantities and fees, and must not dilute remaining
+  active backing per share. Removal must never permit withdrawing material registered backing.
+- Do not add an arbitrary administrative withdrawal as a supposed universal recovery tool.
+  Registered components are protected while shares or liquidation rights exist; historically
+  written-off tokens are always protected. A swap requires incoming value and guard approval.
+- Exercise issuer freezes, bad reads/return data, transfer failures, callbacks, loss/recovery
+  timing, different claim orders, minters/secondary holders, last exits, rounding and donations.
+  Healthy exits must remain possible without cooperation from other holders or the admin.
+- Tests, randomized sequences and reviews reduce risk; they do not prove the absence of bugs.
+  An independent audit remains pending before third-party funds. Mocks and fork observations
+  cannot promise compatibility with future issuer upgrades.
 
-Minimum emergency scenarios: a component reverts on `transfer` or `balanceOf`, another
-returns `false`, the block is lifted later, reentrancy, claims in different orders, users
-with and without a prior mint, GRET transfers, the last holder, dust, donations and
-preservation of reserves for pending claims. Check both conservation (never extracting
-more than owed) and the ability to withdraw the working components without cooperation
-from other holders or the admin.
+## Validation and design history
 
-All these scenarios are covered; see the next section. The independent review is still
-pending.
+The October 30 investigation was recorded here and implemented following the user's request.
+The research-only model was replaced with production-vault regression tests in the existing
+`test/GRETVault.audit-accounting.t.sol`. Historical dated audit reports remain unchanged and
+refer to their original source revisions. Stable risk IDs are retained, including resolved
+R-14/R-25 entries; R-08 now distinguishes future/excluded receipts from already received income.
 
-## Tests and results
+Required commands for this change:
 
-| What | Where | Command |
-| --- | --- | --- |
-| Unit: setup, mint, redemption, minimum supply, losses, `sync` | `test/GRETVault.ts` | `npm test` |
-| Liquidation, with failing components and losses | `test/GRETVault.liquidation.ts` | `npm test` |
-| Governance, rescues and governance transfer | `test/GRETVault.governance.ts`, `test/GRETVault.timelock.ts` | `npm test` |
-| Rebalancer, price guard, swaps, adding, removing and writing off components, initial amounts | `test/GRETVault.rebalancing.ts` | `npm test` |
-| Mint and redemption fees: caps, delays, recipient and charging | `test/GRETVault.fees.ts` | `npm test` |
-| Adversarial: reentrancy in 70 combinations, tokens without `bool`, tokens rejecting zero transfers, issuer freezing the vault or a holder, 0 and 24 decimals, 128 components | `test/GRETVault.adversarial.ts` | `npm test` |
-| Deterministic random sequences | `test/GRETVault.invariants.ts` | `npm test` |
-| Property fuzzing and invariants with a handler | `test/GRETVault.fuzz.t.sol`, `test/GRETVault.invariant.t.sol` | `npm test` (fast), `npm run test:deep` |
-| Security review properties: receipt shortfalls with unrecognized losses, donations and fees; liquidation against an independent token ledger; removals at every basket position | `test/GRETVault.audit-accounting.t.sol`, `test/GRETVault.audit-liquidation.t.sol`, `test/GRETVault.audit-governance.t.sol` | `npm test` (fast), `npm run test:deep` |
-| Second security review: each finding's measured behavior (guard replacement, `balanceOf` failures and gas limits, the fee floor, skipped shares, write-offs, version changes, proposal events); sequences with unrecognized losses, removals at any position, `setInitialAmounts`, short deliveries and checks that healthy operations succeed; shortfall payouts in any claim order | `test/GRETVault.review2-*.t.sol` | `npm test` (fast), `npm run test:deep` |
-| Mainnet fork with the 11 components, including swaps, basket changes and the price guard with the real feeds | `test-fork/GRETVault.mainnet.ts` | `npm run test:fork` |
-| Protections: attacks and failures the vault refuses or lets holders get around | `test/GRETVault.protections.t.sol` | `npm test` |
-| Accepted risks: reproductions and controls named after their IDs in `docs/ACCEPTED_RISKS.md`, including recovery sequences | `test/GRETVault.risks.t.sol` | `npm test` |
-| Chainlink price guard: configuration, prices, per-swap and weekly limits, tokens without a price | `test/ChainlinkPriceGuard.ts` | `npm test` |
-| Fuzzing: whatever swaps the rebalancer attempts in a week, with deposits and withdrawals in between, a holder who stays keeps 98% of the value of their GRET | `test/ChainlinkPriceGuard.fuzz.t.sol` | `npm test` (fast), `npm run test:deep` |
-| Pilot rehearsal with the pilot wallet on a mainnet fork | `test-fork/GRETVault.pilot.ts` | `npm run pilot:rehearse` |
+- `npm run check`: compilation, TypeScript and the complete local test suite.
+- `npm run test:deep`: 20,000 cases per fuzz test and 1,000 sequences of depth 200 per invariant.
+- `npm run pilot:rehearse`: local mainnet fork, real pilot wallet impersonated, no real signatures.
+- `MAINNET_RPC_URL=... npm run test:fork`: real issuer-token and feed behavior at a recorded block.
 
-Invariants the fuzzing checks after every operation, with mint, redemption, transfers
-(including GRET sent to the vault, which must revert), donations, `sync` (also during
-liquidation), `rescue`, losses, swaps, a fourth token that joins and leaves the basket,
-write-offs of the faulty component, fee changes, redemptions that skip a component,
-activation, conversion, claims and random component faults:
+The invariant handler uses an independent physical issuance/loss ledger and exercises mint,
+redeem/skipping, share transfers, donations, losses, token faults, swaps, fees, pauses, component
+activation/write-off/addition/removal, rescue, conversion and claims. Separate tests check
+rounding/shortfall economics, callback views, price loss limits, claim order and late income.
+Passing tests do not prove compatibility with future issuer upgrades or replace independent
+review. Validation on November 2, 2026, on the working tree based on
+`98a6e35f450a13409a2d2698089e47e9a39ee26e`:
 
-- Every unit that enters or leaves the vault is in an independent ledger, including the
-  token while it is outside the basket.
-- Reserves only change through mint, `sync`, swaps, redemption, recognized losses and
-  write-offs; a swap changes only its two reserves, a component leaves only with no
-  reserve, and a written-off token is never rescued.
-- The vault always covers what it owes: its reserve in normal operation; during
-  liquidation, the sum of what everyone can claim never exceeds the balance.
-- The supply is 0 or at least 1 GRET; without supply there are no reserves.
-- The value behind each GRET never drops because of a mint or a redemption.
-- Nobody redeems without having minted, nobody claims more than their right, `rescue`
-  never changes what is owed nor exceeds the surplus, and the vault never holds GRET.
-- Fees never exceed 5%, the recipient gets exactly the fee's share of each mint and
-  redemption, and only the rest of a redemption is paid out.
+- `npm run check`: 248 passing (119 Solidity, 129 Node.js), including compilation/typechecking.
+- `npm run test:deep`: 119 passing; 20,000 cases per fuzz test and 1,000 runs of depth 200
+  per invariant. Three initial states cover normal operations, existing losses/exclusions,
+  and already-started liquidation. The handler checks exact mint/redemption quantities and
+  fees, remaining-holder non-dilution, material removal rejection, global solvency and each
+  holder's nominal entitlement and actual receipts against independent inflow records.
+- `MAINNET_FORK_BLOCK=26327336 npm run pilot:rehearse`: one passing rehearsal.
+  Deployment, approvals, mint, full redemption and another mint used 9,168,721 gas total.
+  The round trip lost one base unit each of SPYx and JAAAx, zero for the other nine tokens.
+- `MAINNET_FORK_BLOCK=26327339 npm run test:fork`: five passing tests covering token
+  identity, each of the eleven tokens separately, the full basket, real Chainlink feeds and
+  rebalance/add/remove flows. Inputs were funded in local fork storage; no mainnet balances
+  were changed. Active income immediately changed mint quotes and could not be rescued.
+  The guard's incoming receipt was delivered before its check. The full-basket example
+  measured mint 712,646, redeem 591,378 and one claim 150,920 gas; these are scenario-specific
+  samples, not bounds or a same-state comparison to the old code.
 
-`npm run test:deep` (20,000 cases per fuzz test, 1,000 sequences of 200 steps per
-invariant) passes on the current version; the price guard's fuzz test tries up to 40 steps
-per case, with fees on: swaps between −3% and +1% of the feed price, and deposits of up to
-100 times a holder's position and withdrawals in between. Temporary probes confirmed that the
-sequences reach every path, including swaps, adding and removing the fourth token, minting and
-claiming it, mints, redemptions and redemptions that skip a component after the basket
-changed, write-offs followed by mints and by a `sync` of the recovered balance, mints and
-redemptions with fees, redemptions that skip a component (also by the last holder), failed
-claims, losses during liquidation, `sync` during liquidation and GRET rejected by the vault;
-another probe confirmed that the guard's fuzz test reaches the weekly limit. `npm run check`
-passes 232 tests, including the eight recovery-sequence tests added on October 29. That
-new suite also passed the deep profile, including 20,000 cases varying holder concentration
-and haircut size. Its passing tests reproduce the reported limitations, not fixes. Coverage
-measured before that addition for `GRETVault.sol` and `ChainlinkPriceGuard.sol`: 100% of lines and
-statements.
+These final commands were run sequentially, with compilation enabled and without
+`--no-compile`. Both network commands used
+`MAINNET_RPC_URL=https://ethereum-rpc.publicnode.com`. This supersedes the initial validation
+at block 26,327,189. No fresh coverage percentage is claimed.
 
-Slither 0.11.6 on the vault and on `ChainlinkPriceGuard`, with Solidity 0.8.38: no high
-findings. In the vault it reports deliberate strict equalities against zero,
-`reentrancy-no-eth` on `swap`, which calls the guard before updating the reserves on purpose,
-so that the guard sees them as they were (`swap` is `nonReentrant` and the guard is appointed
-with notice), token calls inside bounded loops (inherent to a basket) and `block.timestamp`
-in the 7-day waits. In the guard: the unused fields of `latestRoundData`, calls inside the
-bounded loops, timestamps in the price age and the week, and `this.valueOf`, used for the
-`try`.
+The independent normal reserve ledger and sync operations are gone, but the entire contract
+is not dramatically smaller. Against the base revision with Solidity 0.8.38, optimizer 200
+and Cancun, runtime bytecode grows from 19,945 to 20,608 bytes (below the 24,576-byte limit).
+Exclusion controls, protected views and automatic liquidation income offset removed code.
+The first mock-token claim now establishes its basis and measured 150,366 gas; its regression
+bound is 175,000. Historical gas and coverage below describe the original deployment.
 
-### Ethereum mainnet fork (block 26,278,379, October 26, 2026 UTC)
-
-The 11 components work with the vault, each in its own vault and also as the full basket:
-mint, normal redemption, surplus rescue, liquidation and claims. In the rebalancing test,
-DBCon joins a vault of the other 10 after the 7-day wait, each component is sold for the
-next one, so every token leaves and enters the vault through `swap`, and cbBTC is sold
-entirely and removed; the vault always holds what it records, give or take the xStocks
-rounding. Those swaps go through a test guard that accepts them, since they test the tokens;
-a separate test deploys `ChainlinkPriceGuard` with `PRICE_FEEDS` and the real feeds, all five
-fresh at that block: it values each priced token as its feed does, refuses the six without a
-feed, and, checking a PAXG-for-cbBTC swap as the vault would, accepts it at the feed price,
-records a 1.9% loss as its share of the priced reserves and refuses a 5% loss. Test balances are
-written into storage; no real funds moved.
-
-| Token | Contract type | Notes |
-| --- | --- | --- |
-| 7 from Ondo | Beacon proxy (`0x9854…1598`), upgradeable | Exact transfers; no `paused()` |
-| SPYx, JAAAx (xStocks) | EIP-1967 proxy, upgradeable | Store shares with a multiplier (1.0057 and 1.0112, already updated 4 times): lose 2–3 wei per transfer. They have a per-period fee (0 today), `multiplierUpdater`, `pauser` and a sanctions list |
-| PAXG | Own proxy, upgradeable | Exact transfers; `paused()` = false |
-| cbBTC | Own proxy, upgradeable | Exact transfers; `paused()` = false |
-
-This describes the contracts at that block. All are upgradeable: their issuers can change
-the behavior later. PublicNode only serves recent state, so repeating the test at the same
-block requires an RPC with historical state and `MAINNET_FORK_BLOCK`.
+Primary references considered: [xStocks multipliers](https://docs.xstocks.fi/developers/multipliers),
+[Backed share conversion](https://github.com/backed-fi/backed-token-contract/blob/main/contracts/BackedAutoFeeTokenImplementation.sol),
+[Reserve Folio live basket accounting](https://github.com/reserve-protocol/reserve-index-dtf/blob/main/contracts/Folio.sol)
+and [OpenZeppelin donation/rounding analysis](https://docs.openzeppelin.com/contracts/5.x/erc4626).
+GRET is not an ERC-4626 implementation. No third-party architecture was copied as a substitute
+for GRET's issuer-failure and per-component emergency requirements.
 
 ## Mainnet pilot
+
+**Historical October 27 deployment.** The parameters, transactions and measurements below
+describe the immutable previous code, not a deployment of the live-balance revision.
 
 Parameters in
 [`scripts/pilot/config.ts`](../scripts/pilot/config.ts); steps in [`PILOT.md`](PILOT.md).
@@ -718,31 +476,18 @@ Pending for the pilot: MetaMask flags the approvals and the mint as malicious (a
 alert, common for new contracts that receive approvals of many tokens); the vault only pulls
 tokens from the caller of `mint` or `swap`, so it is a false positive still to be reported.
 
+
 ## Roadmap and open items
 
-Next: report the MetaMask alert. An independent audit comes before opening the vault to third
-parties.
+`GRETVault-explained.html` and its PDF describe this live-balance design as of November 2,
+2026; the specification remains authoritative where they differ. Restoring governance
+proposals here does not make them approved, implemented or part of a deployment plan.
 
-1. **Name check.** Name and symbol are fixed per vault, and the pilot vault already uses
-   them. Search Etherscan for an unlisted "GRET" token on mainnet, and the USPTO and EUIPO
-   trademark registers for "GRET" and "Global Reserve Token"; a conflict would need a new
-   vault.
-2. Restrictions a fork does not show: trading hours (DBCon), future changes to the
-   upgradeable tokens and the xStocks fee policy.
-3. Governance after the pilot: the Safe it is handed to, signers and threshold, whether
-   there will be a timelock and with which delay (with execution for the Safe only), and
-   later the Governor with the VORA voting token (GRET does not vote).
-4. Independent review and longer fuzzing before using third-party funds, covering the vault
-   and the price guard.
-5. Price coverage: six components (half of the basket's weight) have no Chainlink feed on
-   Ethereum and cannot be swapped; a new guard when feeds appear, and whether to choose
-   components with that in mind.
-6. Final choice of implementation, and how it maps to existing audited designs.
-7. The mint fee once third parties can mint (P-4 in
-   [`ACCEPTED_RISKS.md`](ACCEPTED_RISKS.md#operating-policy)).
-8. Update the development dependency flagged by `npm audit` (`follow-redirects`, pulled in
-   by `solc`); it is not part of the vault.
-9. Proposed, not decided: the price guard is not deployed yet, so before it is, it could take
-   over the previous guard's weekly count, read token decimals at swap time and count a
-   `balanceOf` with malformed return data as zero. Today the specification describes the
-   guard as it is.
+
+- Independent review and issuer/fork verification before third-party funds.
+- Governance implementation and recovery process; the current governance remains a wallet.
+- Feed coverage, market-peg monitoring and the previously proposed guard improvements (counter
+  continuity across replacements and token-decimal changes). They are not implemented here.
+- Any migration from the original immutable pilot: requires a concrete deployment and funding
+  plan. This source change authorizes neither a mainnet deployment nor movement of its assets.
+- MetaMask's original Blockaid alert and the previously deferred manual pilot rehearsal.

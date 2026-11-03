@@ -4,6 +4,13 @@ Guide to deploy the vault, make the first mint of 1 GRET, redeem it and mint aga
 parameters are in [`scripts/pilot/config.ts`](../scripts/pilot/config.ts) and the
 decisions in [`SPECIFICATION.md`](SPECIFICATION.md#mainnet-pilot).
 
+The immutable vault at `0x21b823334D2794a637cb9c0fd7fF8671b35F5A23` was deployed on
+October 27 with recognized-reserve accounting. Current source uses live balances and is
+**not deployed**. It cannot update that vault. The page's bytecode check will reject the
+old deployment against the new build; do not bypass it. A compatible new vault/guard pair
+and any voluntary migration need a separate deployment plan. The flow below can rehearse
+the new build without changing the existing pilot.
+
 The pilot wallet signs everything from MetaMask. The local page only builds the
 transactions: it never sees a key.
 
@@ -25,7 +32,8 @@ transactions: it never sees a key.
 
 1. **ETH for gas.** Fund `0xe03E228E1f1c50a985556Cc9c05b0aB953Feb7fd` with about
    **0.03 ETH**. The full cycle (deploy, approve, mint, redeem, approve and mint again)
-   uses about 9.5M gas: at 1.35 gwei, about 0.013 ETH.
+   historically used about 9.5M gas: at 1.35 gwei, about 0.013 ETH. Re-estimate the new
+   build and current gas price before any deployment.
 2. **Check in MetaMask** that this same account is selected.
 
 ## Rehearsal with MetaMask (recommended)
@@ -63,7 +71,10 @@ There is also an automated rehearsal, without MetaMask: `npm run pilot:rehearse`
    identical to this repository's build, the 11 components in order, the amounts, the
    governance, no rebalancer, fees at zero, minting not paused, and the name and symbol.
    **If any fails, stop.**
-4. **Approve and mint.** Each approval is for the exact amount, never unlimited.
+4. **Approve and mint.** Each approval is for the exact amount, never unlimited. After
+   approvals, the page requests a fresh plan before submitting mint. If live balances changed
+   the required inputs or mint calldata, it stops and asks for review and retry. It does not
+   silently raise approvals or input limits. A later change can still make mint revert safely.
 5. Check on Etherscan that the wallet holds 1 GRET. **Add GRET to MetaMask** shows it in
    the wallet with its logo.
 6. Optional: **Redeem everything** and mint again, to test the exit with real funds.
@@ -75,10 +86,19 @@ the page remembers the vault in this browser; otherwise paste its address and cl
 ## Afterwards
 
 - Verify the vault's source code on Etherscan and Sourcify, and record the vault address in
-  the README's Deployments table and in `SPECIFICATION.md`. Done on October 27, 2026.
+  the README's Deployments table and in `SPECIFICATION.md`. Done for the previous deployment on October 27, 2026.
 - Later, hand governance over to a Safe, with the vault's two steps and 7-day wait.
 - To rebalance, governance proposes the rebalancer (the pilot wallet itself) and a
   `ChainlinkPriceGuard` deployed with `PRICE_FEEDS` from `config.ts`; both take effect after
   7 days. Only the five components with a feed can be swapped, and SPYx, SGOVon and BILon
   not on weekends. The page only handles the deployment's basket: after a basket change, mint
   and redemption need the new component list.
+
+## Unreadable component balances
+
+If a token or the RPC cannot return a balance, the page stops with an explicit error. It does
+not replace a missing balance with zero and does not silently omit assets from redemption.
+The current page has no skipping-exit flow: `previewRedeemSkipping` and `redeemSkipping` must
+be used through a separately reviewed interaction, with the holder explicitly accepting the
+forfeited component share. Governance may assess exclusion or liquidation under the existing
+policies; a page failure does not itself prevent independent healthy-component claims.

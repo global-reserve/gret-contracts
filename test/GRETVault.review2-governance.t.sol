@@ -54,7 +54,9 @@ contract VersionReadingWallet {
 }
 
 /// Any contract can be announced as a component.
-contract Junk {}
+contract Junk {
+    function balanceOf(address) external pure returns (uint256) { return 0; }
+}
 
 contract Review2GovernanceTest is GRETVaultCase {
     // ---------------------------------------------------------------------------------------------
@@ -89,10 +91,10 @@ contract Review2GovernanceTest is GRETVaultCase {
         vault.cancelWriteOff(address(faulty));
         vm.stopPrank();
 
-        // F recovers and governance syncs it at once (P-5).
+        // F recovers and governance reactivates it at once (P-5).
         faulty.setBlocked(address(vault), false);
         vm.prank(GOVERNANCE);
-        vault.sync(address(faulty));
+        vault.activateComponent(address(faulty));
         uint256[] memory got = entrant.redeemAll(vault);
         vm.prank(ALICE);
         uint256[] memory alice = vault.redeem(SHARE, _pair(0, 0), 0);
@@ -124,14 +126,14 @@ contract Review2GovernanceTest is GRETVaultCase {
         entrant.bundle(vault, address(faulty), k * SHARE);
         faulty.setBlocked(address(vault), false);
         vm.prank(GOVERNANCE);
-        vault.sync(address(faulty));
+        vault.activateComponent(address(faulty));
         uint256[] memory got = entrant.redeemAll(vault);
         assertEq(got[0], 2e18 * k);
         assertEq(got[1], Math.mulDiv(5e18, k, k + 1));
     }
 
     /// Control: a pause before readyAt stops the bundle; the write-off can still be executed alone,
-    /// and the sync returns all of F to Alice.
+    /// and reactivation returns all of F to Alice.
     function test_L03_controlPauseBeforeReadyAt() public {
         uint256 readyAt = _freezeAndProposeWriteOff();
         vm.warp(readyAt - 1);
@@ -145,7 +147,7 @@ contract Review2GovernanceTest is GRETVaultCase {
         vault.writeOffComponent(address(faulty)); // anyone, alone, while paused
         faulty.setBlocked(address(vault), false);
         vm.prank(GOVERNANCE);
-        vault.sync(address(faulty));
+        vault.activateComponent(address(faulty));
         vm.prank(ALICE);
         uint256[] memory alice = vault.redeem(SHARE, _pair(0, 0), 0);
         assertEq(alice[0], 2e18);
@@ -164,7 +166,7 @@ contract Review2GovernanceTest is GRETVaultCase {
         vm.prank(GOVERNANCE);
         vault.cancelWriteOff(address(faulty));
         vm.prank(GOVERNANCE);
-        vault.sync(address(faulty));
+        vault.activateComponent(address(faulty));
         uint256[] memory got = entrant.redeemAll(vault);
         assertEq(got[1], 45e17);
     }
@@ -321,10 +323,10 @@ contract Review2GovernanceTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // REVIEW2-I03: LossRecognized names the component by index
+    // REVIEW2-I03 control: live balances follow addresses after an index shift
     // ---------------------------------------------------------------------------------------------
 
-    function test_I03_lossRecognizedIndexNamesAnotherTokenAfterRemoval() public {
+    function test_I03_liveBalancesFollowComponentsAfterRemoval() public {
         MockFaultyERC20 a = new MockFaultyERC20("A", "A", 18);
         MockFaultyERC20 b = new MockFaultyERC20("B", "B", 18);
         MockFaultyERC20 c = new MockFaultyERC20("C", "C", 18);
@@ -343,33 +345,15 @@ contract Review2GovernanceTest is GRETVaultCase {
         v.mint(SHARE, _three(1e18, 1e18, 1e18), SHARE, 0);
         vm.stopPrank();
 
-        // B loses 30%; anyone recognizes it.
         b.slash(address(v), 3e17);
-        vm.recordLogs();
-        v.recognizeLoss(1);
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        assertEq(logs.length, 1);
-        assertEq(logs[0].topics[0], GRETVault.LossRecognized.selector);
-        assertEq(logs[0].topics.length, 2, "only the index is indexed");
-        assertEq(uint256(logs[0].topics[1]), 1);
-        assertEq(logs[0].data, abi.encode(uint256(3e17), uint256(7e17)), "no token address in the data");
-
-        // In the same block A's whole reserve is gone (sold off or seized) and governance removes it.
+        assertEq(v.reserves()[1], 7e17);
         a.slash(address(v), 1e18);
-        v.recognizeLoss(0);
         vm.prank(GOVERNANCE);
         v.removeComponent(address(a));
-
-        // The component list at the end of that block maps index 1 to C, not to B.
-        assertEq(address(v.components()[1]), address(c));
         assertEq(address(v.components()[0]), address(b));
-        // B's 0.3 comes back: index 1 today has nothing to sync, B (now index 0) has it all.
         b.mint(address(v), 3e17);
-        assertEq(v.componentSurplus(1), 0);
-        assertEq(v.componentSurplus(0), 3e17);
-        // Syncing by address is unambiguous.
-        vm.prank(GOVERNANCE);
-        assertEq(v.sync(address(b)), 3e17);
+        assertEq(v.reserves()[0], 1e18);
+        assertEq(v.reserves()[1], 1e18);
     }
 
     // ---------------------------------------------------------------------------------------------

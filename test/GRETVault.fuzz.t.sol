@@ -52,8 +52,6 @@ contract GRETVaultFuzzTest is Test {
         donation = bound(donation, 0, 1e24);
         if (donation != 0) {
             tokens[0].mint(address(vault), donation);
-            vm.prank(GOVERNANCE);
-            vault.sync(address(tokens[0]));
         }
 
         shares = bound(shares, 1, 1e24);

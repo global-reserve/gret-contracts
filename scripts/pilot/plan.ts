@@ -98,11 +98,30 @@ export async function verifyVault(client: Reader, vault: Address) {
   ];
 }
 
+/** A broken aggregate read must produce an actionable error, never a zero valuation. */
+async function readBacking<T>(operation: Promise<T>): Promise<T> {
+  try {
+    return await operation;
+  } catch (cause) {
+    throw new Error(
+      "Cannot read the vault's component balances. Check the RPC and token status. " +
+      "This page cannot quote a normal mint or redemption while an active component is unreadable. " +
+      "A separate previewRedeemSkipping/redeemSkipping flow can omit that component, but forfeits " +
+      "its share; this page never skips assets automatically.",
+      { cause },
+    );
+  }
+}
+
 /** Balances of the pilot wallet and, once deployed, its position in the vault. */
 export async function walletStatus(client: Reader, account: Address, vault?: Address) {
   const balances = await Promise.all(
     components.map((c) =>
-      client.readContract({ address: c.address, abi: erc20Abi, functionName: "balanceOf", args: [account] }),
+      client.readContract({ address: c.address, abi: erc20Abi, functionName: "balanceOf", args: [account] })
+        .catch((cause: unknown) => {
+          throw new Error(`Cannot read the ${c.symbol} wallet balance. Check the RPC and token status; ` +
+            "an unreadable balance is not treated as zero.", { cause });
+        }),
     ),
   );
   const eth = await client.getBalance({ address: account });
@@ -111,18 +130,19 @@ export async function walletStatus(client: Reader, account: Address, vault?: Add
     readVault<bigint>(client, vault, "balanceOf", [account]),
     readVault<bigint>(client, vault, "totalSupply"),
     readVault<boolean>(client, vault, "hasMinted", [account]),
-    readVault<bigint[]>(client, vault, "reserves"),
+    readBacking(readVault<bigint[]>(client, vault, "reserves")),
   ]);
   return { eth, balances, vault: { gret, supply, hasMinted, reserves } };
 }
 
 /**
  * Approvals still missing and the mint of `shares` GRET, paying at most what the vault asks
- * today and receiving at least `shares` minus 0.1%, which covers the few wei xStocks lose per
- * transfer. Approvals are for that exact amount, never unlimited.
+ * at the live quote and receiving at least `shares` minus 0.1%, which covers the few wei xStocks lose per
+ * transfer. Approvals are for that exact amount, never unlimited. The page requotes after
+ * approvals and asks the user to review again if any limit changed. No silent input slippage.
  */
 export async function mintTransactions(client: Reader, vault: Address, account: Address, shares = INITIAL_SHARES) {
-  const needed = await readVault<bigint[]>(client, vault, "previewMint", [shares]);
+  const needed = await readBacking(readVault<bigint[]>(client, vault, "previewMint", [shares]));
   const version = await readVault<bigint>(client, vault, "basketVersion");
   const txs: PlannedTx[] = [];
   for (const [i, c] of components.entries()) {
@@ -156,7 +176,7 @@ export async function mintTransactions(client: Reader, vault: Address, account: 
 export async function redeemTransaction(client: Reader, vault: Address, account: Address) {
   const shares = await readVault<bigint>(client, vault, "balanceOf", [account]);
   if (shares === 0n) return undefined;
-  const out = await readVault<bigint[]>(client, vault, "previewRedeem", [shares]);
+  const out = await readBacking(readVault<bigint[]>(client, vault, "previewRedeem", [shares]));
   const version = await readVault<bigint>(client, vault, "basketVersion");
   return {
     label: `Redeem ${formatUnits(shares, 18)} GRET`,

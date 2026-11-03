@@ -5,7 +5,8 @@ pragma solidity 0.8.38;
 /// @notice Prices every swap the vault's rebalancer makes and refuses the ones that lose too much.
 interface IPriceGuard {
     /// @notice Reverts unless the vault may give `sellAmount` of `sell` for the `received` units of
-    /// `buy` that arrived. The vault calls it in every swap, before updating its reserves, so the
-    /// guard sees them as they were before the exchange. The guard may record the swap.
+    /// `buy` that arrived. Called after receipt, before sending sell tokens. The guard must exclude
+    /// `received` from the buy balance when valuing pre-swap backing, and omit excluded components.
+    /// Accounting views guarded against reentrancy are unavailable during this call.
     function checkSwap(address sell, uint256 sellAmount, address buy, uint256 received) external;
 }

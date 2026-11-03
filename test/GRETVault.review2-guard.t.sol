@@ -412,52 +412,27 @@ contract Review2GuardTest is GRETVaultCase {
         assertTrue(target.writtenOff(address(s)));
     }
 
-    function test_L06_writtenOffComponentBoughtAtFeedPrice() public {
+    function test_L06_writtenOffComponentCannotBeBoughtAtFeedPrice() public {
         (GRETVault target, MockERC20 h, SenderFreezeToken s, ChainlinkPriceGuard g) = _writtenOffSetup();
-        uint256 version = target.basketVersion();
-        // All healthy reserves (4 H, $400) for 10 S at the feed price.
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentExcluded.selector, address(s)));
         vm.prank(REBALANCER);
         target.swap(address(h), 4e18, address(s), 10e18);
         assertEq(g.weeklyLoss(), 0);
-        assertEq(target.reserves()[0], 0);
-        assertEq(target.reserves()[1], 10e18);
-        assertTrue(target.writtenOff(address(s)));
-        assertEq(target.basketVersion(), version);
-        assertEq(target.previewMint(SHARE)[1], 5e18); // mint asks for S again
-
-        vm.prank(ALICE);
-        vm.expectPartialRevert(SenderFreezeToken.SenderFrozen.selector);
-        target.redeem(SHARE, _pair(0, 0), version);
-
-        address[] memory skipped = new address[](1);
-        skipped[0] = address(s);
-        vm.prank(ALICE);
-        uint256[] memory out = target.redeemSkipping(SHARE, _pair(0, 0), skipped, version);
-        assertEq(out[0], 0);
-
-        vm.prank(GOVERNANCE);
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.TokenWrittenOff.selector, address(s)));
-        target.removeComponent(address(s));
+        assertEq(target.reserves()[0], 4e18);
+        assertEq(target.reserves()[1], 0);
     }
 
-    function test_L06_threeWeiPurchaseUndoesTheWriteOffForRedemption() public {
+    function test_L06_threeWeiPurchaseCannotUndoWriteOff() public {
         (GRETVault target, MockERC20 h, SenderFreezeToken s,) = _writtenOffSetup();
-        uint256 version = target.basketVersion();
-        // After the write-off, normal redemption works again.
-        vm.prank(BOB);
-        target.redeem(SHARE, _pair(0, 0), version);
-        // 1 wei of H for 3 wei of S passes the guard (3 * $40 >= 1 * $100 in base units).
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentExcluded.selector, address(s)));
         vm.prank(REBALANCER);
         target.swap(address(h), 1, address(s), 3);
-        assertEq(target.reserves()[1], 3);
+        uint256 version = target.basketVersion();
         vm.prank(ALICE);
-        vm.expectPartialRevert(SenderFreezeToken.SenderFrozen.selector);
-        target.redeem(SHARE, _pair(0, 0), version);
+        uint256[] memory paid = target.redeem(SHARE, _pair(0, 0), version);
+        assertEq(paid[0], 2e18);
+        assertEq(paid[1], 0);
     }
-
-    // ------------------------------------------------------------------------------------------
-    // REVIEW2-L07: a lagging feed: the loss is unrecorded and on top of both limits
-    // ------------------------------------------------------------------------------------------
 
     function test_L07_laggingFeedLossIsOnTopOfTheWeeklyLimit() public {
         _feeds();

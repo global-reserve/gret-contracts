@@ -1,28 +1,21 @@
 # Accepted risks
 
-Updated on October 29, 2026. Changes since the
-[October 27, 2026 review](audits/2026-10-27-GRETVault-review.md), from a second internal review:
-R-02, R-09 and P-5 widen their scope (the week of a guard replacement, a positive redemption
-fee, pausing before a write-off can be executed); R-03, R-14 and R-15 correct how feeds and a
-broken `balanceOf` are described; R-01, R-06, R-08, R-18, P-1 and P-2 add detail. No risk was
-removed or renumbered.
+Updated on November 2, 2026 for the implemented live-balance design. The immutable
+[October 27 mainnet pilot](SPECIFICATION.md#mainnet-pilot) still runs the prior code: local
+fixes do not change that deployment. The dated reviews remain historical evidence.
 
-The October 29 sequence review expands R-04 and adds R-25, with operational mitigations
-accepted by the project owner: P-2 and P-7 cover the recovery exceptions, and P-13 prevents
-zero-supply liquidation. The vault remains unchanged. Scope and validation are recorded
-under [Review evidence](#review-evidence--october-29-2026).
-
-This document lists every known risk of `GRETVault` and `ChainlinkPriceGuard` that was
-consciously accepted, with the reason and what mitigates it. Issues that were fixed are not
-listed: the protections are in the code and in
-[`test/GRETVault.protections.t.sol`](../test/GRETVault.protections.t.sol). The contracts have had
-internal reviews, not an independent audit.
+This is the canonical register of accepted risks and their operating mitigations. Stable
+IDs are retained when a change fixes a finding: R-14 and R-25 now describe controls, and R-08
+distinguishes the closed post-receipt window from remaining timing risks. R-04, R-16 and the
+policies below incorporate the consequences of automatic accounting. The contracts have had
+internal reviews and tests, not an independent audit. Fixes are also covered by the existing
+accounting, protection and subject-specific suites.
 
 Identifier legend:
 
 | Prefix | Meaning | Example |
 | --- | --- | --- |
-| `R` | **Risk**: an accepted risk of the protocol | `R-04` |
+| `R` | **Risk**: a stable finding, with current status in its entry | `R-04` |
 | `P` | **Policy**: an operating rule for governance that the vault does not enforce | `P-2` |
 
 Numbers are stable identifiers within each prefix, not severity levels or review numbers.
@@ -46,19 +39,19 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 | [R-01](#r-01--governance-holds-broad-powers-and-its-key-can-be-stolen-or-lost) | Governance holds broad powers | Whoever controls governance | After a 7-day notice, the reserves exchanged for anything |
 | [R-02](#r-02--the-rebalancer-chooses-the-price-within-the-guards-limits) | The rebalancer chooses the price | The rebalancer or a thief of its key | 2% of each GRET's value per week (4% in the week of a guard replacement) until revoked |
 | [R-03](#r-03--the-price-guard-is-only-as-good-as-its-feeds) | The guard is only as good as its feeds | A rebalancer, when a token trades below its feed | The priced healthy reserves, until revoked |
-| [R-04](#r-04--governance-decides-what-happens-to-surpluses-and-recoveries) | Governance decides on surpluses and recoveries | Governance; issuer incidents and claim order | Distributions kept or recoveries allocated away from the holders who took a cut |
+| [R-04](#r-04--automatic-recovery-is-not-targeted-compensation) | Automatic recovery is not targeted compensation | Issuer incidents and claim order | Recoveries benefit holders other than those who took a cut |
 | [R-05](#r-05--a-token-with-two-addresses) | A token with two addresses | Governance, after an issuer change | A whole component |
 | [R-06](#r-06--governance-can-write-off-a-healthy-component) | Writing off a healthy component | Governance | Late minters share in that component |
 | [R-07](#r-07--pausing-minting-stops-new-holders-from-qualifying-for-redemption) | A mint pause stops new holders from qualifying | Governance or an issuer | A holder who never minted cannot redeem during a notice |
-| [R-08](#r-08--whoever-mints-before-a-sync-shares-in-it) | Whoever mints before a sync shares in it | Anyone who can mint the basket | Most of a distribution or recovery |
+| [R-08](#r-08--allocation-timing-and-excluded-recoveries) | Allocation timing and excluded recoveries | Anyone who can mint the basket | A share of future income or an excluded recovery |
 | [R-09](#r-09--the-1-gret-floor-can-hold-back-the-last-holders) | The 1 GRET floor can hold back the last holders | Anyone who mints a fraction; the fee recipient; a positive redemption fee | Just under 1 GRET held back; 1 GRET while the redemption fee is positive |
 | [R-10](#r-10--minimums-bound-what-the-vault-sends-not-what-arrives) | Minimums bound what is sent, not what arrives | An issuer | Less than the minimum received |
 | [R-11](#r-11--the-mint-tolerance-is-fixed-in-base-units) | The mint tolerance is fixed in base units | A rounding component | A minter overpays the healthy components |
 | [R-12](#r-12--issuers-control-their-tokens) | Issuers control their tokens | Issuers | A component lost to holders |
 | [R-13](#r-13--a-component-that-takes-more-from-the-vault-than-it-sends) | A component takes more than it sends | An issuer | The last holder cannot withdraw that component |
-| [R-14](#r-14--a-broken-balanceof-makes-a-loss-first-come-first-served) | A broken `balanceOf` makes a loss first come, first served | An issuer | Later holders bear the whole shortfall |
+| [R-14](#r-14--closed-stale-balance-payouts-after-a-broken-balance-read) | Closed: stale-balance payouts | An issuer can still break reads | That component becomes unavailable until recovery or skipping |
 | [R-15](#r-15--a-token-can-become-expensive-or-call-back) | A token can become expensive or call back | An issuer | One token stops normal redemption |
-| [R-16](#r-16--dust-left-after-selling-a-whole-reserve-blocks-removal) | Dust after a whole sale blocks removal | Any minter | One more swap |
+| [R-16](#r-16--dust-and-donations-after-a-whole-reserve-sale) | Dust and donations after a whole sale | Any sender or minter | Required contributions or delayed removal |
 | [R-17](#r-17--written-off-components-keep-their-slot-forever) | Written-off components keep their slot | Repeated issuer failures | No room for new components |
 | [R-18](#r-18--any-contract-can-be-announced-as-a-component) | Any contract can be announced | Governance | A useless or hostile component, with notice |
 | [R-19](#r-19--initial-amounts-can-go-stale-after-basket-changes) | Initial amounts can go stale | Nobody | No restart from zero supply until updated |
@@ -67,18 +60,18 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 | [R-22](#r-22--some-rights-are-never-paid-in-liquidation) | Some rights are never paid in liquidation | An issuer; holders that are contracts | Rights left pending for good |
 | [R-23](#r-23--the-vault-cannot-change) | The vault cannot change | Nobody | A bug or a new rule needs a new vault |
 | [R-24](#r-24--fees-round-down) | Fees round down | Anyone | Operations of a few wei pay no fee |
-| [R-25](#r-25--empty-liquidation-strands-a-written-off-recovery) | Empty liquidation strands a written-off recovery | Governance activating after the last normal exit | The entire recovered component without an exit through the vault |
+| [R-25](#r-25--closed-locally-zero-supply-liquidation) | Closed locally: zero-supply liquidation | Old deployed pilot remains exposed | Current activation reverts with `NoSupply` |
 
 ## Governance and rebalancing
 
 ### R-01 — Governance holds broad powers, and its key can be stolen or lost
 
 - **What can happen.** At once, governance can activate the irreversible liquidation, pause
-  minting, rescue surpluses (R-04), change the fee recipient, cut fees and revoke the
+  minting, reactivate components, rescue foreign tokens (R-04), change the fee recipient, cut fees and revoke the
   rebalancer. With 7 days' notice it can appoint a rebalancer together with a price guard that
   accepts every swap, and then exchange the reserves for anything; add or write off
   components; raise fees up to 5%; and hand governance over. If its key is lost, nobody can
-  activate liquidation, sync, change the basket or replace governance; mint and redemption keep
+  activate liquidation, reactivate components, change the basket or replace governance; mint and redemption keep
   working. Liquidation has no fast guardian: it takes as long as governance's own timelock.
 - **Who can cause it.** Whoever controls the governance address: in the pilot, the pilot
   wallet, an EOA.
@@ -102,7 +95,8 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   value per week, in fixed 7-day periods. Each loss counts as the share of the vault it takes
   at that moment, which is what every GRET loses, so deposits and withdrawals during the week do
   not stretch the weekly limit. The vault is valued by what it actually holds of each reserve,
-  so a balance an issuer took and nobody has recognized yet does not stretch it either.
+  so losses immediately reduce it and income increases it. The incoming swap receipt is
+  subtracted before valuation; excluded components do not count.
 - **Who can cause it.** The rebalancer, or whoever steals its key.
 - **Worst case.** With an honest `ChainlinkPriceGuard`, 2% of the value behind each GRET per week,
   or 4% in a row across the change of week, until governance revokes the rebalancer. The weekly
@@ -128,8 +122,8 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   for SPYx; the fund's price times Ondo's multiplier for the Ondo tokens) keeps pricing a token
   that trades far below it, after a depeg or a problem at the issuer. A swap that buys that
   token at the feed price records no loss: neither limit applies, and no `LossRecorded` is
-  emitted. The same holds for a written-off component: `swap` does not refuse to buy it, and the
-  purchase gives it a reserve again without a `sync`. Feeds also update on a deviation threshold
+  emitted. Excluded components cannot be bought by the rebalancer. After governance reactivates
+  one, a misleading feed can still misprice it. Feeds also update on a deviation threshold
   (0.5%; 2% for cbBTC): a swap at a feed price that is off by up to that threshold loses the
   difference unrecorded, on top of both limits. Between two feeds the gap can reach the sum of
   their thresholds, and it can be taken again on every swap while a feed lags: it is bounded by
@@ -155,45 +149,32 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   price…", "refuses a token without a feed, and a stale…"); the guard test on the mainnet
   fork.
 
-### R-04 — Governance decides what happens to surpluses and recoveries
+### R-04 — Automatic recovery is not targeted compensation
 
-- **What can happen.** What the vault holds above its recognized reserves is surplus, and
-  governance syncs it to the holders or rescues it: issuer distributions, recoveries of
-  recognized losses and, in liquidation, balance that comes back after claims took a cut.
-  A claim during a shortfall consumes the whole right; a later recovery does not recreate
-  that claimant's entitlement to the cut. A removed component's balance is outside the
-  basket and fully rescuable. Written-off tokens are never rescuable, even after recovery.
-  That permanent flag prevents P-2's direct compensation of a later liquidation haircut:
-  `sync` allocates the surplus to all holders rather than only those who took a cut.
-  Separately, a removed component cannot rejoin during liquidation, so its recovery must
-  use P-7's external distribution instead of re-addition and sync.
-- **Who can cause it.** Governance can retain surplus. A prior write-off, subsequent issuer
-  loss and recovery, and different claim times can also cause unequal compensation with
-  entirely cooperative governance. The redistribution requires multiple holders; a sole
-  holder receives the whole synced recovery.
-- **Worst case.** Governance keeps distributions as an effective fee, or a recovered loss
-  benefits holders other than those who bore it. For example: two equal holders are owed
-  5 tokens each; after a prior write-off and full recovery, liquidation begins, 5 of the
-  10 tokens disappear, and Alice claims 2.5. All 5 return, but rescuing the 2.5 surplus to
-  Alice is forbidden. Syncing it leaves Alice with 3.75 and Bob with 6.25. All assets are
-  accounted for, but Alice is not made whole. With Bob holding `k` times Alice's shares
-  and Alice's haircut `c`, approximately `c * k / (k + 1)` goes to Bob, within rounding.
-- **Why it is accepted.** Individual recovery rights would add accounting inside liquidation.
-  The permanent rescue prohibition protects written-off assets from governance withdrawal.
-  The pilot retains that design and handles recovery allocation operationally under P-2
-  and P-7. An external settlement requires cooperation; the vault does not guarantee it.
-- **Mitigation.** P-1, P-2, P-3 and P-7. Reconstruct losses and payouts before distributing a
-  recovery; for a written-off token, sync and reconcile any compensation externally rather
-  than attempting a forbidden rescue. For a removed token recovered during liquidation,
-  rescue and distribute externally. The empty-liquidation case is separate (R-25).
-- **Evidence.** `test_R04_writtenOffRecoveryCannotReimburseHaircut`, its control without a
-  prior write-off (which pays 5 to each),
-  `testFuzz_R04_syncTransfersPartOfCompensationToWaitingHolder`, and
-  `test_R04_removedRecoveryCannotRejoinLiquidation` in
-  [`GRETVault.risks.t.sol`](../test/GRETVault.risks.t.sol). The last test verifies the failed
-  re-addition and sync, followed by successful rescue. Also see the existing governance
-  surplus tests and liquidation shortfall tests in `GRETVault.governance.ts` and
-  `GRETVault.liquidation.ts`.
+- **What can happen.** Registered active balances, including mistaken transfers, immediately
+  back GRET. Governance cannot rescue any registered component while shares exist or during
+  liquidation. A successful haircut consumes the full nominal right. Later excess balance
+  increases the liquidation basis for all frozen shares, including holders already paid in
+  full; it does not reimburse only the holder who took a cut. Each token's basis is established
+  at its first successful claim, so losses before that moment lower its initial basis.
+  Removed components are foreign tokens and their recoveries remain fully rescuable; they
+  cannot rejoin the basket during liquidation. Excluded registered tokens remain protected.
+- **Who can cause it.** Issuer losses/recoveries and differing claim times. Governance retains
+  allocation discretion for foreign tokens, including removed-component recoveries.
+- **Worst case.** Two equal holders own 10 tokens. Alice claims 5; 2.5 disappear; Bob claims
+  2.5; the missing 2.5 return. Each gets another 1.25: Alice receives 6.25 and Bob 3.75.
+  All assets are accounted for but Bob is not made whole. This occurs without a write-off.
+  A mistaken component deposit cannot be returned by governance while holders exist.
+- **Why it is accepted.** Keeping individual compensation entitlements would add liquidation
+  accounting. Automatic allocation removes governance's discretion over registered income
+  and the operational sync window. A sole frozen holder receives the entire recovery.
+- **Mitigation.** P-1, P-2, P-3 and P-7. Reconcile compensation externally using independent
+  funds or voluntary settlements. The vault cannot force another holder to return an excess.
+- **Evidence.** `test_R04_automaticRecoveryIsNotTargetedCompensation`,
+  `testFuzz_R04_recoveryRewardsPreviouslyPaidHolder`,
+  `test_R04_removedRecoveryCannotRejoinLiquidation` in `GRETVault.risks.t.sol`.
+  `test_liveBalance_lazyBasisUsesBalanceAtFirstSuccessfulClaim` and
+  `test_liveBalance_paidHoldersCanClaimLateIncomeAutomatically` in the accounting suite.
 
 ### R-05 — A token with two addresses
 
@@ -210,17 +191,17 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 
 - **What can happen.** Governance judges whether a component is broken; the vault only enforces
   the 7-day wait, and anyone can execute a ready write-off during its window. Writing off a
-  healthy component drops its reserve to zero until a `sync` brings it back. A contract can
+  healthy component excludes its balance until `activateComponent` brings it back. A contract can
   execute a ready write-off and mint without that component in the same transaction, so a mint
   pause sent after the write-off comes too late.
 - **Who can cause it.** Governance, or anyone if governance forgets to cancel a ready write-off.
-- **Worst case.** Whoever mints in between shares in that component when it is synced (R-08).
+- **Worst case.** Whoever mints in between shares in that component when it is reactivated (R-08).
 - **Why it is accepted.** Governance gains nothing directly: it can never rescue the token, and
-  `sync` undoes the write-off. A check by the vault itself could be fooled both ways and was
+  reactivation restores backing while retaining the permanent write-off history. A check by the vault itself could be fooled both ways and was
   removed. A captured governance can already do more with a rebalancer.
 - **Mitigation.** P-5.
 - **Evidence.** [`test/GRETVault.rebalancing.ts`](../test/GRETVault.rebalancing.ts) ("works on a
-  healthy component too, and sync undoes a mistaken write-off");
+  healthy component too, and activation restores its backing");
   `test_R08_lateMinterCapturesWriteOffRecovery`.
 
 ## Entering and exiting
@@ -241,28 +222,30 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 - **Evidence.** `test_R07_pauseKeepsNonMinterInDuringNotice`,
   `test_R07_frozenComponentKeepsNonMinterFromQualifying`.
 
-### R-08 — Whoever mints before a sync shares in it
+### R-08 — Allocation timing and excluded recoveries
 
-- **What can happen.** Mint prices shares from the recognized reserves, so value that has
-  arrived but is not synced is left out of the price. Whoever mints before the `sync` of a
-  distribution or of a written-off component that recovered, or before a swap favorable to the
-  vault, and redeems after it, takes part of that value. A pause around the `sync` only stops
-  those who arrive after the pause. The same holds for the share a `redeemSkipping` leaves
-  behind: it would become surplus if the redemption emptied the supply, but whoever mints just
-  before keeps the supply from emptying and takes all of it when the one skipping was the last
-  holder, or its proportional part otherwise. Conversely, a holder who redeems
-  before a swap that loses value and mints after it pushes its share of that loss onto the
-  others, within the guard's limits.
-- **Who can cause it.** Anyone who can mint the basket, above all someone who already holds it
-  and can mint and redeem in kind at no other cost.
-- **Worst case.** Most of a distribution or recovery, in proportion to what the entrant brings.
-- **Why it is accepted.** Giving accrued value to past holders on chain needs snapshots or
-  recovery claims: new accounting. A gradual release does not stop a holder of the basket, who
-  can hold GRET through it.
-- **Mitigation.** P-4 (above all, a mint fee around 0.1% once third parties can mint), P-5, P-6.
-- **Evidence.** `test_R08_minterCapturesMostOfASync`,
-  `test_R08_pauseAroundSyncDoesNotStopEarlierEntrant`,
-  `test_R08_lateMinterCapturesWriteOffRecovery`.
+- **Status.** The old post-receipt mint-before-sync window is closed for active components.
+  A minter pays against their complete live balance, including previously received dividends.
+- **What can still happen.** Entering before a future distribution, favorable swap or another
+  holder's skipping exit shares the value that arrives later. An excluded token does not
+  enter mint pricing until governance reactivates it; new entrants can share that recovery.
+  A pause immediately before reactivation cannot remove shares minted earlier. A holder can
+  also redeem before a losing swap and return afterwards, avoiding that loss. After the last
+  normal exit, the next bootstrap owns all preexisting active balances for the configured
+  initial contribution; ordinary components can instead be rescued while supply is zero.
+- **Who can cause it.** Anyone able to mint the basket; any sender can add unsolicited balances.
+- **Worst case.** A large share of future income, excluded recovery or abandoned assets.
+  Donations can also increase required contributions and make a pending exact quote revert.
+- **Why it is accepted.** Claims for former holders and dividend record dates require additional
+  accounting. A fixed one-GRET bootstrap and the supply floor prevent a donation from forcing
+  issuance to round to zero; neither promises entitlement to a past holder who already exited.
+- **Mitigation.** P-4, P-5 and P-6. Pause before exclusion and through recovery when appropriate;
+  monitor empty-vault restarts. Exact input limits and a fresh quote after approvals bound
+  minter spending. Fees are optional economic friction, not a fix for allocation timing.
+- **Evidence.** `test_R08_controlLiveDividendCannotBeCaptured` in the protections suite;
+  `test_R08_entryBeforeFutureDonationStillSharesIt`,
+  `test_R08_lateMinterCapturesWriteOffRecovery`; the accounting suite also fuzzes a donation
+  followed by mint/redeem and tests bootstrap ownership of old receipts.
 
 ### R-09 — The 1 GRET floor can hold back the last holders
 
@@ -331,49 +314,41 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 
 ### R-13 — A component that takes more from the vault than it sends
 
-- **What can happen.** Redemptions, claims and swaps lower the reserve by the amount sent. If an
+- **What can happen.** Redemptions, claims and swaps request a transfer of the quoted amount. If an
   issuer upgraded its token to debit the sender more than that, the difference would come out of
   the backing of those who stay, and the last exit of that component could fail even in
-  liquidation, because the vault cannot pay the extra. `rescue` checks the backing after a
-  transfer; the other paths do not. None of the 11 does it today; the xStocks have a fee
-  setting, at zero.
+  liquidation, because the vault cannot pay the extra. Live accounting reflects the lower
+  balance on the next operation; it does not bound the sender debit of an outgoing transfer.
 - **Who can cause it.** An issuer.
 - **Worst case.** The remaining holders pay the surcharge, and the last one cannot withdraw that
   component.
-- **Why it is accepted.** A balance check after every transfer was rejected to keep the contract
-  as it is.
+- **Why it is accepted.** A balance check after every transfer was rejected to avoid adding issuer-specific transfer accounting.
 - **Mitigation.** Wallets that minted exit with `redeemSkipping`; governance writes the
   component off or sells it. P-10.
 - **Evidence.** `test_R13_senderSurchargeComesOutOfRemainingBacking`,
   `test_R13_senderSurchargeBlocksLastClaim`.
 
-### R-14 — A broken `balanceOf` makes a loss first come, first served
+### R-14 — Closed: stale-balance payouts after a broken balance read
 
-- **What can happen.** If a component's `balanceOf` reverts while its transfers work, normal
-  redemption and claims go ahead with the recorded reserve. If the real balance is short, the
-  first to leave get everything. Running out of gas counts as a revert, so whoever chooses the
-  gas limit can force this path when `balanceOf` costs millions of gas. Only a revert is
-  tolerated: a `balanceOf` that succeeds with malformed return data, or a component without
-  code, makes normal redemption and that component's claims revert; `redeemSkipping` without it
-  still works.
-- **Who can cause it.** An issuer, or a broken token.
-- **Worst case.** The last holders bear the whole shortfall of that component.
-- **Why it is accepted.** `balanceOf` tells the vault how much backing remains, which it needs
-  to detect a shortfall and share the loss proportionally. A failed balance read does not mean
-  transfers must fail too. Instead of blocking the exit when that read reverts, the vault tries
-  the transfer using its recorded reserve; if the transfer fails, the operation reverts and the
-  holder keeps their GRET or pending claim. This favors being able to exit a broken token over
-  sharing a loss proportionally: if the recorded reserve exceeds the actual balance, early
-  exits may be paid in full while later holders bear the shortfall.
-- **Mitigation.** A write-off.
-- **Evidence.** `test_R14_brokenBalanceReadPaysFirstRedeemerInFull`.
+- **Previous finding.** The old reserve fallback could pay an early redeemer in full when
+  `balanceOf` reverted despite a real shortfall, leaving the loss to later holders.
+- **Current control.** Normal payouts and claims require a successful current balance read.
+  A revert, out-of-gas or malformed result cannot select a cached full payout. The operation
+  reverts with shares and rights intact. This closes the allocation issue in local code.
+- **Remaining limitation.** A component with a broken read is unavailable even if its transfer
+  works. Use `redeemSkipping` to leave without that asset, or exclude it after the write-off
+  notice. Liquidation activation makes no token calls, and healthy claims remain independent.
+  The broken component's claim must wait for readability to recover (R-12, R-15).
+- **Evidence.** `test_R14_controlBrokenBalanceCannotOverpayFirstRedeemer` in the protections suite, and the malformed,
+  expensive-read and skipping controls in `GRETVault.review2-exits.t.sol` and the accounting
+  suite. The deployed pilot retains its former behavior.
 
 ### R-15 — A token can become expensive or call back
 
-- **What can happen.** The cap of 128 components was measured with mock tokens: mint 4.2M gas
-  and redemption 3.5M, within Ethereum's per-transaction limit of about 16.7M. An issuer upgrade
-  could make one token's calls expensive, or make them call back into the vault. During a mint,
-  the vault's views can be inconsistent if a component calls back. The price guard reads the
+- **What can happen.** The cap of 128 components is exercised with mock tokens against a transaction gas
+  bound. This cannot bound arbitrary issuer code. An issuer upgrade
+  could make one token's calls expensive, or make them call back into the vault. Accounting views reject callbacks during mutations. Raw token balances and ordinary
+  ERC-20 supply views can still show different stages of a transfer. The price guard reads the
   balance of every priced component on each swap with a loss, so an expensive `balanceOf` there
   also stops swaps; one that reverts only leaves that component out of the vault's value, and
   one that returns malformed data stops every swap with a loss.
@@ -383,24 +358,37 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 - **Why it is accepted.** No cap can bound arbitrary external code.
 - **Mitigation.** `redeemSkipping` never calls the skipped tokens, and every operation on the
   reserves is protected against reentrancy. Integrations, including future price guards, must
-  not trust the vault's views during a component's callback.
+  use compatible accounting views outside mutations, not compose an in-flight NAV themselves.
 - **Evidence.** `test_skippedComponentIsNeverCalled` in the protections;
   [`test/GRETVault.adversarial.ts`](../test/GRETVault.adversarial.ts) (128 components, reentrancy
   from every external call).
 
 ## The basket
 
-### R-16 — Dust left after selling a whole reserve blocks removal
+### R-16 — Dust and donations after a whole-reserve sale
 
-- **What can happen.** A swap fixes both amounts, which is its price. Selling "the whole
-  reserve" read beforehand leaves a remainder if a mint lands in between, and the remainder
-  blocks removing the component.
-- **Who can cause it.** Any minter, by accident or on purpose.
-- **Worst case.** One more swap.
-- **Why it is accepted.** Letting the vault sell "whatever is there" would change the amount
-  after the price was set, at the holders' expense.
-- **Mitigation.** P-11.
-- **Evidence.** `test_R16_mintBeforeWholeSaleLeavesDustThatBlocksRemoval`.
+- **What can happen.** A fixed-amount swap leaves a remainder if minting or a donation lands
+  first. With live balances, even one unsolicited base unit reintroduces an active zero-balance
+  token into required contributions, potentially blocking a minter that cannot transfer it.
+  A direct donation can also front-run removal. Excluded components cannot be reactivated by
+  a donation; governance must call `activateComponent`.
+- **Who can cause it.** Any sender or minter, by accident or on purpose.
+- **Worst case.** Required contributions, reverting pending quotes, or blocked component
+  retirement. When a token cannot be sold (for example, no usable feed or transfer failure),
+  a donation above the dust threshold can force a permanent-slot write-off. A tradable token
+  can instead be sold again; repeated donations can still race a non-atomic removal.
+- **Why it is accepted.** Swaps must not silently change their fixed price. Treating all active
+  balances as backing necessarily includes unsolicited transfers.
+- **Mitigation.** P-11. Governance may deactivate/remove an empty ordinary component, allowing
+  at most ten base units only when token decimals are at least 18. Tokens with fewer decimals
+  must be exactly empty. This handles rounding residue, not a larger donation or broken
+  metadata. Exclusion alone never permits rescuing or removing a material balance; writing
+  it off requires notice and permanently retains the slot and rescue prohibition.
+- **Evidence.** `test_R16_mintBeforeWholeSaleLeavesDustThatBlocksRemoval`;
+  `test_liveBalance_oneUnitCanReactivateAnActiveZeroBalance`,
+  `test_liveBalance_dustRetirementIsBoundedAndCannotBypassWriteOff`,
+  `test_liveBalance_removalToleranceCannotDiscardLowDecimalAssets`,
+  `test_R16_donationBlocksRemovalUntilAnotherSale`.
 
 ### R-17 — Written-off components keep their slot forever
 
@@ -416,7 +404,8 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 ### R-18 — Any contract can be announced as a component
 
 - **What can happen.** `announceComponent` accepts any address with code, including the vault
-  itself or an EIP-7702 account. `proposePriceGuard` likewise only checks for code: the notice
+  itself or an EIP-7702 account. Additions start excluded, but activation does not validate
+  ERC-20 behavior. Removal still needs a readable balance (and decimals for nonzero dust). `proposePriceGuard` likewise only checks for code: the notice
   covers a guard's address, not its code, so a guard behind an upgradeable proxy or an EIP-7702
   account can change its behavior later without notice.
 - **Who can cause it.** Governance.
@@ -468,34 +457,17 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 - **Why it is accepted.** Liquidation cannot force a token to move, and contracts must provide
   their own exit.
 
-### R-25 — Empty liquidation strands a written-off recovery
+### R-25 — Closed locally: zero-supply liquidation
 
-- **What can happen.** A token stops transferring and is written off while minting is
-  paused. The last holder redeems all GRET for the healthy components. Governance activates
-  liquidation with supply zero, and the token later recovers. Its whole balance is readable
-  and transferable, but has no exit through the vault. Activation accepts zero supply;
-  `sync` needs a positive `liquidationSupply`, `rescue` permanently refuses the written-off
-  token, nobody can acquire claim rights, and minting, swaps and component removal are
-  closed. Unpausing or changing initial amounts cannot reverse this state.
-- **Who can cause it.** Governance, by activating liquidation after a complete normal exit.
-  No hostile governance or broken token at recovery time is required. An arbitrary third
-  party cannot burn others' GRET or activate liquidation.
-- **Worst case.** The entire recovered balance of that component is stranded through the
-  vault, not merely dust. Exceptional intervention by an issuer outside the vault is not
-  guaranteed. This is prevention-only: governance cannot repair the state once reached.
-- **Why it is accepted.** The sequence is avoidable by retaining outstanding GRET through
-  activation. In the own-funds pilot, the holder and governance are the same wallet and
-  control this ordering. The owner accepts operational prevention under P-13 without
-  replacing the immutable vault; a future code-enforced guard is not required by this decision.
-- **Mitigation.** P-13: do not activate with zero supply, and retain GRET controlled by
-  governance through activation. A supply read before signing alone is not an atomic
-  guarantee when other holders can transact. If the vault is already empty, leave it in
-  normal mode while recovery is assessed; a fresh mint is possible there if the initial
-  basket is usable. Do not turn that recoverable state into an empty liquidation.
-- **Evidence.** `test_R25_emptyLiquidationStrandsWrittenOffRecovery` in
-  [`GRETVault.risks.t.sol`](../test/GRETVault.risks.t.sol). Three controls recover the assets:
-  activation before the last exit; a fresh mint without liquidation; and rescue from an
-  empty liquidation when the token was never written off.
+- **Previous finding.** Governance could activate irreversible liquidation after the last
+  normal exit. With no frozen shares, a later written-off recovery had no possible claimant
+  and remained permanently non-rescuable.
+- **Current control.** `activateLiquidation` reverts with `NoSupply` when supply is zero,
+  before changing state. An empty vault stays in normal mode, where a bootstrap may restore
+  ownership if its active initial basket is usable. The check is atomic with activation.
+- **Deployment limitation.** The immutable October 27 pilot still needs P-13; this source
+  change cannot repair or modify it. A new deployment and voluntary migration are separate.
+- **Evidence.** `test_R25_controlEmptyLiquidationIsRejected` in the protections suite.
 
 ## Limits of the design
 
@@ -505,7 +477,7 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
   new vault is voluntary: each holder redeems from the old one and mints in the new one. The
   vault cannot adopt an allowlist, identity checks, freezing of holders or a different
   redemption rule, nor act on distributions that must be claimed or on token migrations; only
-  what arrives as balance can be synced.
+  what arrives as an active component balance is included automatically.
 - **Who can cause it.** Nobody; it is a choice.
 - **Worst case.** A bug or a new rule requires a new vault.
 - **Why it is accepted.** Any power to change the vault would also be a power to act against the
@@ -520,7 +492,26 @@ governance's conduct are in the [operating policy](#operating-policy) at the end
 - **Worst case.** A fee of a few wei unpaid.
 - **Why it is accepted.** Avoiding it costs more gas than it is worth.
 
-## Review evidence — October 29, 2026
+## Implementation evidence — November 2, 2026
+
+Live-balance implementation reviewed in the working tree based on
+`98a6e35f450a13409a2d2698089e47e9a39ee26e`. Scope: vault, Chainlink guard, component lifecycle,
+liquidation, pilot quoting, existing tests and disclosures. One Codex agent, with prior
+findings available; no independent audit or auxiliary agent. Historical reproductions were
+adapted to current behavior, and closed-finding controls moved into the existing protections
+suite. The three stateful suites share one handler with distinct initial states, an independent
+physical issuance/loss ledger, non-dilution checks and aggregate/per-holder claim checks.
+
+Final validation: 248 local tests passing (119 Solidity, 129 Node.js) and 119 deep tests
+passing, with 20,000 cases per fuzz test and 1,000 sequences of depth 200 per invariant. Pilot
+rehearsal passed at mainnet block 26,327,336; all five real-component/feed/rebalancing fork tests
+passed at block 26,327,339. Commands ran sequentially with compilation enabled. Exact commands,
+fork scope and gas measurements are recorded in
+[SPECIFICATION.md](SPECIFICATION.md#validation-and-design-history). No live deployment,
+migration, signature or mainnet state-changing transaction was performed. Mock issuer faults
+are hypothetical; fork observations do not promise future issuer behavior.
+
+## Historical review evidence — October 29, 2026
 
 One Codex agent reviewed source at `8d4b69cef02e88c059f356d77307014249563ad2`, with no
 auxiliary agent or independent verifier. It read the prior disclosures and reviews; this
@@ -544,7 +535,8 @@ the recovery suite passed its deep profile with 20,000 fuzz cases varying holder
 from 1 to 100 and losses from 1 to 9,999 bps. No fresh coverage or full deep-suite result
 is claimed. These observations do not establish that a finding occurred on mainnet.
 
-Reproduce the consolidated suite:
+The following commands run the current consolidated tests, including replacement controls;
+they no longer reproduce every historical vulnerable behavior:
 
 ```sh
 npm run check
@@ -554,63 +546,62 @@ npm test -- --test-profile deep --grep 'R04_|R25_' test/GRETVault.risks.t.sol
 
 ## Operating policy
 
-Agreed conduct for governance, which the vault does not enforce. Each point mitigates the risks
-that cite it.
+Agreed conduct for governance. Code-enforced controls are identified explicitly; the rest
+requires operational follow-through. The historical pilot still needs its original sync
+procedures until a separately authorized migration; the policies below describe new code.
 
-- **P-1.** Sync every recovery of a recognized loss (`LossRecognized` events) instead of rescuing
-  it. The event names the component by index, which a removal shifts: map it to a token by
-  replaying `ComponentAdded` and `ComponentRemoved` in log order up to that event, not by
-  reading the component list at that block. Apply P-2's compensation procedure and P-7's
-  removed-component exception when relevant. (R-04)
-- **P-2.** In liquidation, reconstruct each claimant's cut from `rights − amount` in
-  `Claimed` events and reconcile actual token delivery. A transfer reporting success without
-  moving tokens is not visible as a cut in that event. When a recovered balance is available
-  as surplus, rescue it to compensate cuts without paying anyone more than their uncompensated
-  loss; the rest is ordinary surplus. **For a token ever written off**, rescue is forbidden:
-  compute the allocation before syncing, sync the recovery, and reconcile the resulting
-  overpayments and shortfalls externally with the affected holders. Keep a settlement ledger
-  to prevent duplicate compensation. Returning another holder's excess requires their
-  cooperation; neither governance nor the vault can force it, and full compensation is not
-  guaranteed. With a sole holder the entire synced recovery returns to that holder. (R-04)
-- **P-3.** Sync issuer distributions that arrive as balance, such as xStocks multiplier
-  increases: they belong to the holders. `rescue` is for what does not belong to them, such as
-  mistaken transfers. (R-04)
-- **P-4.** Around every `sync`: pause minting before it and resume it after; send it through a
-  private RPC (Flashbots Protect, MEV Blocker or similar); sync as soon as a surplus appears, so
-  each `sync` is small; once third parties can mint, keep a mint fee around 0.1%, larger than a
-  quarterly dividend's share of the basket; and if a timelock is added, only the Safe executes
-  its operations, since a timelocked `sync` is visible during its delay. (R-08)
-- **P-5.** Write off only a component that stopped working, and cancel a pending write-off as
-  soon as the token recovers. Pause minting before a write-off becomes executable, since it can
-  be executed and followed by a mint in the same transaction, and keep it paused while a
-  written-off component may recover; sync the recovered balance at once through a private RPC.
-  When the last holders leave with `redeemSkipping`, pause minting first, so the skipped share
-  becomes surplus instead of going to a late minter. Sync still requires positive normal or
-  liquidation supply; follow P-13 before activating liquidation. (R-06, R-08, R-25)
+- **P-1.** Monitor actual component balances and issuer incidents. Normal income and losses no
+  longer need recognition calls or `LossRecognized` event reconstruction. Reconcile losses
+  and recoveries for P-2; a removed token still needs P-7. (R-04)
+- **P-2.** In liquidation, reconstruct consumed rights and requested payouts from `Claimed`
+  events and reconcile actual delivery. No-op transfers are not visible as a haircut in that
+  event. Automatic recovery is proportional to frozen shares, not uncompensated losses.
+  Compute overpayments/shortfalls and settle externally using separate funds or voluntary
+  returns; every registered component is non-rescuable during liquidation. Record settlements
+  to avoid duplicate compensation. Cooperation and complete reimbursement are not guaranteed.
+  With a sole frozen holder, the whole recovery returns to that holder. (R-04)
+- **P-3.** Monitor issuer distributions even though active component receipts count automatically.
+  Poll component balances and compare them with mint/redemption/swap/claim flows and issuer
+  notices; `Synced` and `LossRecognized` no longer provide an event-driven income/loss ledger.
+  No sync transaction is needed. Payments in foreign tokens or requiring a separate issuer
+  claim remain outside automatic accounting. Mistaken deposits of registered components cannot
+  be refunded by rescue while holders or liquidation rights exist. (R-04)
+- **P-4.** A post-receipt mint cannot capture an active dividend without paying for it. For
+  future distributions, favorable swaps or reactivation, assess timing separately: a pause
+  after entry does not undo that entrant's shares. Monitor announced multiplier/dividend
+  schedules. For a known external-value distribution, governance should assess and, when
+  appropriate, pause minting before the event until the new balance is reflected. The timing
+  must be chosen early enough to matter; prior entrants still participate. A mint fee may add
+  friction but neither a fixed fee nor a last-minute pause guarantees prevention. Fee increases
+  require their existing seven-day notice. Keep input limits and refresh quotes after approvals;
+  do not silently increase approvals when balances change. (R-08)
+- **P-5.** Write off only a component that stopped working; cancel its pending write-off as
+  soon as it recovers. Pause minting before execution becomes possible and keep it paused
+  through a relevant exclusion/recovery period. Reactivate recovered normal backing explicitly.
+  Liquidation automatically includes registered recoveries without activation. Before the
+  last skipping exit, pause and assess ownership of abandoned balances before allowing a
+  restart; pausing alone does not preserve an exited holder's rights. (R-06, R-08)
 - **P-6.** Send every `swap` through a private RPC. (R-02, R-08)
-- **P-7.** If a component removed after a total loss gets its balance back before
-  liquidation, add it again and sync it instead of rescuing it. **During liquidation**,
-  re-addition is impossible: rescue the recovered token and distribute it externally to the
-  entitled holders. Reconstruct and record the allocation from the GRET and claim history,
-  including holders who have not converted, and record each payment to avoid paying twice.
-  Do not delay an otherwise needed liquidation merely to wait for re-addition. (R-04)
-- **P-8.** Watch the price guard's `LossRecorded` events, and the market price of every priced
-  token against its feed. Revoke the rebalancer at once after a loss nobody expected, or when a
-  token trades away from its feed. (R-02, R-03)
-- **P-9.** Update the initial amounts (`setInitialAmounts`) as part of every basket change.
-  (R-19)
-- **P-10.** Admit components carefully and watch their issuers: no transfer fees, callbacks or
-  second addresses; 8 decimals or more, unless R-11 and R-21 are revisited; a Chainlink feed if
-  the component must be rebalanced. (R-03, R-05, R-10 to R-15, R-18, R-21)
-- **P-11.** Sell a whole reserve with a second small swap if a remainder is left, and remove
-  components whose reserve was sold. (R-16, R-20)
-- **P-12.** Before third-party funds, governance is a Safe multisig with a tested recovery
-  procedure. (R-01)
-- **P-13.** Activate liquidation only with positive supply. When liquidation is intended,
-  keep GRET controlled by governance, without granting others authority to spend that balance,
-  until activation confirms; do not redeem or transfer that last position beforehand. Check
-  the supply before signing as well. With other holders, that read alone does not prevent a
-  complete exit before execution; the retained governance position prevents supply reaching
-  zero in between. If supply is already zero, do not activate: assess recovery in normal mode,
-  where a fresh mint may restore the ability to sync. This prevents R-25; it cannot undo an
-  empty liquidation already activated. (R-25)
+- **P-7.** If a removed component recovers before liquidation, announce/add it again and then
+  activate it. During liquidation re-addition is impossible: rescue the foreign token and
+  distribute externally to entitled holders. Reconstruct GRET and claim history, including
+  unconverted holders, and record each payment. Do not delay needed liquidation merely to
+  wait for re-addition. (R-04)
+- **P-8.** Watch `LossRecorded` and each priced token's market price against its feed. Revoke
+  the rebalancer after an unexpected loss or depeg. Review budgets across guard replacement
+  and week boundaries. Deploy this vault with a guard compatible with live accounting. (R-02, R-03)
+- **P-9.** Update initial amounts after basket changes, including active/excluded state. Before
+  a zero-supply restart inspect all existing balances and deliberate ownership of them. (R-08, R-19)
+- **P-10.** Admit components carefully and monitor issuers: no transfer fees, callbacks or
+  second addresses; at least 8 decimals unless R-11 and R-21 are revisited; a usable feed if
+  rebalancing is required. Mocks do not prove real-issuer compatibility. (R-03, R-05, R-10 to R-15, R-18, R-21)
+- **P-11.** Sell material remainders and promptly remove or deactivate sold-out components.
+  Group final sale and retirement atomically when the governing/rebalancing caller supports
+  it; otherwise a donation can land between them. The dust exception is at most ten base
+  units for tokens with at least 18 decimals; lower-decimal tokens must be empty. Larger
+  donations still need a sale or delayed write-off. (R-16, R-20)
+- **P-12.** Before third-party funds, use a Safe multisig with a tested recovery procedure. (R-01)
+- **P-13.** The new vault atomically rejects zero-supply liquidation. On the old immutable
+  pilot, retain governance-controlled GRET until activation confirms and check supply before
+  signing; do not activate an already empty vault. A prior read alone is not atomic with
+  other holders' exits. This prevents the old R-25 and cannot undo an empty liquidation. (R-25)

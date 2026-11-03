@@ -72,7 +72,8 @@ describe("GRETVault: adversarial components and callers", async () => {
         "redeemSkipping",
         ({ vault }) => encodeFunctionData({ abi: vault.abi, functionName: "redeemSkipping", args: [1n, NO_MIN, [], 0n] }),
       ],
-      ["sync", ({ vault, tokens }) => encodeFunctionData({ abi: vault.abi, functionName: "sync", args: [tokens[0].address] })],
+      ["activateComponent", ({ vault, tokens }) => encodeFunctionData({ abi: vault.abi, functionName: "activateComponent", args: [tokens[0].address] })],
+      ["deactivateEmptyComponent", ({ vault, tokens }) => encodeFunctionData({ abi: vault.abi, functionName: "deactivateEmptyComponent", args: [tokens[0].address] })],
       [
         "rescue",
         ({ vault, tokens, faulty }) =>
@@ -131,7 +132,11 @@ describe("GRETVault: adversarial components and callers", async () => {
         for (const [reentryName, payload] of reentries) {
           const setup = await networkHelpers.loadFixture(hostileGovernanceFixture);
           const { vault, faulty, alice } = setup;
-          if (entryName === "rescue") await faulty.write.mint([vault.address, 10n]);
+          if (entryName === "rescue") {
+            // Registered components can only be rescued with zero normal supply.
+            await vault.write.redeem([await vault.read.totalSupply(), NO_MIN, 0n], { account: alice.account });
+            await faulty.write.mint([vault.address, 10n]);
+          }
           if (inLiquidation) {
             await vault.write.activateLiquidation({ account: faulty.address });
             await vault.write.convertToClaims([INITIAL_SHARES / 2n], { account: alice.account });
@@ -167,7 +172,10 @@ describe("GRETVault: adversarial components and callers", async () => {
       await vault.write.mint([INITIAL_SHARES, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
       await vault.write.redeem([INITIAL_SHARES, [0n, 0n], 0n], { account: alice.account });
       await usdtLike.write.mint([vault.address, 5n]);
-      await vault.write.rescue([usdtLike.address, alice.account.address, 5n], { account: governance.account });
+      await viem.assertions.revertWithCustomError(
+        vault.write.rescue([usdtLike.address, alice.account.address, 5n], { account: governance.account }),
+        vault, "BackingToken",
+      );
       await vault.write.activateLiquidation({ account: governance.account });
       await vault.write.convertToClaims([INITIAL_SHARES], { account: alice.account });
       await vault.write.claim([1n, alice.account.address, 0n], { account: alice.account });
@@ -323,7 +331,7 @@ describe("GRETVault: adversarial components and callers", async () => {
       const balanceC = await faulty.read.balanceOf([vault.address]);
       const left = aliceRights + 1n;
       await faulty.write.slash([vault.address, balanceC - left]);
-      assert.equal(await vault.read.componentSurplus([2n]), 0n);
+      assert.equal(await faulty.read.balanceOf([vault.address]), left);
 
       const [, , aliceBefore] = await balancesOf(basket, alice.account.address);
       const [, , bobBefore] = await balancesOf(basket, bob.account.address);
@@ -367,7 +375,10 @@ describe("GRETVault: adversarial components and callers", async () => {
         await vault.write.announceComponent([token.address], { account: governance.account });
       }
       await networkHelpers.time.increase(7n * 24n * 60n * 60n);
-      for (const token of tokens.slice(64, 128)) await vault.write.addComponent([token.address]);
+      for (const token of tokens.slice(64, 128)) {
+        await vault.write.addComponent([token.address]);
+        await vault.write.activateComponent([token.address], { account: governance.account });
+      }
       assert.equal(await vault.read.componentCount(), 128n);
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.addComponent([tokens[128].address]),
@@ -402,7 +413,8 @@ describe("GRETVault: adversarial components and callers", async () => {
       assert.equal(await vault.read.MAX_COMPONENTS(), 128n);
       assert.ok(mintGas < 8_000_000n, `mint gas ${mintGas}`);
       assert.ok(redeemGas < 8_000_000n, `redeem gas ${redeemGas}`);
-      assert.ok(claimGas < 150_000n, `claim gas ${claimGas}`);
+      // The first claim now establishes the component basis (one extra storage write).
+      assert.ok(claimGas < 175_000n, `first claim gas ${claimGas}`);
     });
   });
 });

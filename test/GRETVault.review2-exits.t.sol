@@ -219,14 +219,14 @@ contract Review2ExitsTest is GRETVaultCase {
         (ok, ret) = address(v).call(abi.encodeCall(GRETVault.redeem, (SHARE, _pair(0, 0), 0)));
     }
 
-    function test_L01_redeemCatchesOnlyARevert() public {
+    function test_L01_redeemFailsClosedOnBrokenBalanceRead() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
         uint256 snap = vm.snapshotState();
 
         m.setMode(OddBalanceToken.Mode.Revert);
         (bool ok,) = _redeemCall(v);
-        assertTrue(ok, "reverting balanceOf: redeem goes ahead");
-        assertEq(m.rawBalanceOf(ALICE), 1e24, "Alice got her 5e18 M back");
+        assertFalse(ok, "reverting balanceOf: redemption fails closed");
+        assertEq(v.balanceOf(ALICE), SHARE, "failed read burns no shares");
         vm.revertToState(snap);
 
         m.setMode(OddBalanceToken.Mode.Empty);
@@ -267,23 +267,18 @@ contract Review2ExitsTest is GRETVaultCase {
         assertTrue(ok, "after the write-off, redeem works without M");
     }
 
-    function test_L01_liquidationClaimsOnlyCatchARevert() public {
+    function test_L01_liquidationClaimFailsClosedOnBrokenBalanceRead() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
         _liquidateBoth(v);
         uint256 snap = vm.snapshotState();
 
-        // Control: a reverting balanceOf is paid in full, as documented.
         m.setMode(OddBalanceToken.Mode.Revert);
-        assertEq(v.claimable(ALICE, 1), 5e18);
+        (bool ok,) = address(v).staticcall(abi.encodeCall(GRETVault.claimable, (ALICE, 1)));
+        assertFalse(ok);
         vm.prank(ALICE);
-        assertEq(v.claim(1, ALICE, 0), 5e18);
-        // componentSurplus has no try: it reverts on a revert too, so sync and rescue do not
-        // distinguish the two failure modes.
-        (bool ok,) = address(v).staticcall(abi.encodeCall(GRETVault.componentSurplus, (1)));
-        assertFalse(ok, "componentSurplus reverts on a reverting balanceOf too");
-        vm.prank(GOVERNANCE);
-        (ok,) = address(v).call(abi.encodeCall(GRETVault.sync, (address(m))));
-        assertFalse(ok, "sync reverts on a reverting balanceOf too");
+        (ok,) = address(v).call(abi.encodeCall(GRETVault.claim, (1, ALICE, 0)));
+        assertFalse(ok);
+        assertEq(v.claimed(ALICE, 1), 0);
         vm.revertToState(snap);
 
         m.setMode(OddBalanceToken.Mode.Empty);
@@ -295,7 +290,7 @@ contract Review2ExitsTest is GRETVaultCase {
         (ok, ret) = address(v).call(abi.encodeCall(GRETVault.claim, (1, ALICE, 0)));
         assertFalse(ok, "claim reverts on empty return");
         assertEq(ret.length, 0);
-        assertEq(v.pendingRights(ALICE, 1), 5e18, "right stays pending");
+        assertEq(v.claimed(ALICE, 1), 0, "no right consumed");
         vm.prank(BOB);
         assertTrue(m.transfer(CAROL, 1), "M transfers still work");
         vm.prank(ALICE);
@@ -401,44 +396,36 @@ contract Review2ExitsTest is GRETVaultCase {
                 if (lowestFull == 0) lowestFull = g;
                 highestFull = g;
             } else {
-                assertEq(got, 2.5e18, "a successful claim pays full or pro rata");
+                assertEq(got, 2.5e18, "a successful claim pays only the current pro-rata amount");
                 ++proRata;
             }
         }
     }
 
-    function test_L08_expensiveBalanceOfClaimFullPayout() public {
+    function test_L08_expensiveBalanceOfClaimCannotOverpay() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
         _liquidateBoth(v);
         m.slash(address(v), 5e18); // shortfall: 5e18 left for 10e18 of rights
         m.setBurn(8_000_000);
         (uint256 full, uint256 proRata, uint256 lowestFull, uint256 highestFull) =
             _scanClaim(v, m, 1_000_000, 16_700_000, 250_000, false);
-        assertGt(full, 0);
+        assertEq(full, 0);
         assertGt(proRata, 0);
-        assertEq(lowestFull, 4_500_000);
-        assertEq(highestFull, 8_000_000);
-
-        // The attack for real, then Bob is left with nothing claimable.
-        vm.prank(ALICE);
-        (bool ok,) = address(v).call{gas: lowestFull}(abi.encodeCall(GRETVault.claim, (1, ALICE, 0)));
-        assertTrue(ok);
-        assertEq(m.rawBalanceOf(address(v)), 0, "Alice took the whole remaining balance");
-        assertEq(v.claimable(BOB, 1), 0);
-        assertEq(v.pendingRights(BOB, 1), 5e18);
+        assertEq(lowestFull, 0);
+        assertEq(highestFull, 0);
     }
 
-    function test_L08_expensiveBalanceOfClaimFullPayoutColdState() public {
+    function test_L08_expensiveBalanceOfClaimCannotOverpayColdState() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
         _liquidateBoth(v);
         m.slash(address(v), 5e18);
         m.setBurn(8_000_000);
         (uint256 full, uint256 proRata, uint256 lowestFull, uint256 highestFull) =
             _scanClaim(v, m, 1_000_000, 16_700_000, 250_000, true);
-        assertGt(full, 0);
+        assertEq(full, 0);
         assertGt(proRata, 0);
-        assertEq(lowestFull, 5_250_000);
-        assertEq(highestFull, 8_000_000);
+        assertEq(lowestFull, 0);
+        assertEq(highestFull, 0);
     }
 
     function test_L08_realisticBalanceOfCannotBeStarved() public {
@@ -452,9 +439,9 @@ contract Review2ExitsTest is GRETVaultCase {
         assertGt(proRata + proRata2, 0);
     }
 
-    function test_L08_expensiveBalanceOfRedeemSkipsLoss() public {
+    function test_L08_expensiveBalanceOfRedeemCannotSkipLoss() public {
         (GRETVault v, OddBalanceToken m) = _oddVault(5e18);
-        m.slash(address(v), 5e18); // unrecognized loss: 5e18 left for 10e18 of reserve
+        m.slash(address(v), 5e18); // loss: the current balance is only 5e18
         m.setBurn(12_000_000);
         uint256 stale;
         uint256 recognized;
@@ -474,7 +461,8 @@ contract Review2ExitsTest is GRETVaultCase {
                 ++recognized;
             }
         }
-        assertGt(stale, 0);
+        assertEq(stale, 0);
+        assertGt(recognized, 0);
     }
 
     function _redeemCallGas(GRETVault v, uint256 g) internal returns (bool ok, bytes memory ret) {
@@ -483,7 +471,7 @@ contract Review2ExitsTest is GRETVaultCase {
     }
 
     /// @dev 11 components (10 mocks + the expensive one last, the attacker's best position): the
-    /// lowest gas limit at which a redeem is paid on the stale reserve.
+    /// expensive balance reads must fail closed, while a skipping exit stays available.
     function test_L08_elevenComponentRedeemNeedsMoreThanTheCap() public {
         OddBalanceToken m = new OddBalanceToken();
         IERC20[] memory basket = new IERC20[](11);
@@ -515,40 +503,15 @@ contract Review2ExitsTest is GRETVaultCase {
         }
         m.slash(address(v), 1e18);
         m.setBurn(40_000_000);
-        // Below the burn, success on the stale reserve is monotone in the gas limit: binary search.
-        uint256 lo = 1_000_000;
-        uint256 hi = 39_000_000;
-        assertFalse(_staleRedeem(v, m, zero, lo));
-        assertTrue(_staleRedeem(v, m, zero, hi));
-        while (hi - lo > 1_000) {
-            uint256 mid = (lo + hi) / 2;
-            if (_staleRedeem(v, m, zero, mid)) hi = mid;
-            else lo = mid;
-        }
-        uint256 lowestStale = hi;
-        assertGt(lowestStale, 0);
-        for (uint256 i; i < 11; ++i) {
-            _coolList.push(basket[i]);
-        }
-        lo = 1_000_000;
-        hi = 39_000_000;
-        assertFalse(_staleRedeem(v, m, zero, lo));
-        assertTrue(_staleRedeem(v, m, zero, hi));
-        while (hi - lo > 1_000) {
-            uint256 mid = (lo + hi) / 2;
-            if (_staleRedeem(v, m, zero, mid)) hi = mid;
-            else lo = mid;
-        }
-        // Honest redeem cost with the same tokens, balanceOf cheap, cooled: what the rest costs.
-        m.setMode(OddBalanceToken.Mode.Normal);
-        uint256 snap = vm.snapshotState();
-        for (uint256 i; i < 11; ++i) {
-            vm.cool(address(basket[i]));
-        }
-        vm.cool(address(v));
         vm.prank(ALICE);
-        v.redeem(SHARE, zero, 0);
-        vm.revertToState(snap);
+        (bool ok,) = address(v).call{gas: 16_700_000}(abi.encodeCall(GRETVault.redeem, (SHARE, zero, 0)));
+        assertFalse(ok);
+        address[] memory skipped = new address[](1);
+        skipped[0] = address(m);
+        vm.prank(ALICE);
+        uint256[] memory paid = v.redeemSkipping{gas: 16_700_000}(SHARE, zero, skipped, 0);
+        for (uint256 i; i < 10; ++i) assertEq(paid[i], 1e18);
+        assertEq(paid[10], 0);
     }
 
     IERC20[] internal _coolList;
@@ -606,29 +569,16 @@ contract Review2ExitsTest is GRETVaultCase {
         assertEq(n.balanceOf(address(v)), 200e18);
 
         n.setNoop(false);
-        assertEq(v.componentSurplus(0), 100e18, "the undelivered amount is ordinary surplus");
-        uint256 snap = vm.snapshotState();
-
-        // P-2 finds no cut (rights - amount = 0); ordinary surplus synced to every holder.
+        assertEq(v.pendingRights(ALICE, 0), 50e18);
         vm.prank(BOB);
         v.claim(0, BOB, 0);
-        vm.prank(GOVERNANCE);
-        v.sync(address(n));
         vm.prank(ALICE);
         v.claim(0, ALICE, 0);
-        vm.prank(BOB);
-        v.claim(0, BOB, 0);
         assertEq(n.balanceOf(ALICE), 50e18);
         assertEq(n.balanceOf(BOB), 150e18);
-        vm.revertToState(snap);
-
-        // Reconstructed from the token's own transfers, rescue can return it in full.
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.BackingToken.selector, address(n)));
         vm.prank(GOVERNANCE);
-        v.rescue(address(n), ALICE, 100e18);
-        vm.prank(BOB);
-        v.claim(0, BOB, 0);
-        assertEq(n.balanceOf(ALICE), 100e18);
-        assertEq(n.balanceOf(BOB), 100e18);
+        v.rescue(address(n), ALICE, 1);
     }
 
     function _oneToken(IERC20 t) internal pure returns (IERC20[] memory basket) {
@@ -651,10 +601,10 @@ contract Review2ExitsTest is GRETVaultCase {
         faulty.setBlocked(ALICE, true); // the issuer blocks Alice, the only holder
         uint256 snap = vm.snapshotState();
 
-        // Baseline: the skipped share becomes surplus and governance can return it.
+        // Baseline: the last exit leaves a balance; governance may rescue it while normal supply is zero.
         _aliceSkipsF();
         assertEq(vault.totalSupply(), 0);
-        assertEq(vault.componentSurplus(1), 5e18);
+        assertEq(faulty.rawBalanceOf(address(vault)), 5e18);
         vm.prank(GOVERNANCE);
         vault.rescue(address(faulty), CAROL, 5e18);
         assertEq(faulty.rawBalanceOf(CAROL), 5e18);
@@ -668,13 +618,13 @@ contract Review2ExitsTest is GRETVaultCase {
         vault.mint(SHARE, _pair(MAX, MAX), SHARE, 0);
         _aliceSkipsF();
         assertEq(vault.reserves()[1], 10e18, "the skipped share stays in the reserve");
-        assertEq(vault.componentSurplus(1), 0);
+        assertEq(faulty.rawBalanceOf(address(vault)), 10e18);
         vm.prank(entrant);
         vault.redeem(SHARE, _pair(0, 0), 0);
         assertEq(vault.totalSupply(), 0);
         assertEq(healthy.balanceOf(entrant), hBefore);
         assertEq(faulty.rawBalanceOf(entrant) - fBefore, 5e18, "entrant gains the skipped 5 F");
-        assertEq(vault.componentSurplus(1), 0, "nothing left for governance to return");
+        assertEq(faulty.rawBalanceOf(address(vault)), 0, "nothing left for governance to return");
         vm.revertToState(snap);
 
         // A mint pause first restores the baseline.
@@ -684,7 +634,7 @@ contract Review2ExitsTest is GRETVaultCase {
         vm.prank(entrant);
         vault.mint(SHARE, _pair(MAX, MAX), SHARE, 0);
         _aliceSkipsF();
-        assertEq(vault.componentSurplus(1), 5e18);
+        assertEq(faulty.rawBalanceOf(address(vault)), 5e18);
     }
 
     function test_L04_jitShareWhenSkipperIsNotLast() public {

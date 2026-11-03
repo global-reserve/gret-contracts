@@ -244,22 +244,22 @@ describe("ChainlinkPriceGuard", async () => {
       ]);
     });
 
-    it("values each component at the lesser of its reserve and the vault's balance", async () => {
+    it("values live balances including income, excluding the incoming swap payment", async () => {
       const { vault, tokens, faulty, guard, dave } = await networkHelpers.loadFixture(guardFixture);
       const [a, b] = tokens.map((token) => token.address);
-      // C loses half its balance and nobody recognizes it: it counts as $200, not $400. A donation
-      // of A is not reserve: A still counts as $400.
+      // C loses half its balance: it counts as $200. A receives a $1,000 donation.
+      // Both changes count immediately; the incoming swap payment is excluded.
       await faulty.write.slash([vault.address, parseUnits("5", 18)]);
       await tokens[0].write.mint([vault.address, parseUnits("10", 18)]);
       const aForB = () => vault.write.swap([a, parseUnits("1", 18), b, 123_125n], { account: dave.account });
       await aForB();
-      const first = shareOf(parseUnits("1.5", 18), parseUnits("760", 18));
+      const first = shareOf(parseUnits("1.5", 18), parseUnits("1760", 18));
       assert.equal(await guard.read.weeklyLoss(), first);
 
-      // A balance it cannot read counts as zero: $300 of A and $258.50 of B.
+      // An unreadable balance counts as zero: $1,300 of A and $258.50 of B.
       await faulty.write.setFault([Fault.RevertOnBalanceOf]);
       await aForB();
-      assert.equal(await guard.read.weeklyLoss(), first + shareOf(parseUnits("1.5", 18), parseUnits("558.5", 18)));
+      assert.equal(await guard.read.weeklyLoss(), first + shareOf(parseUnits("1.5", 18), parseUnits("1558.5", 18)));
     });
 
     it("refuses tokens it cannot price, and counts them as zero in the vault's value", async () => {

@@ -9,7 +9,7 @@ import {MockERC20} from "../contracts/mocks/MockERC20.sol";
 import {MockFaultyERC20} from "../contracts/mocks/MockFaultyERC20.sol";
 
 /// @notice Targeted fuzz tests for liquidation behaviours not covered by the existing suite:
-/// order independence of shortfall payouts, no surplus while a shortfall persists, and
+/// order independence of shortfall payouts, no component rescue during a shortfall, and
 /// recovery after cuts.
 contract Review2LiquidationFuzzTest is Test {
     address internal constant GOVERNANCE = address(0x60F);
@@ -77,7 +77,7 @@ contract Review2LiquidationFuzzTest is Test {
         assertLe(paidForward, held - held * cutBps / 10_000, "paid above balance");
     }
 
-    /// While a shortfall persists, no surplus appears however many cut claims happen, so rescue
+    /// During liquidation, component funds remain protected however many cut claims happen, so rescue
     /// can never take what holders still waiting are owed.
     function testFuzz_noSurplusWhileShortfallPersists(uint256 s1, uint256 s2, uint256 cutBps, uint256 who) public {
         uint256[3] memory shares = [uint256(1e18), bound(s1, 1, 1e24), bound(s2, 1, 1e24)];
@@ -88,10 +88,8 @@ contract Review2LiquidationFuzzTest is Test {
         who %= 3;
         address first = holders[who];
         _claim(first);
-        assertEq(vault.componentSurplus(1), 0, "surplus during shortfall");
         address second = holders[(who + 1) % 3];
         _claim(second);
-        assertEq(vault.componentSurplus(1), 0, "surplus during shortfall after two claims");
         vm.prank(GOVERNANCE);
         vm.expectRevert();
         vault.rescue(address(f), GOVERNANCE, 1);
@@ -102,7 +100,7 @@ contract Review2LiquidationFuzzTest is Test {
         assertGe(amount * held + held, rights * (held - held * cutBps / 10_000), "last holder below fraction");
     }
 
-    /// After a cut, a recovery and a sync raise everyone's rights in proportion; the vault stays
+    /// After a cut, a recovery automatically raises everyone's rights in proportion; the vault stays
     /// solvent for every pending right.
     function testFuzz_recoveryAfterCutsStaysSolvent(uint256 s1, uint256 s2, uint256 cutBps, uint256 back) public {
         uint256[3] memory shares = [uint256(1e18), bound(s1, 1, 1e24), bound(s2, 1, 1e24)];
@@ -114,8 +112,6 @@ contract Review2LiquidationFuzzTest is Test {
         _claim(holders[0]);
         back = bound(back, 0, 2 * cut);
         f.mint(address(vault), back);
-        vm.prank(GOVERNANCE);
-        try vault.sync(address(f)) {} catch {}
         uint256 total;
         for (uint256 k; k < 3; ++k) total += vault.claimable(holders[k], 1);
         assertLe(total, f.balanceOf(address(vault)), "claimable above balance");

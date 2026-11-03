@@ -15,13 +15,18 @@ assets on Ethereum, minted and redeemed in kind.
 > project's own funds, not meant for third parties. Nothing in this repository is an offer to
 > buy or sell any asset, nor investment advice. Use it at your own risk.
 
+The current source implements automatic live-balance accounting and has **not been deployed**.
+The immutable October 27 pilot below still uses recognized reserves and governance `sync`.
+A new vault and compatible guard require a separate deployment and migration decision.
+
 ## Overview
 
 - **One contract, one token.** `GRETVault` is both the GRET ERC-20 and the vault that holds
   the basket: 11 tokenized assets, from equity, Treasury, credit, real-estate and commodity
   funds to gold and bitcoin.
 - **In kind, without prices.** A mint deposits every component in proportion to the reserves
-  and a redemption pays them out. No oracle takes part in either.
+  and a redemption pays them out. Active balances include income and losses immediately,
+  without `sync`. No oracle takes part in either.
 - **Immutable.** No upgrades and no owner. Governance acts within limits the code enforces:
   new components, rebalancers, price guards, write-offs, fee raises and governance handovers
   wait 7 days in public; fees are capped at 5%; redemption can never be paused.
@@ -35,26 +40,27 @@ assets on Ethereum, minted and redeemed in kind.
 
 ```mermaid
 flowchart TB
-    Gov["Governance<br/>pilot wallet, later a Safe, a timelock and a Governor"]
+    Gov["Governance<br/>pilot wallet<br/>proposed: Safe → timelock → Governor"]
     Holders["Holders"]
     Vault["<b>GRETVault</b><br/>GRET token and reserves"]
     Rebalancer["Rebalancer"]
     Guard["<b>ChainlinkPriceGuard</b><br/>implements IPriceGuard"]
     Feeds["Chainlink price feeds"]
     Tokens["11 component tokens"]
-    Gov -->|"basket, fees, pause, sync, rescue, liquidation"| Vault
+    Gov -->|"basket, activation, fees, pause, rescue, liquidation"| Vault
     Holders <-->|"mint, redeem, claim"| Vault
     Rebalancer -->|swap| Vault
     Vault -->|checkSwap| Guard
     Guard -->|latestRoundData| Feeds
-    Guard -.->|"reads reserves and balances"| Vault
+    Guard -.->|"reads components and exclusions"| Vault
+    Guard -->|"balanceOf; subtract incoming swap receipt"| Tokens
     Vault -->|"transfer, balanceOf"| Tokens
 ```
 
 Only `GRETVault` holds funds. The price guard can only refuse a swap. Governance and the
 rebalancer are addresses to the vault, so what stands behind them can change without
 touching it. The [guide](docs/GRETVault-explained.pdf) has a diagram of every contract
-involved.
+involved; the [specification](docs/SPECIFICATION.md) is authoritative for current code.
 
 | Contract | Description |
 | --- | --- |
@@ -81,7 +87,7 @@ involved.
 
 | Network | Contract | Address |
 | --- | --- | --- |
-| Ethereum mainnet | `GRETVault` (pilot) | [`0x21b823334D2794a637cb9c0fd7fF8671b35F5A23`](https://etherscan.io/address/0x21b823334D2794a637cb9c0fd7fF8671b35F5A23) |
+| Ethereum mainnet | `GRETVault` (October 27 pilot; previous code) | [`0x21b823334D2794a637cb9c0fd7fF8671b35F5A23`](https://etherscan.io/address/0x21b823334D2794a637cb9c0fd7fF8671b35F5A23) |
 
 Basket at deployment, in the order of `components()`, with the amounts in the first GRET from
 `initialAmounts()`. Addresses verified against each issuer's official sources; see the
@@ -158,12 +164,12 @@ Functions of `GRETVault`, besides the standard ERC-20 ones:
 | `mint(shares, maxAmountsIn, minShares, version)` | Anyone | Contributes every component with a reserve in proportion and receives GRET, minus the mint fee; the first mint issues exactly 1 GRET |
 | `redeem(shares, minAmountsOut, version)` | Wallets that minted | Pays the redemption fee in GRET, burns the rest and receives every component; all or nothing; leaves the supply at 0 or at least 1 GRET |
 | `redeemSkipping(shares, minAmountsOut, skipped, version)` | Wallets that minted | Same redemption without the listed components, which are not called; the caller gives up its share of them |
-| `recognizeLoss(i)` | Anyone | Lowers the reserve of component `i` to its actual balance when that is lower; mint and redemption do it on their own |
 | `convertToClaims(shares)` | Any holder | During liquidation, burns GRET in exchange for per-component rights |
 | `claim(i, to, minAmount)` | Whoever converted | Withdraws the pending right over component `i` |
-| `activateLiquidation()` | Governance | Irreversible liquidation: closes mint and normal redemption |
-| `sync(token)` | Governance | Adds the surplus of that component to the reserve, for the benefit of holders; also during liquidation |
-| `rescue(token, to, amount)` | Governance | Withdraws tokens outside the basket, or a component's surplus |
+| `activateLiquidation()` | Governance | With positive supply, freezes the share denominator and closes mint/normal redemption without token calls |
+| `activateComponent(token)` | Governance | Includes a newly added or excluded component in normal backing; retains write-off history |
+| `deactivateEmptyComponent(token)` | Governance | Excludes an empty component so later dust cannot reactivate it; at most ten base units allowed only for tokens with at least 18 decimals |
+| `rescue(token, to, amount)` | Governance | Withdraws foreign tokens, or ordinary components only with zero normal supply; never historically written-off tokens |
 | `proposeGovernance(next)` / `cancelGovernanceProposal()` | Governance | Proposes or discards the next governance |
 | `acceptGovernance()` | Proposed governance | Takes over the role, 7 to 14 days after the proposal |
 | `swap(sell, sellAmount, buy, buyAmount)` | Rebalancer | Delivers `buyAmount` of one component and takes `sellAmount` of another's reserve; the price guard must accept it |
@@ -172,21 +178,24 @@ Functions of `GRETVault`, besides the standard ERC-20 ones:
 | `proposePriceGuard(guard)` / `cancelPriceGuardProposal()` | Governance | Proposes or discards the contract that must accept every swap |
 | `applyPriceGuard()` | Anyone | Applies the proposed guard, 7 to 14 days after the proposal; there is none at deployment, and without one there are no swaps |
 | `announceComponent(token)` / `cancelComponentAnnouncement(token)` | Governance | Announces or discards a new component |
-| `addComponent(token)` | Anyone | Adds an announced component, 7 to 14 days later, with no reserve |
-| `removeComponent(token)` | Governance | Removes a component with no reserve, never a written-off one; the later ones move down one index |
+| `addComponent(token)` | Anyone | Adds an announced component, 7 to 14 days later, initially excluded |
+| `removeComponent(token)` | Governance | Removes an empty ordinary component under the bounded dust rule, never a written-off one; later indices shift |
 | `setMintPaused(paused)` | Governance | Pauses or resumes minting at once; redemption is never paused |
 | `setInitialAmounts(amounts, version)` | Governance | Sets the basket of the first mint, used only while the supply is zero |
 | `proposeWriteOff(token)` / `cancelWriteOff(token)` | Governance | Proposes or discards writing off a component that stopped working; governance judges it |
-| `writeOffComponent(token)` | Anyone | 7 to 14 days later, drops its reserve to zero; the token stays in the basket and can never be rescued |
+| `writeOffComponent(token)` | Anyone | 7 to 14 days later, excludes the component without reading it; the token stays registered and permanently non-rescuable |
 | `proposeFees(mintFee, redeemFee)` / `cancelFeesProposal()` | Governance | Sets the fees in basis points, at most 5% each: a cut applies at once, a raise waits 7 days |
 | `applyFees()` | Anyone | Applies a proposed raise, 7 to 14 days after it |
 | `setFeeRecipient(recipient)` | Governance | Chooses who receives the fees, in GRET |
 
-Governance is an external contract; GRET does not vote. A proposal that waited 7 days expires if
+Governance is currently the pilot wallet. The proposed progression is Safe, then a timelock,
+then a Governor with a separate VORA voting token; it is not implemented. GRET does not vote. A proposal that waited 7 days expires if
 nobody executes or accepts it in the following 7 days (`EXECUTION_WINDOW`). Amounts per GRET are not stored: they
 follow the reserves, so rebalancing means swapping what the vault holds. The vault rejects
-GRET sent to its own address. The views `previewMint`, `previewRedeem`, `reserves`, `componentSurplus`,
-`pendingRights` and `claimable` compute amounts before operating.
+GRET sent to its own address. The views `previewMint`, `previewRedeem`, `previewRedeemSkipping`,
+`reserves`, `pendingRights` and `claimable` compute current amounts outside mutations.
+In liquidation `reserves` returns effective nominal bases, not remaining token balances;
+`liquidationBasis` returns only the stored bases established by successful claims.
 
 `ChainlinkPriceGuard` is the first price guard. It values both sides of each swap with one
 Chainlink feed per token and refuses a token without a fresh price, a swap that loses more
@@ -204,7 +213,7 @@ basket reverts with `BasketChanged` instead of applying a limit to another token
 ## Repository layout
 
 ```text
-contracts/GRETVault.sol              GRET token and vault: mint, redemption, sync, rebalancing and liquidation
+contracts/GRETVault.sol              GRET token and vault: mint, redemption, live balances, rebalancing and liquidation
 contracts/IPriceGuard.sol            What the vault asks the price guard in every swap
 contracts/ChainlinkPriceGuard.sol    Price guard with Chainlink feeds and loss limits per swap and per week
 contracts/mocks/MockAggregator.sol   Test Chainlink feed with a price set by hand
@@ -212,7 +221,7 @@ contracts/mocks/MockPriceGuard.sol   Test guard that accepts every swap unless t
 contracts/mocks/MockERC20.sol        Test ERC-20 with configurable decimals
 contracts/mocks/MockFaultyERC20.sol  Test ERC-20 with switchable faults
 contracts/mocks/MockNoReturnERC20.sol Test token without a return value, like USDT
-test/GRETVault.ts                    Setup, bootstrap, mint, redemption, losses and sync
+test/GRETVault.ts                    Setup, bootstrap, mint, redemption, losses and income
 test/GRETVault.liquidation.ts        Activation, conversion and claims with failing components
 test/GRETVault.governance.ts         Rescues, governance limits and governance transfer
 test/GRETVault.timelock.ts           Governance that evolves with OpenZeppelin's TimelockController

@@ -9,7 +9,7 @@ import {MockFaultyERC20} from "../contracts/mocks/MockFaultyERC20.sol";
 /// @notice Independent audit probe for liquidation conservation across mixed operations.
 /// @dev The deliberately tiny reserve exposes integer rounding. The token is a test model,
 /// not evidence about an issuer's transfer behavior. Five holders mix conversions, share
-/// transfers, claims, balance losses, recoveries, syncs and rescues over thirty steps.
+/// transfers, claims, balance losses, recoveries and rejected component rescues over thirty steps.
 contract GRETVaultAuditLiquidationTest is Test {
     uint256 private constant SHARES = 1e18;
     uint256 private constant HOLDERS = 5;
@@ -67,21 +67,10 @@ contract GRETVaultAuditLiquidationTest is Test {
                 uint256 amount = entropy % 2_001;
                 token.mint(address(vault), amount);
                 ledger.inflow += amount;
-            } else if (action == 5) {
-                vault.sync(address(token));
             } else {
-                uint256 amount = entropy % (vault.componentSurplus(0) + 1);
-                if (amount != 0) {
-                    uint256 reserve = vault.reserves()[0];
-                    uint256 consumed = vault.rightsClaimed()[0];
-                    uint256 before = token.balanceOf(address(this));
-                    vault.rescue(address(token), address(this), amount);
-                    ledger.rescued += amount;
-                    assertEq(token.balanceOf(address(this)) - before, amount, "rescue delivery");
-                    assertEq(vault.reserves()[0], reserve, "rescue changed reserve");
-                    assertEq(vault.rightsClaimed()[0], consumed, "rescue changed rights");
-                    assertGe(token.balanceOf(address(vault)), reserve - consumed, "rescue took backing");
-                }
+                // Even unclaimed income belongs to holders; governance cannot withdraw it.
+                vm.expectPartialRevert(GRETVault.BackingToken.selector);
+                vault.rescue(address(token), address(this), 1);
             }
             _assertConservation(ledger);
         }

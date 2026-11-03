@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.38;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 import {IPriceGuard} from "../IPriceGuard.sol";
 
 interface IReserves {
-    function reserves() external view returns (uint256[] memory);
+    function components() external view returns (IERC20[] memory);
+    function excluded(address token) external view returns (bool);
 }
 
 /// @notice Test-only price guard that accepts every swap unless told to refuse, and records the
@@ -31,7 +34,13 @@ contract MockPriceGuard is IPriceGuard {
         lastSellAmount = sellAmount;
         lastBuy = buy;
         lastReceived = received;
-        _reservesSeen = IReserves(msg.sender).reserves();
+        IERC20[] memory tokens = IReserves(msg.sender).components();
+        delete _reservesSeen;
+        for (uint256 i; i < tokens.length; ++i) {
+            uint256 balance = IReserves(msg.sender).excluded(address(tokens[i])) ? 0 : tokens[i].balanceOf(msg.sender);
+            if (address(tokens[i]) == buy) balance = balance > received ? balance - received : 0;
+            _reservesSeen.push(balance);
+        }
     }
 
     function reservesSeen() external view returns (uint256[] memory) {

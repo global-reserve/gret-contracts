@@ -15,6 +15,100 @@ import {GRETVaultCase, SenderSurchargeToken, GasBurnerToken} from "./helpers/GRE
 /// @notice Protections: each test plays an attack or a failure and shows what the vault refuses
 /// or lets holders do about it.
 contract GRETVaultProtectionsTest is GRETVaultCase {
+    function test_activationIsIdempotentAndOnlyEmitsOnStateChange() public {
+        vm.recordLogs();
+        vm.prank(GOVERNANCE);
+        vault.activateComponent(address(healthy));
+        assertEq(vm.getRecordedLogs().length, 0);
+        vm.startPrank(GOVERNANCE);
+        vault.proposeWriteOff(address(healthy));
+        vm.warp(block.timestamp + 7 days);
+        vault.writeOffComponent(address(healthy));
+        vm.recordLogs();
+        vault.activateComponent(address(healthy));
+        vm.stopPrank();
+        assertEq(vm.getRecordedLogs().length, 1);
+        assertFalse(vault.excluded(address(healthy)));
+        assertTrue(vault.writtenOff(address(healthy)));
+    }
+
+    function test_activationAfterMintQuoteRespectsInputLimitsWithoutVersionChange() public {
+        vm.startPrank(GOVERNANCE);
+        vault.proposeWriteOff(address(healthy));
+        vm.warp(block.timestamp + 7 days);
+        vault.writeOffComponent(address(healthy));
+        uint256[] memory quote = vault.previewMint(SHARE);
+        uint256 version = vault.basketVersion();
+        vault.activateComponent(address(healthy));
+        vm.stopPrank();
+        assertEq(vault.basketVersion(), version);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.AmountInAboveMax.selector, 0, 2e18, 0));
+        vm.prank(BOB);
+        vault.mint(SHARE, quote, SHARE, version);
+        assertEq(vault.totalSupply(), SHARE);
+    }
+
+    function test_writeOffAfterRedeemQuoteRespectsOutputLimitsWithoutVersionChange() public {
+        uint256[] memory quote = vault.previewRedeem(SHARE);
+        uint256 version = vault.basketVersion();
+        vm.startPrank(GOVERNANCE);
+        vault.proposeWriteOff(address(faulty));
+        vm.warp(block.timestamp + 7 days);
+        vault.writeOffComponent(address(faulty));
+        vm.stopPrank();
+        assertEq(vault.basketVersion(), version);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.AmountOutBelowMin.selector, 1, 0, 5e18));
+        vm.prank(ALICE);
+        vault.redeem(SHARE, quote, version);
+        assertEq(vault.balanceOf(ALICE), SHARE);
+    }
+
+    function test_deactivationAfterRedeemQuoteRespectsOutputLimitsWithoutVersionChange() public {
+        faulty.slash(address(vault), 5e18 - 10);
+        uint256[] memory quote = vault.previewRedeem(SHARE);
+        uint256 version = vault.basketVersion();
+        vm.prank(GOVERNANCE);
+        vault.deactivateEmptyComponent(address(faulty));
+        assertEq(vault.basketVersion(), version);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.AmountOutBelowMin.selector, 1, 0, 10));
+        vm.prank(ALICE);
+        vault.redeem(SHARE, quote, version);
+        assertEq(vault.balanceOf(ALICE), SHARE);
+    }
+
+    // Controls for stable risk IDs closed by live-balance accounting.
+    function test_R08_controlLiveDividendCannotBeCaptured() public {
+        healthy.mint(address(vault), 100e18);
+        uint256 before = healthy.balanceOf(BOB);
+        vm.startPrank(BOB);
+        vault.mint(99 * SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        vault.redeem(99 * SHARE, _pair(0, 0), 0);
+        vm.stopPrank();
+        assertEq(healthy.balanceOf(BOB), before);
+        assertEq(vault.reserves()[0], 102e18);
+    }
+
+    function test_R14_controlBrokenBalanceCannotOverpayFirstRedeemer() public {
+        vm.prank(BOB);
+        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        faulty.slash(address(vault), 5e18);
+        faulty.setFault(MockFaultyERC20.Fault.RevertOnBalanceOf);
+        vm.expectRevert(MockFaultyERC20.BalanceOfBlocked.selector);
+        vm.prank(ALICE);
+        vault.redeem(SHARE, _pair(0, 0), 0);
+        assertEq(faulty.rawBalanceOf(address(vault)), 5e18);
+        assertEq(vault.balanceOf(ALICE), SHARE);
+    }
+
+    function test_R25_controlEmptyLiquidationIsRejected() public {
+        vm.prank(ALICE);
+        vault.redeem(SHARE, _pair(0, 0), 0);
+        vm.expectRevert(GRETVault.NoSupply.selector);
+        vm.prank(GOVERNANCE);
+        vault.activateLiquidation();
+        assertFalse(vault.liquidationActive());
+    }
+
     /// `minAmount` lets the claimant refuse an unexpected cut and keep the right pending.
     function test_claimMinimumRefusesUnexpectedCut() public {
         vm.prank(BOB);
@@ -30,7 +124,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.expectRevert(abi.encodeWithSelector(GRETVault.AmountOutBelowMin.selector, 1, 5e17, 49e17));
         vm.prank(ALICE);
         vault.claim(1, ALICE, 49e17);
-        assertEq(vault.pendingRights(ALICE, 1), 5e18);
+        assertEq(vault.claimed(ALICE, 1), 0);
 
         // Once the balance recovers, the same protected claim pays the whole right.
         faulty.mint(address(vault), 9e18);
@@ -60,7 +154,6 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.prank(ALICE);
         vault.transfer(BOB, SHARE);
         faulty.slash(address(vault), 5e18);
-        vault.recognizeLoss(1);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.RedemptionNotEnabled.selector, BOB));
         vm.prank(BOB);
         vault.redeem(SHARE, _pair(0, 0), 0);
@@ -83,7 +176,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         token.mint(address(single), 1e18);
         token.enable();
         // The 1% sender debit would leave 199.99 behind 200 owed.
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.BackingReduced.selector, address(token), 19999e16, 200e18));
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.BackingToken.selector, address(token)));
         vm.prank(GOVERNANCE);
         single.rescue(address(token), CAROL, 1e18);
         assertEq(token.balanceOf(address(single)), 201e18);
@@ -101,9 +194,9 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.warp(block.timestamp + 7 days);
         vault.writeOffComponent(address(faulty));
 
-        // A captured governance syncs the frozen balance back and appoints its rebalancer.
+        // A captured governance reactivates the frozen balance and appoints its rebalancer.
         vm.startPrank(GOVERNANCE);
-        assertEq(vault.sync(address(faulty)), 10e18);
+        vault.activateComponent(address(faulty));
         vault.proposeRebalancer(REBALANCER);
         vm.stopPrank();
         vm.expectRevert(abi.encodeWithSelector(MockFaultyERC20.AccountBlocked.selector, address(vault)));
@@ -148,7 +241,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
     }
 
     /// A written-off component cannot be removed, so there is never a seven-day re-announcement to
-    /// exploit, and a recovery during liquidation is synced at once.
+    /// exploit, and a recovery during liquidation counts automatically.
     function test_writtenOffComponentStaysAndRecoversDuringLiquidation() public {
         faulty.setBlocked(address(vault), true);
         vm.prank(GOVERNANCE);
@@ -165,12 +258,10 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vault.activateLiquidation();
         vm.prank(ALICE);
         vault.convertToClaims(SHARE);
-        assertEq(vault.pendingRights(ALICE, 1), 0);
+        assertEq(vault.pendingRights(ALICE, 1), 5e18);
 
-        // The issuer lifts the freeze: sync restores every holder's rights.
+        // The issuer lifts the freeze: every holder can claim without synchronization.
         faulty.setBlocked(address(vault), false);
-        vm.prank(GOVERNANCE);
-        vault.sync(address(faulty));
         assertEq(vault.pendingRights(ALICE, 1), 5e18);
         vm.prank(ALICE);
         assertEq(vault.claim(1, ALICE, 0), 5e18);
@@ -295,7 +386,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         _appoint(target, address(guard));
         feed.setAnswer(1e8);
         faulty.slash(address(target), 19_800e18);
-        assertEq(target.reserves()[2], 19_800e18);
+        assertEq(target.reserves()[2], 0);
 
         // Each swap sells a whole healthy reserve for 98% of its value. The first takes 1% of the
         // $200 left; the second would take 2% more.
