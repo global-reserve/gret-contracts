@@ -173,14 +173,14 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.acceptGovernance({ account: carol.account }),
         vault,
-        "GovernanceTransferNotReady",
+        "NotReady",
         [readyAt],
       );
       await networkHelpers.time.setNextBlockTimestamp(readyAt - 1n);
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.acceptGovernance({ account: carol.account }),
         vault,
-        "GovernanceTransferNotReady",
+        "NotReady",
         [readyAt],
       );
       await viem.assertions.revertWithCustomErrorWithArgs(

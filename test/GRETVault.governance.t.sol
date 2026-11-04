@@ -107,6 +107,18 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         assertTrue(vault.mintPaused());
     }
 
+    /// Asking for the state the vault is already in changes nothing and emits nothing.
+    function test_repeatedPauseAndActivationEmitNothing() public {
+        vm.startPrank(GOVERNANCE);
+        vault.setMintPaused(true);
+        vm.recordLogs();
+        vault.setMintPaused(true);
+        vault.activateComponent(address(healthy));
+        vm.stopPrank();
+        assertEq(vm.getRecordedLogs().length, 0);
+        assertTrue(vault.mintPaused());
+    }
+
     /// F recovers after readyAt, before governance cancels. A bundle of the ready write-off and a
     /// mint reverts as a whole, so the cancel still lands; executing the write-off alone only pauses
     /// minting until governance reactivates F, and later entrants pay for F.

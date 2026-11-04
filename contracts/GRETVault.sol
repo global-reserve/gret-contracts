@@ -182,7 +182,6 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     error InvalidIndex(uint256 index);
     error ZeroShares();
     error InvalidInitialMint(uint256 shares);
-    error ZeroComponentAmount(uint256 index);
     error AmountInAboveMax(uint256 index, uint256 amount, uint256 maxAmount);
     error AmountOutBelowMin(uint256 index, uint256 amount, uint256 minAmount);
     error UnexpectedBalance(uint256 index, uint256 expected, uint256 actual);
@@ -201,31 +200,26 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     error NotGovernance(address caller);
     error NotPendingGovernance(address caller);
     error NoPendingGovernance();
-    error GovernanceTransferNotReady(uint256 readyAt);
     error NotRebalancer(address caller);
     error NotPendingRebalancer(address caller);
     error NoPendingRebalancer();
-    error RebalancerChangeNotReady(uint256 readyAt);
     error NoPriceGuard();
     error NoPendingPriceGuard();
-    error PriceGuardChangeNotReady(uint256 readyAt);
     error NotAComponent(address token);
     error SameComponent(address token);
     error SwapExceedsReserve(address token, uint256 amount, uint256 reserve);
     error NoPendingComponent(address token);
-    error ComponentNotReady(address token, uint256 readyAt);
     error ComponentHasReserve(address token, uint256 reserve);
     error EmptyBasket();
     error NoPendingWriteOff(address token);
-    error WriteOffNotReady(address token, uint256 readyAt);
     error ComponentExcluded(address token);
     error BackingToken(address token);
     error ComponentBalanceReduced(address token);
     error TokenWrittenOff(address token);
     error FeeAboveMax(uint256 fee);
     error NoPendingFees();
-    error FeesNotReady(uint256 readyAt);
     error NoFeeRecipient();
+    error NotReady(uint256 readyAt);
     error ProposalExpired(uint256 expiredAt);
 
     modifier onlyGovernance() {
@@ -339,7 +333,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     ) external nonReentrant returns (uint256[] memory amounts) {
         _requireBasket(version, minAmountsOut.length);
         amounts = _redeem(shares, minAmountsOut, _skipMask(skipped));
-        if (skipped.length != 0 && totalSupply() == 0) _pauseMint();
+        if (skipped.length != 0 && totalSupply() == 0) _setMintPaused(true);
     }
 
     /// @notice Activates a newly added or previously excluded component. Its whole balance then
@@ -347,9 +341,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     function activateComponent(address token) external onlyGovernance nonReentrant {
         _requireNotLiquidating();
         _indexOf(token);
-        if (!excluded[token]) return;
-        excluded[token] = false;
-        emit ComponentActivationChanged(token, true);
+        _setActive(token, true);
     }
 
     /// @notice Keeps an empty component inactive even if unsolicited dust later arrives. Larger
@@ -358,8 +350,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         _requireNotLiquidating();
         _indexOf(token);
         _requireEmpty(token);
-        excluded[token] = true;
-        emit ComponentActivationChanged(token, false);
+        _setActive(token, false);
     }
 
     /// @notice Live mint amounts. Excluded components are not called. Initial mint still uses
@@ -481,8 +472,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         _indexOf(sell);
         uint256 buyIndex = _indexOf(buy);
         if (sell == buy) revert SameComponent(sell);
-        if (sellAmount == 0) revert ZeroAmount();
-        if (buyAmount == 0) revert ZeroComponentAmount(buyIndex);
+        if (sellAmount == 0 || buyAmount == 0) revert ZeroAmount();
         IPriceGuard guard = priceGuard;
         if (address(guard) == address(0)) revert NoPriceGuard();
 
@@ -548,8 +538,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     function acceptRebalancer() external {
         if (msg.sender != pendingRebalancer) revert NotPendingRebalancer(msg.sender);
         uint256 readyAt = pendingRebalancerReadyAt;
-        if (block.timestamp < readyAt) revert RebalancerChangeNotReady(readyAt);
-        _requireNotExpired(readyAt);
+        _requireReady(readyAt);
 
         address previous = rebalancer;
         rebalancer = msg.sender;
@@ -593,8 +582,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         address next = pendingPriceGuard;
         if (next == address(0)) revert NoPendingPriceGuard();
         uint256 readyAt = pendingPriceGuardReadyAt;
-        if (block.timestamp < readyAt) revert PriceGuardChangeNotReady(readyAt);
-        _requireNotExpired(readyAt);
+        _requireReady(readyAt);
 
         address previous = address(priceGuard);
         priceGuard = IPriceGuard(next);
@@ -630,8 +618,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         _requireNotLiquidating();
         uint256 readyAt = componentReadyAt[token];
         if (readyAt == 0) revert NoPendingComponent(token);
-        if (block.timestamp < readyAt) revert ComponentNotReady(token, readyAt);
-        _requireNotExpired(readyAt);
+        _requireReady(readyAt);
         uint256 count = _components.length;
         if (count == MAX_COMPONENTS) revert InvalidComponentCount(count + 1);
 
@@ -713,17 +700,15 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         uint256 index = _indexOf(token);
         uint256 readyAt = writeOffReadyAt[token];
         if (readyAt == 0) revert NoPendingWriteOff(token);
-        if (block.timestamp < readyAt) revert WriteOffNotReady(token, readyAt);
-        _requireNotExpired(readyAt);
+        _requireReady(readyAt);
         if (excluded[token]) revert ComponentExcluded(token);
 
         delete writeOffReadyAt[token];
         writtenOff[token] = true;
-        excluded[token] = true;
         _initialAmounts[index] = 0;
         emit ComponentWrittenOff(token);
-        emit ComponentActivationChanged(token, false);
-        _pauseMint();
+        _setActive(token, false);
+        _setMintPaused(true);
     }
 
     /// @notice Sets the mint and redemption fees, in basis points, each at most `MAX_FEE` (5%).
@@ -759,8 +744,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     function applyFees() external nonReentrant {
         uint256 readyAt = pendingFeesReadyAt;
         if (readyAt == 0) revert NoPendingFees();
-        if (block.timestamp < readyAt) revert FeesNotReady(readyAt);
-        _requireNotExpired(readyAt);
+        _requireReady(readyAt);
         if (feeRecipient == address(0)) revert NoFeeRecipient();
         uint256 nextMintFee = pendingMintFee;
         uint256 nextRedeemFee = pendingRedeemFee;
@@ -773,17 +757,18 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     function setFeeRecipient(address next) external onlyGovernance {
         if (next == address(0)) revert ZeroAddress();
         if (next == address(this)) revert InvalidRecipient();
-        emit FeeRecipientChanged(feeRecipient, next);
+        address previous = feeRecipient;
         feeRecipient = next;
+        emit FeeRecipientChanged(previous, next);
     }
 
     /// @notice Pauses or resumes minting, at once. Wallets that minted can still redeem; a holder
     /// that never minted cannot qualify until minting resumes (a known limitation). Useful during an
     /// incident; a write-off and a last skipping exit pause minting by themselves. Resuming before
-    /// a written-off component is reactivated lets new entrants share its recovery.
+    /// a written-off component is reactivated lets new entrants share its recovery. Asking for the
+    /// current state does nothing.
     function setMintPaused(bool paused) external onlyGovernance {
-        mintPaused = paused;
-        emit MintPauseChanged(paused);
+        _setMintPaused(paused);
     }
 
     /// @notice First step of a governance change. Replaces any pending proposal and restarts
@@ -809,8 +794,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     function acceptGovernance() external {
         if (msg.sender != pendingGovernance) revert NotPendingGovernance(msg.sender);
         uint256 readyAt = pendingGovernanceReadyAt;
-        if (block.timestamp < readyAt) revert GovernanceTransferNotReady(readyAt);
-        _requireNotExpired(readyAt);
+        _requireReady(readyAt);
 
         address previous = governance;
         governance = msg.sender;
@@ -1015,10 +999,17 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     }
 
     /// @dev Emits only on a change, so an existing pause is kept without a second event.
-    function _pauseMint() private {
-        if (mintPaused) return;
-        mintPaused = true;
-        emit MintPauseChanged(true);
+    function _setMintPaused(bool paused) private {
+        if (mintPaused == paused) return;
+        mintPaused = paused;
+        emit MintPauseChanged(paused);
+    }
+
+    /// @dev Emits only on a change, like `_setMintPaused`.
+    function _setActive(address token, bool active) private {
+        if (excluded[token] == !active) return;
+        excluded[token] = !active;
+        emit ComponentActivationChanged(token, active);
     }
 
     function _requireNewComponent(address token) private view {
@@ -1043,7 +1034,9 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         return slot - 1;
     }
 
-    function _requireNotExpired(uint256 readyAt) private view {
+    /// @dev A proposal can be executed from `readyAt` until `EXECUTION_WINDOW` later.
+    function _requireReady(uint256 readyAt) private view {
+        if (block.timestamp < readyAt) revert NotReady(readyAt);
         uint256 expiredAt = readyAt + EXECUTION_WINDOW;
         if (block.timestamp > expiredAt) revert ProposalExpired(expiredAt);
     }

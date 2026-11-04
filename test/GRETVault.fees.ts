@@ -102,7 +102,7 @@ describe("GRETVault: mint and redemption fees", async () => {
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.applyFees({ account: governance.account }),
         vault,
-        "FeesNotReady",
+        "NotReady",
         [readyAt],
       );
       await networkHelpers.time.setNextBlockTimestamp(readyAt);

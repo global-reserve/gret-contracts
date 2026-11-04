@@ -98,7 +98,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.acceptRebalancer({ account: dave.account }),
         vault,
-        "RebalancerChangeNotReady",
+        "NotReady",
         [readyAt],
       );
       await viem.assertions.revertWithCustomErrorWithArgs(
@@ -227,7 +227,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.applyPriceGuard({ account: alice.account }),
         vault,
-        "PriceGuardChangeNotReady",
+        "NotReady",
         [readyAt],
       );
       await networkHelpers.time.setNextBlockTimestamp(readyAt);
@@ -385,7 +385,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
         getAddress(tokenD.address),
       ]);
       await viem.assertions.revertWithCustomError(swap(a, 0n, b, 1n), vault, "ZeroAmount");
-      await viem.assertions.revertWithCustomErrorWithArgs(swap(a, 1n, b, 0n), vault, "ZeroComponentAmount", [1n]);
+      await viem.assertions.revertWithCustomError(swap(a, 1n, b, 0n), vault, "ZeroAmount");
 
       // Atomic: if the component going out fails, what came in goes back too.
       await faulty.write.setFault([Fault.RevertOnTransfer]);
@@ -463,8 +463,8 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.addComponent([d], { account: governance.account }),
         vault,
-        "ComponentNotReady",
-        [getAddress(d), readyAt],
+        "NotReady",
+        [readyAt],
       );
       // Governance decided when it announced it: once the wait is over, anyone can add it.
       await networkHelpers.time.setNextBlockTimestamp(readyAt);
@@ -668,8 +668,8 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.writeOffComponent([c], { account: carol.account }),
         vault,
-        "WriteOffNotReady",
-        [getAddress(c), readyAt],
+        "NotReady",
+        [readyAt],
       );
       await networkHelpers.time.setNextBlockTimestamp(readyAt);
       await viem.assertions.emitWithArgs(
