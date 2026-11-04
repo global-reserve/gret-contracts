@@ -151,9 +151,9 @@ denominator. Excluded components do not count. Donations received before the exc
 count, because they back GRET.
 
 The guard enumerates component addresses and reads each priced, active token separately.
-A reverting balance read or unusable price contributes zero, making the loss fraction more
-conservative. It does not call the aggregate `reserves()` view, which is unavailable during
-mutation. Malformed successful return data can still revert valuation.
+A balance read that reverts or answers with less than one word, or an unusable price,
+contributes zero, making the loss fraction more conservative. It does not call the aggregate
+`reserves()` view, which is unavailable during mutation.
 
 Guard limits and price assumptions:
 
@@ -398,8 +398,7 @@ design decision and must be made here first.
 - **Issuers control their tokens.** A freeze, an upgrade, an expensive call or an unreadable
   balance can block normal mint and redemption until holders skip the component or governance
   writes it off; its liquidation claim waits until reads and transfers recover. The
-  128-component cap cannot bound arbitrary issuer code. In the guard, malformed balance data
-  stops every swap with a loss.
+  128-component cap cannot bound arbitrary issuer code.
 - **Dust and donations.** One unsolicited base unit makes an active zero-balance component
   required again. A donation can front-run a removal; for a token that cannot be sold, a
   donation above the dust allowance leaves a write-off, which keeps the slot forever, as the

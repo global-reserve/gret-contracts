@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.38;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
@@ -161,17 +162,19 @@ contract ChainlinkPriceGuard is IPriceGuard {
     }
 
     /// @dev Live active backing immediately before the swap: the incoming buy amount is
-    /// removed in token units before valuation. Each failed/unpriced component counts as zero.
+    /// removed in token units before valuation. Each unreadable or unpriced component counts as
+    /// zero, whether its balance read reverts or answers with less than one word.
     function _vaultValue(address buy, uint256 received) private view returns (uint256 total) {
         address[] memory tokens = IGRETVaultReserves(vault).components();
         for (uint256 i; i < tokens.length; ++i) {
             address token = tokens[i];
             if (address(_feeds[token].feed) == address(0) || IGRETVaultReserves(vault).excluded(token)) continue;
-            try IERC20Metadata(token).balanceOf(vault) returns (uint256 balance) {
-                if (token == buy) balance = Math.saturatingSub(balance, received);
-                try this.valueOf(token, balance) returns (uint256 value) {
-                    total += value;
-                } catch {}
+            (bool ok, bytes memory data) = token.staticcall(abi.encodeCall(IERC20.balanceOf, (vault)));
+            if (!ok || data.length < 32) continue;
+            uint256 balance = abi.decode(data, (uint256));
+            if (token == buy) balance = Math.saturatingSub(balance, received);
+            try this.valueOf(token, balance) returns (uint256 value) {
+                total += value;
             } catch {}
         }
     }

@@ -211,7 +211,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // try/catch catches a revert in balanceOf, not malformed return data or missing code
+    // A broken balanceOf: the vault fails closed, the guard counts the component as zero
     // ---------------------------------------------------------------------------------------------
 
     function _redeemCall(GRETVault v) internal returns (bool ok, bytes memory ret) {
@@ -308,7 +308,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
         assertFalse(ok, "claim reverts without code");
     }
 
-    function test_guardMalformedBalanceStopsLossySwaps() public {
+    function test_guardCountsBrokenBalanceAsZero() public {
         OddBalanceToken m = new OddBalanceToken();
         MockERC20 b = new MockERC20("B", "B", 18);
         IERC20[] memory basket = new IERC20[](3);
@@ -359,16 +359,15 @@ contract GRETVaultExitsTest is GRETVaultCase {
         assertGt(revertLoss, normalLoss);
         vm.revertToState(snap);
 
-        // Empty return: every swap with a loss reverts, though M is not part of the swap.
-        m.setMode(OddBalanceToken.Mode.Empty);
-        vm.prank(REBALANCER);
-        (bool ok, bytes memory ret) =
-            address(v).call(abi.encodeCall(GRETVault.swap, (address(healthy), 1e18, address(b), 0.99e18)));
-        assertFalse(ok, "lossy swap reverts on empty return");
-        assertEq(ret.length, 0);
-        // A swap without a loss returns before the valuation.
-        vm.prank(REBALANCER);
-        v.swap(address(healthy), 1e18, address(b), 1e18);
+        // An empty or 31-byte answer counts the same as a revert; the swap is not blocked.
+        OddBalanceToken.Mode[2] memory malformed = [OddBalanceToken.Mode.Empty, OddBalanceToken.Mode.Short31];
+        for (uint256 i; i < 2; ++i) {
+            m.setMode(malformed[i]);
+            vm.prank(REBALANCER);
+            v.swap(address(healthy), 1e18, address(b), 0.99e18);
+            assertEq(guard.weeklyLoss(), revertLoss);
+            vm.revertToState(snap);
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
