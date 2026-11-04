@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.38;
 
+import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
@@ -102,6 +103,17 @@ contract SwitchableGuard is IPriceGuard {
     function reserves() external view returns (uint256[] memory) {
         return GRETVault(vault).reserves();
     }
+}
+
+/// @dev A guard of another kind that reports a week but has no weekly loss to read.
+contract WeekOnlyGuard is IPriceGuard {
+    uint256 public currentWeek;
+
+    function setWeek(uint256 week) external {
+        currentWeek = week;
+    }
+
+    function checkSwap(address, uint256, address, uint256, bytes calldata) external {}
 }
 
 contract GRETVaultGuardTest is GRETVaultCase {
@@ -373,6 +385,63 @@ contract GRETVaultGuardTest is GRETVaultCase {
         assertLt(own, 1e16);
         _smallLoss(b);
         assertGt(b.weeklyLoss(), own);
+    }
+
+    /// A predecessor that reports the current week but no readable weekly loss counts as zero.
+    function test_replacementOfGuardWithoutWeeklyLossStartsAtZero() public {
+        _feeds();
+        vm.warp((block.timestamp / W + 1) * W + 1 hours);
+        WeekOnlyGuard previous = new WeekOnlyGuard();
+        _appoint(vault, address(previous));
+        ChainlinkPriceGuard b = _guard();
+        vm.prank(GOVERNANCE);
+        vault.proposePriceGuard(address(b));
+        vm.warp(_priceGuardReadyAt());
+        previous.setWeek(block.timestamp / W);
+        _refresh();
+        vault.applyPriceGuard();
+        _smallLoss(b);
+        uint256 own = b.weeklyLoss();
+        assertGt(own, 0);
+        assertLt(own, 1e16);
+    }
+
+    /// An excluded component counts for nothing in the vault's value, even with a feed and a
+    /// balance: here a donation of 1,000 dollars to a component that joined excluded.
+    function test_excludedPricedComponentLeftOutOfVaultValue() public {
+        _feeds();
+        vm.warp((block.timestamp / W + 1) * W + 1 hours);
+        MockERC20 joined = new MockERC20("Joined", "J", 18);
+        MockAggregator joinedFeed = new MockAggregator(8, 1e8);
+        vm.prank(GOVERNANCE);
+        vault.announceComponent(address(joined));
+        address[] memory tokens = new address[](3);
+        tokens[0] = address(healthy);
+        tokens[1] = address(faulty);
+        tokens[2] = address(joined);
+        IChainlinkFeed[] memory feeds = new IChainlinkFeed[](3);
+        feeds[0] = IChainlinkFeed(address(hFeed));
+        feeds[1] = IChainlinkFeed(address(fFeed));
+        feeds[2] = IChainlinkFeed(address(joinedFeed));
+        ChainlinkPriceGuard guard =
+            new ChainlinkPriceGuard(address(vault), tokens, feeds, _three(1 days, 1 days, 1 days));
+        _appoint(vault, address(guard));
+        vault.addComponent(address(joined));
+        assertTrue(vault.excluded(address(joined)));
+        joined.mint(address(vault), 1000e18);
+        _refresh();
+        joinedFeed.setAnswer(1e8);
+
+        uint256 activeValue = _usd(guard);
+        vm.recordLogs();
+        _smallLoss(guard);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 vaultValue;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].topics[0] != ChainlinkPriceGuard.LossRecorded.selector) continue;
+            (, vaultValue,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
+        }
+        assertEq(vaultValue, activeValue);
     }
 
     // ------------------------------------------------------------------------------------------
