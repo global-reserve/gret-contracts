@@ -45,10 +45,11 @@ compatibility; fork results are specific to their block and code versions.
   than requested and no more than ten base units short (`MAX_RECEIPT_SHORTFALL`). The minter
   absorbs rounding, not existing holders. Larger transfer fees revert. Receipts are measured
   even though backing is live.
-- **Eligibility:** a wallet that completes a mint may redeem normally, including GRET acquired
-  later. Eligibility does not transfer with GRET. A mint must contribute every active component
-  with a positive balance (at bootstrap, with a positive initial amount); zero issuance and an
-  empty backing basket are rejected.
+- **Eligibility:** without an eligibility contract anyone may mint and redeem, including a
+  holder who received GRET by transfer. Governance may appoint one after the seven-day notice
+  (see "Eligibility contract"). A mint must contribute every active component with a positive
+  balance (at bootstrap, with a positive initial amount); zero issuance and an empty backing
+  basket are rejected.
 - **Normal redemption:** calculate outputs from all required live balances before sending any
   token. The fee is transferred in GRET; the remainder is burned for
   `floor(burnedShares * B[i] / S)` per component. Redeeming the whole supply pays no fee.
@@ -65,7 +66,7 @@ compatibility; fork results are specific to their block and code versions.
   Liquidation permits conversion below that floor and eventually zero unconverted supply.
 - **Mint pause only:** governance can pause/resume minting immediately; executing a write-off
   and a skipping redemption that leaves zero supply also pause it. Normal redemption is never
-  paused. A secondary-market holder who never minted cannot qualify while paused.
+  paused.
 - GRET transfers to the vault itself revert; otherwise shares are ordinary transferable ERC-20
   tokens, including unconverted GRET during liquidation.
 
@@ -202,10 +203,36 @@ Liquidation has no fees. Fee rounding and the minimum supply can affect very sma
 
 Governance may pause minting, activate liquidation, manage component lifecycle and initial
 amounts, configure fees and their recipient, rescue permitted tokens, and appoint the guard,
-rebalancer or its own successor. Governance succession is two-step: the proposed address must
-accept after seven days and within the execution window. There is no governance-contract
-assumption beyond being able to call the vault. No arbitrary external-call or upgrade function
-exists. Proposals can be cancelled; revocation removes the pending rebalancer too.
+rebalancer, eligibility contract or its own successor. Governance succession is two-step: the
+proposed address must accept after seven days and within the execution window. There is no
+governance-contract assumption beyond being able to call the vault. No arbitrary external-call
+or upgrade function exists. Proposals can be cancelled; revocation removes the pending
+rebalancer too.
+
+The seven-day waits are enforced by the vault itself, not left to an external timelock such
+as OpenZeppelin's `TimelockController` or `AccessManager`. An external contract's delays are
+set by whoever administers it, so they would hold only while governance keeps them; the vault's
+own waits hold whoever governs, and they let some powers stay immediate (pausing minting,
+revoking the rebalancer, removing the eligibility contract, liquidation) while others wait. A
+timelock can still sit on top as the governance address.
+
+### Eligibility contract
+
+Without an eligibility contract, anyone may mint and redeem. Governance may appoint one with
+`proposeEligibility`; anyone applies it with `applyEligibility` after the seven-day notice and
+within the execution window, and governance can remove it at once with `removeEligibility`.
+Like the guard, it must be a contract other than the vault and not an EIP-7702 account.
+
+Once appointed, `mint` asks `canMint(caller, to)` and both redemptions ask `canRedeem(caller,
+to)`, where the caller pays or burns and `to` receives. The vault asks with a read-only call
+and only an explicit `true` passes: a revert, a malformed answer or one that runs out of gas
+refuses, whatever gas the caller sends. GRET transfers, liquidation, swaps and `rescue` never
+ask it.
+
+It follows how tokenized-asset issuers restrict their primary market: only approved parties
+create and redeem with the issuer, while the tokens trade freely elsewhere. Starting open
+keeps that choice for later without a new vault, and the notice gives holders that a new
+contract would refuse time to redeem first.
 
 `rescue(token,to,amount)` may transfer foreign tokens at any time, including during
 liquidation. For a registered ordinary component, active or excluded, it works only while
@@ -324,8 +351,6 @@ balances and supply.
   returns net `minted` and actual `received`. Exact input tokens produce the requested gross
   issuance; rounding tokens can reduce it. The caller pays a mint and burns a redemption;
   `to` receives the GRET or the components, and a redemption to zero or to the vault reverts.
-  `hasMinted` belongs to the caller: a router's mint qualifies the router, not its underlying
-  user.
 - There is no normal reserve ledger. Every active required balance is read before input or
   output transfers. Unreadable/reverting/malformed balances fail closed. Explicitly excluded
   or skipped tokens are not called. Initial amounts of zero are omitted during bootstrap.
@@ -385,7 +410,8 @@ design decision and must be made here first.
   pause minting, reactivate components, rescue foreign tokens, change the fee recipient, lower
   fees and revoke the rebalancer. After seven days' notice it can appoint a rebalancer with a
   guard that accepts every swap and exchange the reserves for anything, add or write off
-  components, raise fees up to 5% and hand over governance. Removing empty components and adding
+  components, raise fees up to 5%, appoint an eligibility contract that refuses mint and
+  redemption, and hand over governance. Removing empty components and adding
   announced ones change `basketVersion`, so a hostile governance can make redemptions prepared
   for a fixed version revert with `BasketChanged`. If the governance key is lost, nobody can
   activate liquidation, reactivate components, change the basket or replace governance;
@@ -403,10 +429,11 @@ design decision and must be made here first.
   including later donations. A write-off pauses minting, but if
   governance resumes it before reactivating the component, the entrants in between share its
   recovery.
-- **Qualifying for normal redemption requires a mint.** A holder who never minted cannot
-  qualify while minting is paused, including after a write-off until governance resumes it, or
-  while an active component with a positive balance cannot be transferred in; selling,
-  transferring to a wallet that minted or liquidation remain.
+- **An eligibility contract keeps its own rules.** The notice binds its address, not the
+  rules inside it, so one whose owner can change its list at once can refuse holders without
+  notice; holders should read a proposed contract during its notice. A broken one refuses mint
+  and redemption until governance removes it, and with the governance key lost they stay
+  refused; selling GRET remains.
 - **The supply floor can hold back the last holders.** A fraction of GRET held elsewhere, from
   a tiny mint or as fee GRET, keeps the others from redeeming the last GRET normally until it
   is handed over; whoever then holds every GRET leaves without a fee. Liquidation lets every
@@ -416,7 +443,8 @@ design decision and must be made here first.
   transfer without moving anything still consumes the claimed right.
 - **A token that debits the vault more than it sends** takes the difference from the
   remaining holders' backing, and the last exit of that component can fail even in
-  liquidation.
+  liquidation. Checking the vault's balance after every outgoing transfer was rejected: it
+  would add a read to every exit and cover one behavior among the many an issuer controls.
 - **Issuers control their tokens.** A freeze, an upgrade, an expensive call or an unreadable
   balance can block normal mint and redemption until holders skip the component or governance
   writes it off; its liquidation claim waits until reads and transfers recover. The
@@ -424,8 +452,10 @@ design decision and must be made here first.
 - **Dust and donations.** One unsolicited base unit makes an active zero-balance component
   required again. A donation can front-run a removal; for a token that cannot be sold, a
   donation above the dust allowance leaves a write-off, which keeps the slot forever, as the
-  only way to exclude it. In
-  liquidation, a balance where every pending payout rounds to zero stays until more arrives.
+  only way to exclude it. Excluding a component automatically once sold out was rejected:
+  every rotation through it would then need governance to reactivate it, while
+  `deactivateEmptyComponent` already excludes it at once. In liquidation, a balance where every
+  pending payout rounds to zero stays until more arrives.
 - **Some liquidation rights may never be paid.** Rights over a component that never transfers
   again stay pending, and GRET held by contracts that cannot call `convertToClaims` stays
   unconverted. Late recoveries are shared pro rata, not targeted to whoever took a cut.
@@ -447,7 +477,7 @@ These items are proposals: none is approved, implemented or part of a deployment
 
 - Independent audit and issuer/fork verification before third-party funds.
 - Governance implementation and key recovery; the current governance is a wallet.
-- Feed coverage, market-peg monitoring and guard improvements (counter continuity across
-  replacements and token-decimal changes).
+- Feed coverage, market-peg monitoring and guard improvements, such as following token-decimal
+  changes.
 - Deploying this source, and any migration from the October 27 pilot, requires a concrete
   deployment and funding plan.

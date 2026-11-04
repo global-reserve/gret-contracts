@@ -185,7 +185,7 @@ function render() {
     $("checks").innerHTML = '<li class="muted">No vault yet.</li>';
   }
   $("gret").textContent = s?.vault
-    ? `You hold ${fmt(s.vault.gret, 18)} GRET · total supply ${fmt(s.vault.supply, 18)} GRET · redemption enabled: ${s.vault.hasMinted ? "yes" : "no"}`
+    ? `You hold ${fmt(s.vault.gret, 18)} GRET · total supply ${fmt(s.vault.supply, 18)} GRET · ${/^0x0+$/.test(s.vault.eligibility) ? "anyone may mint and redeem" : `eligibility contract ${s.vault.eligibility}`}`
     : "";
 
   const can = ready() && !state.busy;

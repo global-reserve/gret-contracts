@@ -8,6 +8,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {GRETVault} from "../contracts/GRETVault.sol";
 import {MockFaultyERC20} from "../contracts/mocks/MockFaultyERC20.sol";
 import {MockPriceGuard} from "../contracts/mocks/MockPriceGuard.sol";
+import {MockEligibility} from "../contracts/mocks/MockEligibility.sol";
 import {ChainlinkPriceGuard} from "../contracts/ChainlinkPriceGuard.sol";
 import {GRETVaultCase, SenderSurchargeToken, NoOpTransferToken} from "./helpers/GRETVaultCase.sol";
 
@@ -53,58 +54,32 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         assertGt(marketBefore - marketAfter, marketBefore * 98 / 100);
     }
 
-    /// A holder who never minted cannot leave while minting is paused, so a captured
-    /// governance can pause, appoint a rebalancer and drain the vault after the notice.
-    function test_pauseKeepsNonMinterInDuringNotice() public {
-        vm.prank(ALICE);
-        vault.transfer(BOB, SHARE);
-        vm.startPrank(GOVERNANCE);
-        vault.setMintPaused(true);
-        vault.proposeRebalancer(REBALANCER);
-        vault.proposePriceGuard(address(new MockPriceGuard()));
-        vm.stopPrank();
-        assertFalse(vault.hasMinted(BOB));
-
-        vm.startPrank(BOB);
-        vm.expectRevert(GRETVault.MintIsPaused.selector);
-        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.RedemptionNotEnabled.selector, BOB));
-        vault.redeem(SHARE, BOB, _pair(0, 0), 0);
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.RedemptionNotEnabled.selector, BOB));
-        vault.redeemSkipping(SHARE, BOB, _pair(0, 0), new address[](0), 0);
-        vm.expectRevert(GRETVault.LiquidationNotActive.selector);
-        vault.convertToClaims(SHARE);
-        vm.stopPrank();
-
+    /// The notice binds an eligibility contract's address, not its rules: its list can refuse a
+    /// holder at once, and a broken contract refuses everyone until governance removes it.
+    function test_eligibilityRulesChangeWithoutNotice() public {
+        MockEligibility policy = new MockEligibility();
+        policy.setListed(ALICE, true);
+        vm.prank(GOVERNANCE);
+        vault.proposeEligibility(address(policy));
         vm.warp(block.timestamp + 7 days);
-        vm.prank(REBALANCER);
-        vault.acceptRebalancer();
-        vault.applyPriceGuard();
-        vm.startPrank(REBALANCER);
-        vault.swap(address(healthy), 2e18, address(faulty), 1, "");
-        vault.swap(address(faulty), 5e18 + 1, address(healthy), 1, "");
-        vm.stopPrank();
-        assertEq(vault.balanceOf(BOB), SHARE);
-        assertEq(healthy.balanceOf(address(vault)), 1);
-        assertEq(faulty.balanceOf(address(vault)), 0);
-    }
+        vault.applyEligibility();
 
-    /// A holder who never minted cannot qualify while a component cannot be paid in, so
-    /// skipping it is not available to them either.
-    function test_frozenComponentKeepsNonMinterFromQualifying() public {
+        policy.setListed(ALICE, false);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.NotEligible.selector, ALICE, ALICE));
         vm.prank(ALICE);
-        vault.transfer(BOB, SHARE / 2);
-        faulty.setBlocked(address(vault), true);
-        address[] memory skipped = new address[](1);
-        skipped[0] = address(faulty);
-        vm.startPrank(BOB);
-        vm.expectRevert(abi.encodeWithSelector(MockFaultyERC20.AccountBlocked.selector, address(vault)));
-        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.RedemptionNotEnabled.selector, BOB));
-        vault.redeemSkipping(SHARE / 2, BOB, _pair(0, 0), skipped, 0);
-        vm.stopPrank();
-    }
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
 
+        policy.setListed(ALICE, true);
+        policy.setAnswer(MockEligibility.Answer.Revert);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.NotEligible.selector, ALICE, ALICE));
+        vm.prank(ALICE);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
+
+        vm.prank(GOVERNANCE);
+        vault.removeEligibility();
+        vm.prank(ALICE);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
+    }
 
     /// An entry before a future donation still shares that donation.
     function test_entryBeforeFutureDonationStillSharesIt() public {

@@ -26,7 +26,6 @@ contract GRETVaultHandler is Test {
         uint256[4] backing;
         uint256[4] actorTokens;
     }
-    mapping(address => bool) public everMinted;
     mapping(bytes32 => uint256) public successes;
     bool public violation;
 
@@ -49,7 +48,6 @@ contract GRETVaultHandler is Test {
         }
         vm.prank(actors[0]);
         vault.mint(1e18, actors[0], initial, 1e18, 0);
-        everMinted[actors[0]] = true;
         vault.setFeeRecipient(actors[4]);
         vault.proposeRebalancer(address(this));
         vault.proposePriceGuard(address(new MockPriceGuard()));
@@ -60,7 +58,7 @@ contract GRETVaultHandler is Test {
 
     function mint(uint256 who, uint256 seed) external {
         if (vault.liquidationActive()) return;
-        address actor = actors[who % 3]; // Two secondary holders never qualify by minting.
+        address actor = actors[who % 3]; // Two secondary holders only receive GRET by transfer.
         uint256 shares = vault.totalSupply() == 0 ? 1e18 : bound(seed, 1, 10e18);
         uint256[] memory limits = new uint256[](vault.componentCount());
         for (uint256 i; i < limits.length; ++i) limits[i] = type(uint256).max;
@@ -85,7 +83,6 @@ contract GRETVaultHandler is Test {
                     tokens[i].rawBalanceOf(address(vault)) != before_.backing[i] + expected[i] ||
                     tokens[i].rawBalanceOf(actor) + expected[i] != before_.actorTokens[i]) violation = true;
             }
-            everMinted[actor] = true;
             successes["mint"]++;
             if (vault.mintPaused()) violation = true;
             _checkNoDilution(before_.backing, before_.supply);
@@ -125,7 +122,6 @@ contract GRETVaultHandler is Test {
                     tokens[i].rawBalanceOf(actor) != before_.actorTokens[i] + expected[i]) violation = true;
             }
             successes[skip ? bytes32("skip") : bytes32("redeem")]++;
-            if (!everMinted[actor]) violation = true;
             _checkNoDilution(before_.backing, before_.supply);
         } catch {}
     }
@@ -378,7 +374,6 @@ contract GRETVaultInvariantTest is Test {
         for (uint256 k; k < 5; ++k) {
             address actor = handler.actors(k);
             shares += vault.balanceOf(actor);
-            assertEq(vault.hasMinted(actor), handler.everMinted(actor));
         }
         assertEq(shares, vault.totalSupply());
         assertEq(vault.balanceOf(address(vault)), 0);

@@ -109,7 +109,7 @@ describe("GRETVault: randomized sequences", async () => {
         } else if (roll < 65) {
           const eligible = [];
           for (const [index, user] of users.entries()) {
-            if (state.holdings[index] > 0n && (await vault.read.hasMinted([user.account.address]))) {
+            if (state.holdings[index] > 0n) {
               eligible.push({ user, balance: state.holdings[index] });
             }
           }
@@ -253,7 +253,6 @@ describe("GRETVault: randomized sequences", async () => {
       }
       assert.equal(converted, liquidationSupply);
       assert.equal(await vault.read.totalSupply(), 0n);
-      assert.equal(await vault.read.hasMinted([dave.account.address]), false);
 
       const finalReserves = await vault.read.reserves();
       for (const [index, reserve] of finalReserves.entries()) {

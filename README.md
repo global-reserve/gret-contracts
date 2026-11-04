@@ -65,6 +65,7 @@ touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the
 | [`GRETVault`](contracts/GRETVault.sol) | The GRET token and the vault: mint, redemption, basket changes, rebalancing, fees and liquidation |
 | [`ChainlinkPriceGuard`](contracts/ChainlinkPriceGuard.sol) | The first price guard: values both sides of a swap with Chainlink feeds and enforces the loss limits; no owner, nothing to change |
 | [`IPriceGuard`](contracts/IPriceGuard.sol) | The one question the vault asks before every swap |
+| [`IEligibility`](contracts/IEligibility.sol) | The questions the vault asks before a mint or a redemption, once governance appoints an eligibility contract |
 
 ## Documentation
 
@@ -154,9 +155,9 @@ Functions of `GRETVault`, besides the standard ERC-20 ones and EIP-2612 `permit`
 
 | Function | Who | What it does |
 | --- | --- | --- |
-| `mint(shares, to, maxAmountsIn, minShares, version)` | Anyone | Contributes every component with a reserve in proportion; `to` receives the GRET, minus the mint fee; the first mint issues exactly 1 GRET |
-| `redeem(shares, to, minAmountsOut, version)` | Wallets that minted | Pays the redemption fee in GRET and burns the rest; `to` receives every component; redeeming the whole supply pays no fee; all or nothing; leaves the supply at 0 or at least 1 GRET |
-| `redeemSkipping(shares, to, minAmountsOut, skipped, version)` | Wallets that minted | Same redemption without the listed components, which are not called; the caller gives up its share of them; leaving zero supply pauses minting |
+| `mint(shares, to, maxAmountsIn, minShares, version)` | Anyone, or whom the eligibility contract approves | Contributes every component with a reserve in proportion; `to` receives the GRET, minus the mint fee; the first mint issues exactly 1 GRET |
+| `redeem(shares, to, minAmountsOut, version)` | Any holder, or whom the eligibility contract approves | Pays the redemption fee in GRET and burns the rest; `to` receives every component; redeeming the whole supply pays no fee; all or nothing; leaves the supply at 0 or at least 1 GRET |
+| `redeemSkipping(shares, to, minAmountsOut, skipped, version)` | Any holder, or whom the eligibility contract approves | Same redemption without the listed components, which are not called; the caller gives up its share of them; leaving zero supply pauses minting |
 | `convertToClaims(shares)` | Any holder | During liquidation, burns GRET in exchange for per-component rights |
 | `claim(i, to, minAmount)` | Whoever converted | Withdraws the pending right over component `i` |
 | `activateLiquidation()` | Governance | With positive supply, freezes the share denominator and closes mint/normal redemption without token calls |
@@ -174,6 +175,8 @@ Functions of `GRETVault`, besides the standard ERC-20 ones and EIP-2612 `permit`
 | `addComponent(token)` | Anyone | Adds an announced component, 7 to 14 days later, initially excluded |
 | `removeComponent(token)` | Governance | Removes an empty ordinary component under the bounded dust rule, never a written-off one; later indices shift |
 | `setMintPaused(paused)` | Governance | Pauses or resumes minting at once; a write-off and a skipping exit that empties the supply also pause it; redemption is never paused |
+| `proposeEligibility(next)` / `cancelEligibilityProposal()` / `removeEligibility()` | Governance | Proposes or discards the contract that decides who may mint and redeem, or removes the current one at once; never the vault or an EIP-7702 account |
+| `applyEligibility()` | Anyone | Applies the proposed eligibility contract, 7 to 14 days after the proposal; there is none at deployment, and without one anyone may mint and redeem |
 | `setInitialAmounts(amounts, version)` | Governance | Sets the basket of the first mint, used only while the supply is zero |
 | `proposeWriteOff(token)` / `cancelWriteOff(token)` | Governance | Proposes or discards writing off a component that stopped working; governance judges it |
 | `writeOffComponent(token)` | Anyone | 7 to 14 days later, excludes the component without reading it and pauses minting; the token stays registered and permanently non-rescuable |
@@ -209,9 +212,11 @@ basket reverts with `BasketChanged` instead of applying a limit to another token
 ```text
 contracts/GRETVault.sol              GRET token and vault: mint, redemption, live balances, rebalancing and liquidation
 contracts/IPriceGuard.sol            What the vault asks the price guard in every swap
+contracts/IEligibility.sol           What the vault asks an appointed eligibility contract before a mint or a redemption
 contracts/ChainlinkPriceGuard.sol    Price guard with Chainlink feeds and loss limits per swap and per week
 contracts/mocks/MockAggregator.sol   Test Chainlink feed with a price set by hand
 contracts/mocks/MockPriceGuard.sol   Test guard that accepts every swap unless told to refuse
+contracts/mocks/MockEligibility.sol  Test eligibility contract with a list and broken answers
 contracts/mocks/MockERC20.sol        Test ERC-20 with configurable decimals
 contracts/mocks/MockFaultyERC20.sol  Test ERC-20 with switchable faults
 contracts/mocks/MockNoReturnERC20.sol Test token without a return value, like USDT
@@ -231,6 +236,7 @@ test/GRETVault.components.t.sol      Component removal keeps balances tied to to
 test/GRETVault.exits.t.sol           Exits with a redemption fee, unreadable balances and skipped components
 test/GRETVault.governance.t.sol      Write-offs, basket versions, swap losses and proposal events
 test/GRETVault.guard.t.sol           Guard replacement, decimals, written-off components and lagging feeds
+test/GRETVault.eligibility.t.sol     The optional eligibility contract: notice, decisions, broken answers and removal
 test/GRETVault.liquidation.t.sol     Liquidation conservation and shortfall claims under fuzzing
 test/GRETVault.fuzz.t.sol            Property fuzzing in Solidity
 test/GRETVault.invariant.t.sol       Invariants over random sequences of every operation, from several starting states

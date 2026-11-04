@@ -30,7 +30,7 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
       getCode: async () => "0x" as const,
       readContract: async ({ functionName }: { functionName: string }) => {
         if (["reserves", "previewMint", "previewRedeem"].includes(functionName)) throw unavailable;
-        if (functionName === "hasMinted") return true;
+        if (functionName === "eligibility") return zeroAddress;
         return 1n;
       },
     } as unknown as import("../scripts/pilot/plan.js").Reader;
@@ -169,7 +169,6 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
       assert.deepEqual(await vault.read.reserves(), INITIAL_AMOUNTS);
       assert.equal(await vault.read.totalSupply(), INITIAL_SHARES);
       assert.equal(await vault.read.balanceOf([alice.account.address]), INITIAL_SHARES);
-      assert.equal(await vault.read.hasMinted([alice.account.address]), true);
     });
 
     it("the first mint must issue exactly 1 GRET", async () => {
@@ -207,7 +206,6 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
         INITIAL_AMOUNTS.map((reserve, i) => reserve + expected[i]),
       );
       assert.equal(await vault.read.balanceOf([bob.account.address]), shares);
-      assert.equal(await vault.read.hasMinted([bob.account.address]), true);
     });
 
     it("a mint of 1 wei of GRET still contributes every component and enables redemption", async () => {
@@ -220,7 +218,6 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
       const bobAfter = await balancesOf(basket, bob.account.address);
       // ceil(1 * reserve / 1e18): at least one base unit of each component, never zero.
       assert.deepEqual(bobBefore.map((balance, i) => balance - bobAfter[i]), [2n, 1n, 5n]);
-      assert.equal(await vault.read.hasMinted([bob.account.address]), true);
     });
 
     it("rejects zero shares, wrong array lengths and contributions above maxAmountsIn", async () => {
@@ -245,7 +242,6 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
         "AmountInAboveMax",
         [1n, expected[1], expected[1] - 1n],
       );
-      assert.equal(await vault.read.hasMinted([bob.account.address]), false);
     });
 
     it("rejects a component that charges a transfer fee", async () => {
@@ -299,7 +295,6 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
         vault,
         "ZeroShares",
       );
-      assert.equal(await vault.read.hasMinted([bob.account.address]), false);
     });
 
     it("blocks reentrancy from a component during mint", async () => {
@@ -377,29 +372,18 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
       assert.equal(await vault.read.balanceOf([alice.account.address]), INITIAL_SHARES - shares);
     });
 
-    it("is only available to wallets that minted, even when they hold GRET", async () => {
-      const { vault, alice, dave } = await networkHelpers.loadFixture(bootstrappedFixture);
+    it("is available to any holder, including one who never minted", async () => {
+      const basket = await networkHelpers.loadFixture(bootstrappedFixture);
+      const { vault, alice, dave } = basket;
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
       await vault.write.transfer([dave.account.address, INITIAL_SHARES / 4n], { account: alice.account });
+      const before = await balancesOf(basket, dave.account.address);
+      const expected = await vault.read.previewRedeem([INITIAL_SHARES / 4n]);
 
-      assert.equal(await vault.read.hasMinted([dave.account.address]), false);
-      await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.redeem([INITIAL_SHARES / 4n, dave.account.address, NO_MIN, 0n], { account: dave.account }),
-        vault,
-        "RedemptionNotEnabled",
-        [getAddress(dave.account.address)],
-      );
-    });
-
-    it("lets a wallet that minted redeem GRET acquired later", async () => {
-      const { vault, alice, bob } = await networkHelpers.loadFixture(bootstrappedFixture);
-      await vault.write.mint([2n * INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
-      await vault.write.mint([1n, bob.account.address, NO_MAX, 0n, 0n], { account: bob.account });
-      await vault.write.transfer([bob.account.address, INITIAL_SHARES / 2n], { account: alice.account });
-
-      await vault.write.redeem([INITIAL_SHARES / 2n + 1n, bob.account.address, NO_MIN, 0n], { account: bob.account });
-
-      assert.equal(await vault.read.balanceOf([bob.account.address]), 0n);
-      assert.equal(await vault.read.hasMinted([bob.account.address]), true);
+      await vault.write.redeem([INITIAL_SHARES / 4n, dave.account.address, NO_MIN, 0n], { account: dave.account });
+      assert.equal(await vault.read.balanceOf([dave.account.address]), 0n);
+      const after = await balancesOf(basket, dave.account.address);
+      assert.deepEqual(after.map((balance, i) => balance - before[i]), expected);
     });
 
     it("is atomic: a failing component reverts the whole redemption", async () => {
@@ -515,12 +499,6 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
         vault,
         "AmountOutBelowMin",
         [2n, 0n, 1n],
-      );
-      await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.redeemSkipping([INITIAL_SHARES, carol.account.address, NO_MIN, [faulty.address], 0n], { account: carol.account }),
-        vault,
-        "RedemptionNotEnabled",
-        [getAddress(carol.account.address)],
       );
       // Skipping nothing, or the same token twice, works like a plain redemption without it.
       await vault.write.redeemSkipping([INITIAL_SHARES / 2n, alice.account.address, NO_MIN, [], 0n], { account: alice.account });

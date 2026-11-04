@@ -184,24 +184,34 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(vault.balanceOf(BOB), 0);
     }
 
-    /// Mint does not ask for a component with no reserve, so a new holder qualifies for redemption
-    /// with the healthy components alone and exits without liquidation.
-    function test_newHolderQualifiesAfterTotalLoss() public {
+    /// A holder who never minted redeems directly, even after a component's total loss.
+    function test_secondaryHolderRedeemsAfterTotalLoss() public {
         vm.prank(ALICE);
         vault.transfer(BOB, SHARE);
         faulty.slash(address(vault), 5e18);
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.RedemptionNotEnabled.selector, BOB));
-        vm.prank(BOB);
-        vault.redeem(SHARE, BOB, _pair(0, 0), 0);
-
         uint256 before = healthy.balanceOf(BOB);
-        vm.startPrank(BOB);
-        (uint256 minted, uint256[] memory paid) = vault.mint(SHARE, BOB, _pair(type(uint256).max, 0), 0, 0);
-        assertEq(minted, SHARE);
+        vm.prank(BOB);
+        uint256[] memory paid = vault.redeem(SHARE, BOB, _pair(0, 0), 0);
         assertEq(paid[1], 0);
-        vault.redeem(2 * SHARE, BOB, _pair(0, 0), 0);
-        vm.stopPrank();
-        assertEq(healthy.balanceOf(BOB), before + 2e18);
+        assertEq(healthy.balanceOf(BOB) - before, 2e18);
+        assertEq(vault.totalSupply(), 0);
+    }
+
+    /// Without an eligibility contract, a holder who never minted leaves while minting is paused
+    /// and a component is frozen, so a captured governance cannot keep secondary holders in
+    /// during the notice of a new rebalancer.
+    function test_secondaryHolderLeavesWhileMintIsPausedAndComponentFrozen() public {
+        vm.prank(ALICE);
+        vault.transfer(BOB, SHARE);
+        vm.prank(GOVERNANCE);
+        vault.setMintPaused(true);
+        faulty.setBlocked(address(vault), true);
+        address[] memory skipped = new address[](1);
+        skipped[0] = address(faulty);
+        uint256 before = healthy.balanceOf(BOB);
+        vm.prank(BOB);
+        vault.redeemSkipping(SHARE, BOB, _pair(0, 0), skipped, 0);
+        assertEq(healthy.balanceOf(BOB) - before, 2e18);
         assertEq(vault.totalSupply(), 0);
     }
 

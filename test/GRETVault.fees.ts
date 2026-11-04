@@ -181,7 +181,6 @@ describe("GRETVault: mint and redemption fees", async () => {
       assert.equal(await vault.read.balanceOf([dave.account.address]), INITIAL_SHARES - fee);
       assert.equal(await vault.read.balanceOf([carol.account.address]), fee);
       assert.equal(await vault.read.totalSupply(), supply + INITIAL_SHARES);
-      assert.equal(await vault.read.hasMinted([carol.account.address]), false);
 
       // The fee comes out of the minter: what stands behind each GRET does not drop.
       const valueAfter = await vault.read.previewRedeem([INITIAL_SHARES]);

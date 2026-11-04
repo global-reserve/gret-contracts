@@ -9,6 +9,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
+import {IEligibility} from "./IEligibility.sol";
 import {IPriceGuard} from "./IPriceGuard.sol";
 
 /// @title Global Reserve Token vault
@@ -22,8 +23,9 @@ import {IPriceGuard} from "./IPriceGuard.sol";
 /// must pass a price guard, an external contract that holds the prices and the loss limits; every
 /// new rebalancer, price guard and component waits seven days. A component that stops working can
 /// be written off after the same wait. Governance can charge mint and redemption fees in GRET, at
-/// most 5% each; raising them waits too. It can pause minting at once, but never redemption. GRET
-/// supports EIP-2612 `permit`.
+/// most 5% each; raising them waits too. It can pause minting at once, but never redemption. After
+/// the same wait it can appoint an eligibility contract that decides who may mint and redeem;
+/// without one, anyone may. GRET supports EIP-2612 `permit`.
 /// @dev Not independently audited. The specification, including the known limitations, is in
 /// docs/SPECIFICATION.md.
 contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
@@ -47,9 +49,9 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     uint256 public constant MAX_RECEIPT_SHORTFALL = 10;
     /// @notice Minimum wait, enforced by the vault, before a proposed governance may accept.
     uint256 public constant GOVERNANCE_TRANSFER_DELAY = 7 days;
-    /// @notice Minimum wait, enforced by the vault, before a new rebalancer, price guard or
-    /// component takes effect, so holders see every change to who may exchange the reserves, at
-    /// what price and for what.
+    /// @notice Minimum wait, enforced by the vault, before a new rebalancer, price guard,
+    /// eligibility contract or component takes effect, so holders see every change to who may
+    /// exchange the reserves, at what price and for what, and to who may mint and redeem.
     uint256 public constant BASKET_CHANGE_DELAY = 7 days;
     /// @notice Time after its wait ends during which a proposal can still be executed or accepted;
     /// after it, the proposal expires and must be made again, so an old notice cannot be used at
@@ -86,6 +88,10 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     address public previousPriceGuard;
     /// @notice Proposed price guard, which anyone may apply from `readyAt`; zero if none.
     Proposal public priceGuardProposal;
+    /// @notice Decides who may mint and redeem. None at deployment, and without one anyone may.
+    IEligibility public eligibility;
+    /// @notice Proposed eligibility contract, which anyone may apply from `readyAt`; zero if none.
+    Proposal public eligibilityProposal;
     /// @notice Earliest timestamp at which an announced token may join the basket; zero if none.
     mapping(address token => uint256) public componentReadyAt;
     /// @notice Earliest timestamp at which a proposed write-off may take effect; zero if none.
@@ -127,9 +133,6 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
 
     mapping(uint256 index => LiquidationTotals) private _liquidationTotals;
 
-    /// @notice Wallets that completed a mint and may use normal redemption. Not transferable.
-    mapping(address account => bool) public hasMinted;
-
     /// @notice While true, `mint` reverts. Executing a write-off, or a skipping redemption that
     /// leaves zero supply, sets it. Redemption is never paused.
     bool public mintPaused;
@@ -167,6 +170,9 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     event PriceGuardProposed(address indexed pending, uint256 readyAt);
     event PriceGuardProposalCancelled(address indexed pending);
     event PriceGuardChanged(address indexed previous, address indexed next);
+    event EligibilityProposed(address indexed pending, uint256 readyAt);
+    event EligibilityProposalCancelled(address indexed pending);
+    event EligibilityChanged(address indexed previous, address indexed next);
     event ComponentAnnounced(address indexed token, uint256 readyAt);
     event ComponentAnnouncementCancelled(address indexed token);
     event ComponentAdded(address indexed token, uint256 index);
@@ -200,7 +206,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     error SharesExceedSupply(uint256 shares, uint256 supply);
     error SupplyBelowMinimum(uint256 remaining);
     error InvalidRecipient();
-    error RedemptionNotEnabled(address account);
+    error NotEligible(address caller, address receiver);
     error NoSupply();
     error LiquidationIsActive();
     error MintIsPaused();
@@ -264,7 +270,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// fewer than `minShares`. The caller pays the components. The first mint (supply zero)
     /// contributes the initial basket for exactly 1 GRET in total. Excluded or zero-balance
     /// components are not asked for. `version` is the `basketVersion` that `maxAmountsIn` was
-    /// prepared for.
+    /// prepared for. An appointed eligibility contract must approve the caller and `to`.
     /// @dev Contributions round up. GRET is issued for what actually arrived, rounded down, so a
     /// component that delivers a few units less costs the minter, never the existing holders;
     /// `minShares` bounds that cost. Every limit is checked before any input is pulled.
@@ -279,6 +285,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         if (mintPaused) revert MintIsPaused();
         if (shares == 0) revert ZeroShares();
         _requireBasket(version, maxAmountsIn.length);
+        _requireEligible(abi.encodeCall(IEligibility.canMint, (msg.sender, to)), to);
 
         uint256 supply = totalSupply();
         (uint256[] memory amounts, uint256[] memory balancesBefore) = _mintAmounts(shares, supply);
@@ -314,7 +321,6 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
             _mint(feeRecipient, fee);
             emit FeeCharged(msg.sender, feeRecipient, fee);
         }
-        hasMinted[msg.sender] = true;
         emit Minted(msg.sender, to, minted, received);
     }
 
@@ -322,9 +328,10 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// the rest is burned for the proportional amount of every component, which goes to `to`;
     /// redeeming the whole supply pays no fee. All or nothing: if any transfer fails the whole
     /// redemption reverts. The supply left must be zero or at least `MIN_SUPPLY`. `version` is the
-    /// `basketVersion` that `minAmountsOut` was prepared for.
-    /// @dev Only for wallets that completed a mint. Amounts round down, in favor of the vault. Live
-    /// balances include all income and losses before calculating proportional outputs.
+    /// `basketVersion` that `minAmountsOut` was prepared for. An appointed eligibility contract
+    /// must approve the caller and `to`.
+    /// @dev Amounts round down, in favor of the vault. Live balances include all income and losses
+    /// before calculating proportional outputs.
     function redeem(uint256 shares, address to, uint256[] calldata minAmountsOut, uint256 version)
         external
         nonReentrant
@@ -340,7 +347,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// If nobody remains, minting pauses so that governance can review what was left before a
     /// bootstrap takes it.
     /// @dev Skipped components are not called at all, so no token can block this exit. It keeps the
-    /// 7-day notice of a new rebalancer meaningful: whoever minted can always leave with every
+    /// 7-day notice of a new rebalancer meaningful: whoever may redeem can always leave with every
     /// component that still works.
     function redeemSkipping(
         uint256 shares,
@@ -793,13 +800,44 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     // Governance
     // ---------------------------------------------------------------------------------------------
 
-    /// @notice Pauses or resumes minting, at once. Wallets that minted can still redeem; a holder
-    /// that never minted cannot qualify until minting resumes (a known limitation). Useful during
-    /// an incident; a write-off and a last skipping exit pause minting by themselves. Resuming
-    /// before a written-off component is reactivated lets new entrants share its recovery. Asking
-    /// for the current state does nothing.
+    /// @notice Pauses or resumes minting, at once; redemption continues. Useful during an incident;
+    /// a write-off and a last skipping exit pause minting by themselves. Resuming before a
+    /// written-off component is reactivated lets new entrants share its recovery. Asking for the
+    /// current state does nothing.
     function setMintPaused(bool paused) external onlyGovernance {
         _setMintPaused(paused);
+    }
+
+    /// @notice Proposes the contract that decides who may mint and redeem. It takes effect only
+    /// after `BASKET_CHANGE_DELAY`, so holders it would refuse can redeem first. Replaces any
+    /// pending proposal and restarts the wait. The vault itself and EIP-7702 accounts are refused;
+    /// the notice binds an address, not the rules it keeps.
+    function proposeEligibility(address next) external onlyGovernance {
+        _requireContract(next);
+        emit EligibilityProposed(next, _propose(eligibilityProposal, next, BASKET_CHANGE_DELAY));
+    }
+
+    /// @notice Discards the pending eligibility contract.
+    function cancelEligibilityProposal() external onlyGovernance {
+        emit EligibilityProposalCancelled(_cancel(eligibilityProposal));
+    }
+
+    /// @notice Governance decided when it proposed the contract: once the wait is over, anyone can
+    /// apply it.
+    function applyEligibility() external {
+        address next = _take(eligibilityProposal);
+        address previous = address(eligibility);
+        eligibility = IEligibility(next);
+        emit EligibilityChanged(previous, next);
+    }
+
+    /// @notice Lets anyone mint and redeem again, at once: removing restrictions needs no wait. A
+    /// pending proposal stays.
+    function removeEligibility() external onlyGovernance {
+        address previous = address(eligibility);
+        if (previous == address(0)) return;
+        delete eligibility;
+        emit EligibilityChanged(previous, address(0));
     }
 
     /// @notice Rescues foreign tokens, or ordinary components only while normal supply is zero.
@@ -941,10 +979,10 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         bool[] memory skip
     ) private returns (uint256[] memory amounts) {
         _requireNotLiquidating();
-        if (!hasMinted[msg.sender]) revert RedemptionNotEnabled(msg.sender);
         if (shares == 0) revert ZeroShares();
         if (to == address(0)) revert ZeroAddress();
         if (to == address(this)) revert InvalidRecipient();
+        _requireEligible(abi.encodeCall(IEligibility.canRedeem, (msg.sender, to)), to);
 
         uint256 fee;
         (amounts, fee) = _redemptionAmounts(shares, skip);
@@ -1123,6 +1161,18 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     function _accept(Proposal storage proposal) private {
         if (msg.sender != proposal.next) revert NotProposed(msg.sender);
         _take(proposal);
+    }
+
+    /// @dev Without an eligibility contract anyone may. With one, only an explicit `true` passes: a
+    /// revert, a malformed answer or one that runs out of gas refuses, whatever gas the caller
+    /// sends.
+    function _requireEligible(bytes memory query, address receiver) private view {
+        address policy = address(eligibility);
+        if (policy == address(0)) return;
+        (bool ok, bytes memory answer) = policy.staticcall(query);
+        if (!ok || answer.length != 32 || abi.decode(answer, (uint256)) != 1) {
+            revert NotEligible(msg.sender, receiver);
+        }
     }
 
     /// @dev A proposal can be executed from `readyAt` until `EXECUTION_WINDOW` later.

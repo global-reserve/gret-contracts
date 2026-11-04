@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { type Address, erc20Abi, parseEther } from "viem";
+import { type Address, erc20Abi, parseEther, zeroAddress } from "viem";
 
 import { PILOT } from "../scripts/pilot/config.js";
 import {
@@ -69,7 +69,7 @@ describe("GRET pilot rehearsal on a mainnet fork", { skip: RPC_URL === undefined
     const minted = await walletStatus(client, wallet, vault);
     assert.equal(minted.vault?.gret, INITIAL_SHARES);
     assert.equal(minted.vault?.supply, INITIAL_SHARES);
-    assert.equal(minted.vault?.hasMinted, true);
+    assert.equal(minted.vault?.eligibility, zeroAddress);
     for (const [i, c] of components.entries()) {
       // Share-based tokens can also debit a few units less than requested, depending on
       // the sender's existing fractional balance. Other components must remain exact.

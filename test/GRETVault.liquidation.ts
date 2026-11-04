@@ -82,10 +82,12 @@ describe("GRETVault: emergency liquidation", async () => {
         "activateLiquidation",
         "addComponent",
         "announceComponent",
+        "applyEligibility",
         "applyFees",
         "applyPriceGuard",
         "approve",
         "cancelComponentAnnouncement",
+        "cancelEligibilityProposal",
         "cancelFeesProposal",
         "cancelGovernanceProposal",
         "cancelPriceGuardProposal",
@@ -96,6 +98,7 @@ describe("GRETVault: emergency liquidation", async () => {
         "deactivateEmptyComponent",
         "mint",
         "permit",
+        "proposeEligibility",
         "proposeFees",
         "proposeGovernance",
         "proposePriceGuard",
@@ -104,6 +107,7 @@ describe("GRETVault: emergency liquidation", async () => {
         "redeem",
         "redeemSkipping",
         "removeComponent",
+        "removeEligibility",
         "rescue",
         "revokeRebalancer",
         "setFeeRecipient",
@@ -162,7 +166,6 @@ describe("GRETVault: emergency liquidation", async () => {
       const shares = INITIAL_SHARES / 4n;
       const expected = await entitlement(basket, shares);
       const before = await balancesOf(basket, dave.account.address);
-      assert.equal(await vault.read.hasMinted([dave.account.address]), false);
 
       await viem.assertions.emitWithArgs(
         vault.write.convertToClaims([shares], { account: dave.account }),

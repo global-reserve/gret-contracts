@@ -145,13 +145,13 @@ export async function walletStatus(client: Reader, account: Address, vault?: Add
   );
   const eth = await client.getBalance({ address: account });
   if (vault === undefined) return { eth, balances };
-  const [gret, supply, hasMinted, reserves] = await Promise.all([
+  const [gret, supply, eligibility, reserves] = await Promise.all([
     readVault<bigint>(client, vault, "balanceOf", [account]),
     readVault<bigint>(client, vault, "totalSupply"),
-    readVault<boolean>(client, vault, "hasMinted", [account]),
+    readVault<Address>(client, vault, "eligibility"),
     readBacking(readVault<bigint[]>(client, vault, "reserves")),
   ]);
-  return { eth, balances, vault: { gret, supply, hasMinted, reserves } };
+  return { eth, balances, vault: { gret, supply, eligibility, reserves } };
 }
 
 /**
