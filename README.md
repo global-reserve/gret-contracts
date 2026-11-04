@@ -156,7 +156,7 @@ Functions of `GRETVault`, besides the standard ERC-20 ones:
 | --- | --- | --- |
 | `mint(shares, maxAmountsIn, minShares, version)` | Anyone | Contributes every component with a reserve in proportion and receives GRET, minus the mint fee; the first mint issues exactly 1 GRET |
 | `redeem(shares, minAmountsOut, version)` | Wallets that minted | Pays the redemption fee in GRET, burns the rest and receives every component; all or nothing; leaves the supply at 0 or at least 1 GRET |
-| `redeemSkipping(shares, minAmountsOut, skipped, version)` | Wallets that minted | Same redemption without the listed components, which are not called; the caller gives up its share of them |
+| `redeemSkipping(shares, minAmountsOut, skipped, version)` | Wallets that minted | Same redemption without the listed components, which are not called; the caller gives up its share of them; leaving zero supply pauses minting |
 | `convertToClaims(shares)` | Any holder | During liquidation, burns GRET in exchange for per-component rights |
 | `claim(i, to, minAmount)` | Whoever converted | Withdraws the pending right over component `i` |
 | `activateLiquidation()` | Governance | With positive supply, freezes the share denominator and closes mint/normal redemption without token calls |
@@ -173,7 +173,7 @@ Functions of `GRETVault`, besides the standard ERC-20 ones:
 | `announceComponent(token)` / `cancelComponentAnnouncement(token)` | Governance | Announces or discards a new component |
 | `addComponent(token)` | Anyone | Adds an announced component, 7 to 14 days later, initially excluded |
 | `removeComponent(token)` | Governance | Removes an empty ordinary component under the bounded dust rule, never a written-off one; later indices shift |
-| `setMintPaused(paused)` | Governance | Pauses or resumes minting at once; a write-off also pauses it; redemption is never paused |
+| `setMintPaused(paused)` | Governance | Pauses or resumes minting at once; a write-off and a skipping exit that empties the supply also pause it; redemption is never paused |
 | `setInitialAmounts(amounts, version)` | Governance | Sets the basket of the first mint, used only while the supply is zero |
 | `proposeWriteOff(token)` / `cancelWriteOff(token)` | Governance | Proposes or discards writing off a component that stopped working; governance judges it |
 | `writeOffComponent(token)` | Anyone | 7 to 14 days later, excludes the component without reading it and pauses minting; the token stays registered and permanently non-rescuable |

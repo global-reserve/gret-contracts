@@ -31,9 +31,11 @@ compatibility; fork results are specific to their block and code versions.
   and contributes the configured initial basket, skipping excluded components and zero
   amounts. At least one positive contribution is required. Preexisting balances of active
   components then belong to that first GRET. This includes residues abandoned by a previous
-  last skipping redeemer. Ordinary components may be rescued while normal supply is zero;
-  written-off tokens may not. Blocking bootstrap on unsolicited balances was rejected because
-  anyone could grief it.
+  last skipping redeemer, so a skipping redemption that leaves zero supply pauses minting:
+  governance reviews what was left before a restart and resumes minting when it decides. A
+  normal redemption of the whole supply pays out every active balance and does not pause.
+  Ordinary components may be rescued while normal supply is zero; written-off tokens may not.
+  Blocking bootstrap on unsolicited balances was rejected because anyone could grief it.
 - **Later mints:** snapshot all active balances before any input transfer. For requested shares
   `s`, supply `S` and each pre-input balance `B[i]`, ask for `ceil(s * B[i] / S)`. A zero balance
   asks for nothing; an excluded component is not called. Measure receipts and issue at most
@@ -53,14 +55,15 @@ compatibility; fork results are specific to their block and code versions.
   Minimum outputs bound requested transfers, not the recipient's actual balance increase.
 - **Skipping:** `redeemSkipping` never calls listed tokens or excluded components, even for
   `balanceOf`. Their outputs and minima must be zero. Skipped assets remain for other holders,
-  or a later bootstrap if supply empties; the exiting holder retains no separate right.
+  or, if supply empties, for a later bootstrap once governance resumes minting; the exiting
+  holder retains no separate right.
   `previewRedeemSkipping` quotes this exit without calling skipped tokens.
 - **Supply floor:** normal redemption leaves either zero or at least `MIN_SUPPLY = 1e18`.
   Fee shares remain outstanding, so a positive redemption fee prevents a full normal exit.
   Liquidation permits conversion below that floor and eventually zero unconverted supply.
-- **Mint pause only:** governance can pause/resume minting immediately, and executing a
-  write-off also pauses it. Normal redemption is never paused. A secondary-market holder who
-  never minted cannot qualify while paused.
+- **Mint pause only:** governance can pause/resume minting immediately; executing a write-off
+  and a skipping redemption that leaves zero supply also pause it. Normal redemption is never
+  paused. A secondary-market holder who never minted cannot qualify while paused.
 - GRET transfers to the vault itself revert; otherwise shares are ordinary transferable ERC-20
   tokens, including unconverted GRET during liquidation.
 
@@ -366,15 +369,16 @@ design decision and must be made here first.
   for a fixed version revert with `BasketChanged`. If the governance key is lost, nobody can
   activate liquidation, reactivate components, change the basket or replace governance;
   redemption keeps working, and so does minting until a write-off proposed earlier is
-  executed, which pauses it for good.
+  executed or the last holder leaves by skipping, which pauses it for good.
 - **The rebalancer chooses the price within the guard's view.** The guard bounds only the
   losses its feeds can see. Feeds may lag within their deviation thresholds, price an
   underlying while the token trades below it, or go stale. Weeks are fixed epochs, so losses
   on both sides of a boundary can reach about 4% within seven days.
 - **Allocation follows timing.** Whoever holds GRET when value arrives shares it: future
   income, a favorable swap, a reactivated component or an asset another holder skipped. A
-  holder can redeem before a losing swap and return afterwards. After the last normal exit,
-  the next bootstrap owns all remaining active balances. A write-off pauses minting, but if
+  holder can redeem before a losing swap and return afterwards. A last skipping exit pauses
+  minting; once governance resumes it, the next bootstrap owns all remaining active balances,
+  including later donations. A write-off pauses minting, but if
   governance resumes it before reactivating the component, the entrants in between share its
   recovery.
 - **Qualifying for normal redemption requires a mint.** A holder who never minted cannot

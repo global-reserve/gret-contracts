@@ -116,7 +116,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// @notice Wallets that completed a mint and may use normal redemption. Not transferable.
     mapping(address account => bool) public hasMinted;
 
-    /// @notice While true, `mint` reverts. Executing a write-off sets it. Redemption is never paused.
+    /// @notice While true, `mint` reverts. Executing a write-off, or a skipping redemption that
+    /// leaves zero supply, sets it. Redemption is never paused.
     bool public mintPaused;
     /// @notice Grows by one whenever a component is added or removed. Calls that pass amounts by
     /// position (`mint`, both redemptions, `setInitialAmounts`) state the version they were prepared
@@ -316,8 +317,9 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
     /// @notice Like `redeem`, but leaves out the `skipped` components, for when one of them cannot be
     /// sent: an issuer froze the vault, or a token was made to fail. The caller gives up its share
-    /// of them, which stays with the other holders, or with a future bootstrap if nobody remains. Their
-    /// `minAmountsOut` must be zero.
+    /// of them, which stays with the other holders. If nobody remains, minting pauses so that
+    /// governance can review what was left before a bootstrap takes it. Their `minAmountsOut` must
+    /// be zero.
     /// @dev Skipped components are not called at all, so no token can block this exit. It keeps the
     /// 7-day notice of a new rebalancer meaningful: whoever minted can always leave with every
     /// component that still works.
@@ -332,7 +334,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         for (uint256 i; i < skipped.length; ++i) {
             skip[_indexOf(skipped[i])] = true;
         }
-        return _redeem(shares, minAmountsOut, skip);
+        amounts = _redeem(shares, minAmountsOut, skip);
+        if (skipped.length != 0 && totalSupply() == 0) _pauseMint();
     }
 
     /// @notice Activates a newly added or previously excluded component. Its whole balance then
@@ -779,8 +782,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
     /// @notice Pauses or resumes minting, at once. Wallets that minted can still redeem; a holder
     /// that never minted cannot qualify until minting resumes (a known limitation). Useful during an
-    /// incident; a write-off pauses minting by itself, and resuming before the component is
-    /// reactivated lets new entrants share its recovery.
+    /// incident; a write-off and a last skipping exit pause minting by themselves. Resuming before
+    /// a written-off component is reactivated lets new entrants share its recovery.
     function setMintPaused(bool paused) external onlyGovernance {
         mintPaused = paused;
         emit MintPauseChanged(paused);

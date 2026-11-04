@@ -170,6 +170,57 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(vault.totalSupply(), 0);
     }
 
+    /// A skipping exit that empties the supply pauses minting, so nobody bootstraps onto the
+    /// skipped residue before governance has dealt with it.
+    function test_lastNormalExitPausesMintUntilGovernanceReviewsResidue() public {
+        address[] memory skipped = new address[](1);
+        skipped[0] = address(faulty);
+        vm.expectEmit(address(vault));
+        emit GRETVault.MintPauseChanged(true);
+        vm.prank(ALICE);
+        vault.redeemSkipping(SHARE, _pair(0, 0), skipped, 0);
+        assertEq(vault.totalSupply(), 0);
+        assertTrue(vault.mintPaused());
+        assertEq(faulty.balanceOf(address(vault)), 5e18);
+
+        vm.expectRevert(GRETVault.MintIsPaused.selector);
+        vm.prank(BOB);
+        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
+
+        vm.startPrank(GOVERNANCE);
+        vault.rescue(address(faulty), ALICE, 5e18); // back to the holder who skipped it
+        vault.setMintPaused(false);
+        vm.stopPrank();
+        vm.startPrank(BOB);
+        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
+        uint256[] memory paid = vault.redeem(SHARE, _pair(0, 0), 0);
+        vm.stopPrank();
+        assertEq(paid[0], 2e18);
+        assertEq(paid[1], 5e18);
+    }
+
+    /// A normal exit of the whole supply pays out every active balance, so it does not pause.
+    function test_normalLastExitLeavesNothingAndDoesNotPause() public {
+        vm.prank(ALICE);
+        vault.redeem(SHARE, _pair(0, 0), 0);
+        assertEq(vault.totalSupply(), 0);
+        assertEq(healthy.balanceOf(address(vault)), 0);
+        assertEq(faulty.balanceOf(address(vault)), 0);
+        assertFalse(vault.mintPaused());
+    }
+
+    /// A skipping exit that leaves holders behind does not pause either.
+    function test_skippingExitThatLeavesHoldersDoesNotPause() public {
+        vm.prank(BOB);
+        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
+        address[] memory skipped = new address[](1);
+        skipped[0] = address(faulty);
+        vm.prank(ALICE);
+        vault.redeemSkipping(SHARE, _pair(0, 0), skipped, 0);
+        assertEq(vault.totalSupply(), SHARE);
+        assertFalse(vault.mintPaused());
+    }
+
     /// A rescue that would leave less than what is owed reverts.
     function test_rescueCannotReduceBackingThroughSenderFee() public {
         SenderSurchargeToken token = new SenderSurchargeToken();
