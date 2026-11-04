@@ -11,7 +11,7 @@ interface IReserves {
 }
 
 /// @notice Test-only price guard that accepts every swap unless told to refuse, and records the
-/// last one with the reserves the vault reported during the call.
+/// last one with the vault's active balances before the purchase, as read during the call.
 contract MockPriceGuard is IPriceGuard {
     bool public refuse;
     uint256 public calls;

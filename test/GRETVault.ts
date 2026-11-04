@@ -571,7 +571,7 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
       assert.deepEqual(await vault.read.previewMint([INITIAL_SHARES]), expected);
     });
 
-    it("mint and redemption recognize losses by themselves before computing amounts", async () => {
+    it("mint and redemption compute amounts from the balance left after a loss", async () => {
       const basket = await networkHelpers.loadFixture(bootstrappedFixture);
       const { vault, faulty, alice, bob } = basket;
       await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: bob.account });

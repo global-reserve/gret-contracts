@@ -437,7 +437,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
         m.slash(address(v), 5e18); // loss: the current balance is only 5e18
         m.setBurn(12_000_000);
         uint256 stale;
-        uint256 recognized;
+        uint256 afterLoss;
         uint256 lowestStale;
         for (uint256 g = 1_000_000; g <= 16_700_000; g += 250_000) {
             uint256 snap = vm.snapshotState();
@@ -451,11 +451,11 @@ contract GRETVaultExitsTest is GRETVaultCase {
                 if (lowestStale == 0) lowestStale = g;
             } else {
                 assertEq(got, 2.5e18);
-                ++recognized;
+                ++afterLoss;
             }
         }
         assertEq(stale, 0);
-        assertGt(recognized, 0);
+        assertGt(afterLoss, 0);
     }
 
     function _redeemCallGas(GRETVault v, uint256 g) internal returns (bool ok, bytes memory ret) {

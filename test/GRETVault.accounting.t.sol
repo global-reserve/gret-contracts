@@ -42,8 +42,8 @@ contract ShortfallToken is ERC20 {
 }
 
 /// @notice Economic properties across receipt rounding, live losses, donations and fees.
-/// @dev Complements the invariant handler, whose transfer models deliver exact amounts
-/// and whose losses are recognized immediately. These tokens are hypothetical, not issuer models.
+/// @dev Complements the invariant handler, whose transfer models deliver exact amounts.
+/// These tokens are hypothetical, not issuer models.
 contract GRETVaultAccountingTest is Test {
     address private constant GOVERNANCE = address(0x60F);
     address private constant ALICE = address(0xA11CE);

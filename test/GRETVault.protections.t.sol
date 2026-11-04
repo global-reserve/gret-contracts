@@ -294,7 +294,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(stray.balanceOf(CAROL), 1e18);
     }
 
-    /// Syncing a component the vault cannot send blocks `redeem`, but `redeemSkipping` lets holders
+    /// Reactivating a component the vault cannot send blocks `redeem`, but `redeemSkipping` lets holders
     /// leave with the other components during the seven-day notice of a new rebalancer.
     function test_holdersExitDuringRebalancerNoticeBySkipping() public {
         vm.prank(BOB);
@@ -371,7 +371,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vault.convertToClaims(SHARE);
         assertEq(vault.pendingRights(ALICE, 1), 5e18);
 
-        // The issuer lifts the freeze: every holder can claim without synchronization.
+        // The issuer lifts the freeze: the right can be claimed with no further step.
         faulty.setBlocked(address(vault), false);
         assertEq(vault.pendingRights(ALICE, 1), 5e18);
         vm.prank(ALICE);
@@ -462,9 +462,8 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertGe(_aliceValue(guard), before * 98 / 100);
     }
 
-    /// A balance the vault no longer holds does not stretch the limit, even if nobody has
-    /// recognized its loss yet. Healthy H and O are worth $100 each and F $19,800, all at $1;
-    /// F's issuer then takes the whole F balance.
+    /// A balance the vault no longer holds does not stretch the limit. Healthy H and O are worth
+    /// $100 each and F $19,800, all at $1; F's issuer then takes the whole F balance.
     function test_priceGuardIgnoresBalanceTheVaultNoLongerHolds() public {
         MockERC20 other = new MockERC20("Other", "O", 18);
         IERC20[] memory basket = new IERC20[](3);
