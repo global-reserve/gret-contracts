@@ -32,7 +32,8 @@ time as the deep, fork or rehearsal tests.
 - Everything is written in English: code, comments, user-facing strings, documentation and
   commit messages.
 - Solidity 0.8.38 with exact pragmas; document external functions with NatSpec and use custom
-  errors.
+  errors. Contracts are formatted with `forge fmt contracts` (`foundry.toml` sets 100 columns),
+  and NatSpec is wrapped by hand to the same width, since the formatter leaves comments alone.
 - Tests use Hardhat 3, viem and `node:test` in TypeScript, and forge-std for Solidity fuzz,
   invariant and case tests.
 - Mocks do not prove compatibility with the real issuers; the mainnet fork tests do.

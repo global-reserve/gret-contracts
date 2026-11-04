@@ -1,0 +1,3 @@
+# Hardhat builds and tests this project; this file only configures `forge fmt contracts`.
+[fmt]
+line_length = 100

@@ -14,7 +14,13 @@ interface IChainlinkFeed {
     function latestRoundData()
         external
         view
-        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
+        returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        );
 }
 
 /// @dev The vault views the guard reads to value the vault and to continue the week's count.
@@ -31,18 +37,18 @@ interface IGRETVaultView {
 /// that loses more than 2% of what the vault sells, or one that would make the week's swaps take
 /// more than 2% of the vault's value. Each loss counts as the share of the vault it takes when it
 /// happens, which is what every GRET loses, so mints and redemptions in between do not stretch the
-/// limit. A token without a feed, or whose price is stale, cannot be swapped.
-/// It has no owner: tokens, feeds and limits are fixed at deployment. Changing them means
-/// deploying another guard, which the vault applies only after its seven-day wait. A replacement
-/// continues the week's count of the guard it replaced, so it does not open a second budget.
+/// limit. A token without a feed, or whose price is stale, cannot be swapped. It has no owner:
+/// tokens, feeds and limits are fixed at deployment. Changing them means deploying another guard,
+/// which the vault applies only after its seven-day wait. A replacement continues the week's count
+/// of the guard it replaced, so it does not open a second budget.
 /// @dev Each feed must quote one whole token in US dollars, with nothing to convert. A loss the
 /// feeds do not see, such as a token that trades below the asset its feed prices, is not limited.
 /// Mint, redemption and liquidation never call the guard.
 contract ChainlinkPriceGuard is IPriceGuard {
     /// @notice Highest loss of a single swap, in basis points of the value sold: 2%.
     uint256 public constant MAX_SWAP_LOSS = 200;
-    /// @notice Highest share of the vault's value that all swaps in a week can take, in basis points:
-    /// 2%. Each loss is measured against the vault's value just before that swap.
+    /// @notice Highest share of the vault's value that all swaps in a week can take, in basis
+    /// points: 2%. Each loss is measured against the vault's value just before that swap.
     uint256 public constant MAX_WEEKLY_LOSS = 200;
     /// @notice Weeks are fixed periods of this length, counted from the Unix epoch.
     uint256 public constant WEEK = 7 days;
@@ -63,15 +69,19 @@ contract ChainlinkPriceGuard is IPriceGuard {
 
     /// @notice Week of the last recorded loss.
     uint256 public currentWeek;
-    /// @notice Share of the vault's value that swaps took in `currentWeek`, with 18 decimals
-    /// (1e18 is all of it): the sum of each loss divided by the vault's value just before it.
+    /// @notice Share of the vault's value that swaps took in `currentWeek`, with 18 decimals (1e18
+    /// is all of it): the sum of each loss divided by the vault's value just before it.
     uint256 public weeklyLoss;
 
     /// @param loss In US dollars with 18 decimals.
     /// @param vaultValue The vault's priced reserves just before the swap, in US dollars.
     /// @param weeklyLoss The week's share so far, including this loss.
     event LossRecorded(
-        address indexed sold, address indexed bought, uint256 loss, uint256 vaultValue, uint256 weeklyLoss
+        address indexed sold,
+        address indexed bought,
+        uint256 loss,
+        uint256 vaultValue,
+        uint256 weeklyLoss
     );
 
     error NotAContract(address account);
@@ -85,7 +95,12 @@ contract ChainlinkPriceGuard is IPriceGuard {
     error SwapLossTooHigh(uint256 soldValue, uint256 boughtValue);
     error WeeklyLossTooHigh(uint256 weeklyLoss, uint256 limit);
 
-    constructor(address vault_, address[] memory tokens, IChainlinkFeed[] memory feeds, uint256[] memory maxAges) {
+    constructor(
+        address vault_,
+        address[] memory tokens,
+        IChainlinkFeed[] memory feeds,
+        uint256[] memory maxAges
+    ) {
         if (vault_.code.length == 0) revert NotAContract(vault_);
         uint256 count = tokens.length;
         if (feeds.length != count || maxAges.length != count) revert LengthMismatch();
@@ -135,22 +150,29 @@ contract ChainlinkPriceGuard is IPriceGuard {
         return (address(config.feed), config.maxAge);
     }
 
-    function _value(address token, uint256 amount, Math.Rounding rounding) private view returns (uint256) {
+    function _value(address token, uint256 amount, Math.Rounding rounding)
+        private
+        view
+        returns (uint256)
+    {
         PriceFeed storage config = _feeds[token];
         IChainlinkFeed feed = config.feed;
         if (address(feed) == address(0)) revert NoFeed(token);
         (, int256 answer,, uint256 updatedAt,) = feed.latestRoundData();
         if (answer <= 0) revert InvalidPrice(token, answer);
-        if (updatedAt == 0 || updatedAt > block.timestamp || block.timestamp - updatedAt > config.maxAge) {
+        if (
+            updatedAt == 0 || updatedAt > block.timestamp
+                || block.timestamp - updatedAt > config.maxAge
+        ) {
             revert StalePrice(token, updatedAt);
         }
         uint256 scale = 10 ** (uint256(config.tokenDecimals) + feed.decimals());
         return Math.mulDiv(amount, uint256(answer) * 1e18, scale, rounding);
     }
 
-    /// @dev The loss the guard this one replaced recorded in `week`. The vault's seven-day wait lets
-    /// at most one replacement take effect per week, so one predecessor is enough. A predecessor
-    /// that does not report a matching week, or answers with malformed data, counts as zero.
+    /// @dev The loss the guard this one replaced recorded in `week`. The vault's seven-day wait
+    /// lets at most one replacement take effect per week, so one predecessor is enough. A
+    /// predecessor that reports another week, or answers with malformed data, counts as zero.
     function _inheritedLoss(uint256 week) private view returns (uint256) {
         address previous = IGRETVaultView(vault).previousPriceGuard();
         if (previous == address(0)) return 0;
@@ -161,15 +183,17 @@ contract ChainlinkPriceGuard is IPriceGuard {
         return abi.decode(data, (uint256));
     }
 
-    /// @dev Live active backing immediately before the swap: the incoming buy amount is
-    /// removed in token units before valuation. Each unreadable or unpriced component counts as
-    /// zero, whether its balance read reverts or answers with less than one word.
+    /// @dev Live active backing immediately before the swap: the incoming buy amount is removed in
+    /// token units before valuation. Each unreadable or unpriced component counts as zero, whether
+    /// its balance read reverts or answers with less than one word.
     function _vaultValue(address buy, uint256 received) private view returns (uint256 total) {
         address[] memory tokens = IGRETVaultView(vault).components();
         for (uint256 i; i < tokens.length; ++i) {
             address token = tokens[i];
-            if (address(_feeds[token].feed) == address(0) || IGRETVaultView(vault).excluded(token)) continue;
-            (bool ok, bytes memory data) = token.staticcall(abi.encodeCall(IERC20.balanceOf, (vault)));
+            if (address(_feeds[token].feed) == address(0)) continue;
+            if (IGRETVaultView(vault).excluded(token)) continue;
+            (bool ok, bytes memory data) =
+                token.staticcall(abi.encodeCall(IERC20.balanceOf, (vault)));
             if (!ok || data.length < 32) continue;
             uint256 balance = abi.decode(data, (uint256));
             if (token == buy) balance = Math.saturatingSub(balance, received);
