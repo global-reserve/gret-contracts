@@ -6,11 +6,14 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {GRETVault} from "../contracts/GRETVault.sol";
+import {MockERC20} from "../contracts/mocks/MockERC20.sol";
 import {MockFaultyERC20} from "../contracts/mocks/MockFaultyERC20.sol";
 import {MockPriceGuard} from "../contracts/mocks/MockPriceGuard.sol";
 import {MockEligibility} from "../contracts/mocks/MockEligibility.sol";
 import {ChainlinkPriceGuard} from "../contracts/ChainlinkPriceGuard.sol";
-import {GRETVaultCase, SenderSurchargeToken, NoOpTransferToken} from "./helpers/GRETVaultCase.sol";
+import {
+    GRETVaultCase, SenderSurchargeToken, NoOpTransferToken, ShareRoundingToken
+} from "./helpers/GRETVaultCase.sol";
 
 /// @notice Known limitations (docs/SPECIFICATION.md): each test reproduces the accepted behavior;
 /// change it if the decision changes.
@@ -79,6 +82,82 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vault.removeEligibility();
         vm.prank(ALICE);
         vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
+    }
+
+    /// The receipt tolerance is fixed in base units: with only 11 units of F left, one unit short
+    /// issues 10/11 of a share, so the minter pays a whole share's H for less than a share.
+    function test_shortfallAfterSevereLossOverchargesMinter() public {
+        faulty.slash(address(vault), 5e18 - 11);
+        faulty.setFault(MockFaultyERC20.Fault.ShortByOneOnTransfer);
+        uint256 before = healthy.balanceOf(BOB);
+        vm.prank(BOB);
+        (uint256 minted,) = vault.mint(SHARE, BOB, _pair(2e18, 11), 0, 0);
+        assertEq(minted, 10 * SHARE / 11);
+        assertEq(before - healthy.balanceOf(BOB), 2e18);
+    }
+
+    /// While a rounding component keeps only a few units, a small mint asks it for one unit, which
+    /// moves nothing, and reverts; larger mints still work.
+    function test_smallMintRevertsOnNearlyEmptyRoundingComponent() public {
+        ShareRoundingToken rounding = new ShareRoundingToken();
+        IERC20[] memory basket = new IERC20[](2);
+        basket[0] = healthy;
+        basket[1] = rounding;
+        GRETVault target = new GRETVault(basket, _pair(2e18, 30), GOVERNANCE);
+        rounding.mint(ALICE, 1e18);
+        rounding.mint(BOB, 1e18);
+        vm.prank(ALICE);
+        rounding.approve(address(target), type(uint256).max);
+        vm.prank(ALICE);
+        healthy.approve(address(target), type(uint256).max);
+        vm.prank(ALICE);
+        target.mint(SHARE, ALICE, _pair(type(uint256).max, type(uint256).max), 0, 0);
+
+        vm.startPrank(BOB);
+        rounding.approve(address(target), type(uint256).max);
+        healthy.approve(address(target), type(uint256).max);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.UnexpectedBalance.selector, 1, 1, 0));
+        target.mint(SHARE / 30, BOB, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        target.mint(SHARE, BOB, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        vm.stopPrank();
+    }
+
+    /// Basket changes do not update the initial amounts: after a rotation into a component that
+    /// joined without one, a restart from zero supply reverts until governance sets them.
+    function test_rotationLeavesNoInitialAmountForRestart() public {
+        MockERC20 next = new MockERC20("Next", "N", 18);
+        vm.prank(GOVERNANCE);
+        vault.announceComponent(address(next));
+        _appoint(vault, address(new MockPriceGuard()));
+        vault.addComponent(address(next));
+        vm.prank(GOVERNANCE);
+        vault.activateComponent(address(next));
+        next.mint(REBALANCER, 2e18);
+        vm.startPrank(REBALANCER);
+        next.approve(address(vault), type(uint256).max);
+        vault.swap(address(healthy), 2e18, address(next), 1e18, "");
+        vault.swap(address(faulty), 5e18, address(next), 1e18, "");
+        vm.stopPrank();
+        vm.startPrank(GOVERNANCE);
+        vault.removeComponent(address(healthy));
+        vault.removeComponent(address(faulty));
+        vm.stopPrank();
+        assertEq(vault.initialAmounts()[0], 0);
+        uint256 version = vault.basketVersion();
+        vm.prank(ALICE);
+        vault.redeem(SHARE, ALICE, _one(0), version);
+
+        next.mint(BOB, 1e18);
+        vm.startPrank(BOB);
+        next.approve(address(vault), type(uint256).max);
+        vm.expectRevert(GRETVault.EmptyBasket.selector);
+        vault.mint(SHARE, BOB, _one(type(uint256).max), 0, version);
+        vm.stopPrank();
+        vm.prank(GOVERNANCE);
+        vault.setInitialAmounts(_one(1e18), version);
+        vm.prank(BOB);
+        vault.mint(SHARE, BOB, _one(type(uint256).max), 0, version);
+        assertEq(vault.balanceOf(BOB), SHARE);
     }
 
     /// An entry before a future donation still shares that donation.

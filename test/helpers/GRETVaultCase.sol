@@ -134,6 +134,17 @@ abstract contract CaseToken is ERC20 {
     }
 }
 
+/// @dev Keeps balances in shares of three base units, like a token that converts amounts to
+/// shares: a transfer moves the amount rounded down to a multiple of three, so one unit moves none.
+contract ShareRoundingToken is CaseToken {
+    constructor() CaseToken("Share rounding") {}
+
+    function _update(address from, address to, uint256 amount) internal override {
+        if (from != address(0) && to != address(0)) amount -= amount % 3;
+        super._update(from, to, amount);
+    }
+}
+
 /// @dev Once enabled, every transfer also burns 1% of the amount from the sender.
 contract SenderSurchargeToken is CaseToken {
     constructor() CaseToken("Sender surcharge") {}

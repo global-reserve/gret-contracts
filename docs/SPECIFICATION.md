@@ -401,6 +401,40 @@ boolean alone is not a recovery guarantee.
   An independent audit is pending before third-party funds. Mocks and fork observations
   cannot promise compatibility with future issuer upgrades.
 
+## Operating assumptions
+
+The code does not enforce these. The design assumes that governance and the rebalancer follow
+them, and an assessment of the vault should take them as part of its trust model.
+
+- **Admit components with care.** No transfer fees, callbacks or second addresses over the same
+  balances; at least 8 decimals, since the dust and receipt allowances are fixed in base units;
+  and a usable Chainlink feed if the component will be rebalanced. Mocks do not prove an
+  issuer's compatibility; the mainnet fork tests do.
+- **Monitor issuers, balances and prices.** Watch issuer notices and corporate actions,
+  component balances against mint, redemption, swap and claim flows, `LossRecorded`, and each
+  priced token's market price against its feed. Revoke the rebalancer after an unexpected loss
+  or a depeg. Income paid in another token or requiring an issuer claim is not counted
+  automatically.
+- **Time distributions.** Before a known distribution or multiplier change, consider pausing
+  minting so that entrants right before it do not share it; earlier entrants still do.
+- **Send swaps privately.** The rebalancer sends every `swap` through a private RPC, so nobody
+  can redeem or mint around it in the same block.
+- **Write off only what stopped working.** Cancel a pending write-off if the component
+  recovers; after one executes, reactivate the recovered balance before resuming minting.
+- **Keep the basket tidy.** Sell material remainders and retire sold-out components promptly,
+  atomically when the caller allows it. Update the initial amounts after basket changes, and
+  before resuming minting from zero supply decide who owns the balances left in the vault.
+- **Re-add recovered components.** A removed component that recovers before liquidation must be
+  announced, added and activated again. During liquidation it cannot rejoin: rescue it and
+  distribute it outside the vault, recording each payment.
+- **Reconcile liquidation.** Reconstruct conversions and payouts from `ConvertedToClaims` and
+  `Claimed`. Recoveries are shared pro rata, so any targeted compensation for a cut is settled
+  outside the vault.
+- **Govern with a recoverable key.** Before third-party funds, a Safe multisig with a tested
+  recovery procedure governs.
+- **Configure feeds to their heartbeat.** Each guard feed's `maxAge` follows that feed's update
+  interval, so a stale price refuses swaps without blocking them in normal operation.
+
 ## Known limitations
 
 These are accepted consequences of the design, not defects. A change to any of them is a
@@ -441,6 +475,14 @@ design decision and must be made here first.
 - **Minimums bound what the vault sends, not what arrives.** A token that charges the
   recipient delivers less than `minAmountsOut` or `minAmount`, and a token that reports a
   transfer without moving anything still consumes the claimed right.
+- **The receipt tolerance is fixed in base units.** A component may arrive up to ten base units
+  short in a mint or a swap. After a severe loss leaves only a few units of a rounding
+  component, those units bound the issuance and the minter overpays the other components;
+  `minShares` lets the minter refuse.
+- **A small mint can revert on a nearly empty rounding component.** While such a component keeps
+  only a few units, a small mint asks it for one or two, which a token that converts amounts to
+  shares can deliver as nothing; the mint reverts until the remainder is sold or the component
+  excluded.
 - **A token that debits the vault more than it sends** takes the difference from the
   remaining holders' backing, and the last exit of that component can fail even in
   liquidation. Checking the vault's balance after every outgoing transfer was rejected: it
@@ -456,6 +498,10 @@ design decision and must be made here first.
   every rotation through it would then need governance to reactivate it, while
   `deactivateEmptyComponent` already excludes it at once. In liquidation, a balance where every
   pending payout rounds to zero stays until more arrives.
+- **Initial amounts are upkeep.** Adding, removing or writing off components does not update
+  them, and they matter only when the supply returns to zero: a restart then contributes the
+  old weights, and if no active component has a positive initial amount the first mint reverts
+  with `EmptyBasket` until governance sets them.
 - **Some liquidation rights may never be paid.** Rights over a component that never transfers
   again stay pending, and GRET held by contracts that cannot call `convertToClaims` stays
   unconverted. Late recoveries are shared pro rata, not targeted to whoever took a cut.
