@@ -9,6 +9,7 @@ import {ChainlinkPriceGuard, IChainlinkFeed} from "../contracts/ChainlinkPriceGu
 import {IPriceGuard} from "../contracts/IPriceGuard.sol";
 import {MockAggregator} from "../contracts/mocks/MockAggregator.sol";
 import {MockERC20} from "../contracts/mocks/MockERC20.sol";
+import {MockPriceGuard} from "../contracts/mocks/MockPriceGuard.sol";
 import {GRETVaultCase} from "./helpers/GRETVaultCase.sol";
 
 /// @dev Models an in-place issuer upgrade that changes decimals and rescales balances, keeping value.
@@ -190,8 +191,16 @@ contract GRETVaultGuardTest is GRETVaultCase {
     }
 
     // ------------------------------------------------------------------------------------------
-    // A replacement guard starts a fresh weekly budget
+    // A replacement guard continues the replaced guard's weekly count
     // ------------------------------------------------------------------------------------------
+
+    /// @dev One swap that sells 1 H and loses 1.99% of it at the feed prices.
+    function _smallLoss(ChainlinkPriceGuard guard) internal {
+        uint256 received = guard.valueOf(address(healthy), 1e18) * 9801 / 10_000 * 1e18
+            / guard.valueOf(address(faulty), 1e18);
+        vm.prank(REBALANCER);
+        vault.swap(address(healthy), 1e18, address(faulty), received);
+    }
 
     /// Control: one guard, one fixed week.
     function test_singleGuardOneWeek() public {
@@ -223,9 +232,32 @@ contract GRETVaultGuardTest is GRETVaultCase {
         assertLe(_bps(v0, v1), 396);
     }
 
-    /// The rebalancer drains guard A, applies the ready replacement B itself, and drains B, in the
-    /// same block and fixed week.
-    function test_replacementSecondBudgetSameFixedWeek() public {
+    /// B's first loss in the week starts from what A recorded in that week.
+    function test_replacementContinuesWeeklyCount() public {
+        _feeds();
+        vm.warp((block.timestamp / W + 1) * W + 1 hours);
+        ChainlinkPriceGuard a = _guard();
+        _appoint(vault, address(a));
+        ChainlinkPriceGuard b = _guard();
+        vm.prank(GOVERNANCE);
+        vault.proposePriceGuard(address(b));
+        vm.warp(vault.pendingPriceGuardReadyAt());
+        _refresh();
+        _smallLoss(a);
+        uint256 fromA = a.weeklyLoss();
+        assertGt(fromA, 0);
+        vault.applyPriceGuard();
+        assertEq(vault.previousPriceGuard(), address(a));
+        _smallLoss(b);
+        // Two similar losses: B's count holds both, not only its own.
+        assertGt(b.weeklyLoss(), fromA * 19 / 10);
+        assertLe(b.weeklyLoss(), fromA * 21 / 10);
+        assertEq(b.currentWeek(), a.currentWeek());
+    }
+
+    /// The rebalancer drains guard A, applies the ready replacement B itself and drains B, in the
+    /// same block and fixed week: together they stay within one weekly budget.
+    function test_replacementInSameWeekSharesOneBudget() public {
         _feeds();
         vm.warp((block.timestamp / W + 1) * W + 1 hours);
         ChainlinkPriceGuard a = _guard();
@@ -239,22 +271,13 @@ contract GRETVaultGuardTest is GRETVaultCase {
 
         uint256 v0 = _usd(a);
         _drain(a);
-        uint256 v1 = _usd(a);
-        assertLe(_bps(v0, v1), 199);
         vm.prank(REBALANCER); // anyone may apply
         vault.applyPriceGuard();
         assertEq(address(vault.priceGuard()), address(b));
         _drain(b);
-        uint256 v2 = _usd(a);
-
+        uint256 v1 = _usd(a);
         assertEq(block.timestamp / W, week);
-        assertEq(a.currentWeek(), week);
-        assertEq(b.currentWeek(), week);
-        assertLe(a.weeklyLoss(), 2e16);
-        assertLe(b.weeklyLoss(), 2e16);
-        assertGt(_bps(v0, v2), 380);
-        // Theoretical cap with two budgets: 1 - 0.98^2 = 3.96%.
-        assertLe(v0 - v2, v0 * 396 / 10_000 + 1);
+        assertLe(_bps(v0, v1), 199);
 
         // A second replacement can never become ready in the same fixed week.
         ChainlinkPriceGuard c = _guard();
@@ -263,8 +286,9 @@ contract GRETVaultGuardTest is GRETVaultCase {
         assertGt(vault.pendingPriceGuardReadyAt() / W, week);
     }
 
-    /// A's budget and B's budget at the end of week N, then B's budget again at the start of N+1.
-    function test_replacementThreeBudgetsAcrossWeekChange() public {
+    /// A and B at the end of week N, then B at the start of N+1: two budgets, as with one guard
+    /// across the change of week.
+    function test_replacementAcrossWeekChangeKeepsTwoBudgets() public {
         _feeds();
         vm.warp((block.timestamp / W + 1) * W);
         ChainlinkPriceGuard a = _guard();
@@ -282,20 +306,19 @@ contract GRETVaultGuardTest is GRETVaultCase {
         vault.applyPriceGuard();
         _drain(b);
         uint256 v1 = _usd(a);
-        assertGt(_bps(v0, v1), 380);
+        assertLe(_bps(v0, v1), 199);
         vm.warp(block.timestamp + 180);
         _refresh();
         _drain(b);
         uint256 v2 = _usd(a);
         assertEq(block.timestamp - start, 180);
-        assertGt(_bps(v0, v2), 570);
-        // Theoretical cap with three budgets: 1 - 0.98^3 = 5.8808%.
-        assertLe(v0 - v2, v0 * 58808 / 1_000_000 + 1);
+        // Cap with two budgets: 1 - 0.98^2 = 3.96%.
+        assertLe(v0 - v2, v0 * 396 / 10_000 + 1);
     }
 
     /// Back-to-back replacements (C proposed in the block B is applied): a closed 7-day window
-    /// holds four budgets (A and B in week N, B and C in week N+1). One guard: at most two.
-    function test_chainedReplacementsFourBudgetsInSevenDays() public {
+    /// covers A and B in week N and B and C in week N+1, still two budgets.
+    function test_chainedReplacementsKeepTwoBudgetsInSevenDays() public {
         _feeds();
         vm.warp((block.timestamp / W + 1) * W);
         ChainlinkPriceGuard a = _guard();
@@ -324,7 +347,26 @@ contract GRETVaultGuardTest is GRETVaultCase {
         _drain(c);
         uint256 v1 = _usd(a);
         assertEq(block.timestamp - start, 7 days);
-        assertGt(_bps(v0, v1), 760);
+        assertLe(v0 - v1, v0 * 396 / 10_000 + 1);
+    }
+
+    /// A predecessor that keeps no weekly count, such as an accept-all guard, counts as zero.
+    function test_replacementOfAnotherKindOfGuardStartsAtZero() public {
+        _feeds();
+        vm.warp((block.timestamp / W + 1) * W + 1 hours);
+        _appoint(vault, address(new MockPriceGuard()));
+        ChainlinkPriceGuard b = _guard();
+        vm.prank(GOVERNANCE);
+        vault.proposePriceGuard(address(b));
+        vm.warp(vault.pendingPriceGuardReadyAt());
+        _refresh();
+        vault.applyPriceGuard();
+        _smallLoss(b);
+        uint256 own = b.weeklyLoss();
+        assertGt(own, 0);
+        assertLt(own, 1e16);
+        _smallLoss(b);
+        assertGt(b.weeklyLoss(), own);
     }
 
     // ------------------------------------------------------------------------------------------

@@ -73,6 +73,9 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// @notice Prices every swap and refuses the ones that lose too much. None at deployment, and
     /// without one there are no swaps.
     IPriceGuard public priceGuard;
+    /// @notice The guard that `applyPriceGuard` last replaced, from which the next one can continue
+    /// the week's loss count; zero until the first replacement.
+    address public previousPriceGuard;
     address public pendingPriceGuard;
     /// @notice Earliest timestamp at which `pendingPriceGuard` may be applied.
     uint256 public pendingPriceGuardReadyAt;
@@ -591,6 +594,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
         address previous = address(priceGuard);
         priceGuard = IPriceGuard(next);
+        previousPriceGuard = previous;
         delete pendingPriceGuard;
         delete pendingPriceGuardReadyAt;
         emit PriceGuardChanged(previous, next);

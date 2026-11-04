@@ -160,8 +160,12 @@ Guard limits and price assumptions:
   backing, rounded up; the sum must be at most 2% during each fixed seven-day Unix epoch.
   Fair/favorable trades do not consume the budget. Deposits/withdrawals do not reset it.
 - The guard has no owner; feeds, max ages, cached token decimals and limits are immutable.
-  Replacement creates a fresh weekly counter. Losses across week boundaries or replacements
-  can therefore exceed one period's budget.
+  A replacement continues the weekly count: the vault records the guard it replaced as
+  `previousPriceGuard`, and on its first loss in a week the new guard starts from what that
+  guard recorded in the same week. A predecessor that reports another week, or does not
+  answer `currentWeek` and `weeklyLoss` with one word each, counts as zero. The seven-day
+  notice lets at most one replacement take effect per week, so one predecessor is enough.
+  Losses on both sides of a week boundary can still reach about 4% within seven days.
 - Feeds may lag, price an underlying rather than the token's market peg, or become stale on
   weekends. Six current components lack configured Ethereum feeds; they cannot be traded by
   this guard. Neither price accuracy nor issuer solvency is guaranteed.
@@ -282,9 +286,10 @@ rights; it is **not** a remaining-token-balance view then.
 
 `reserves`, both normal previews, the skipping preview, `pendingRights` and `claimable` use
 `nonReentrantView`: callback consumers cannot read an intermediate accounting state. Mutations
-use the transient reentrancy guard. Storage-only membership/exclusion views remain available
-to the price guard. Ordinary ERC-20 views alone are not a NAV oracle; integrations must not
-reconstruct prices from raw in-flight token balances and supply.
+use the transient reentrancy guard. Storage-only membership, exclusion and
+`previousPriceGuard` views remain available to the price guard. Ordinary ERC-20 views alone
+are not a NAV oracle; integrations must not reconstruct prices from raw in-flight token
+balances and supply.
 
 ## Implementation details
 
@@ -364,10 +369,8 @@ design decision and must be made here first.
   executed, which pauses it for good.
 - **The rebalancer chooses the price within the guard's view.** The guard bounds only the
   losses its feeds can see. Feeds may lag within their deviation thresholds, price an
-  underlying while the token trades below it, or go stale. Each guard counts its own week in
-  fixed epochs and a new guard starts at zero, so losses across a week boundary or a
-  replacement can exceed 2% within seven days. Anyone may apply a ready guard, so a hostile
-  rebalancer can choose that moment.
+  underlying while the token trades below it, or go stale. Weeks are fixed epochs, so losses
+  on both sides of a boundary can reach about 4% within seven days.
 - **Allocation follows timing.** Whoever holds GRET when value arrives shares it: future
   income, a favorable swap, a reactivated component or an asset another holder skipped. A
   holder can redeem before a losing swap and return afterwards. After the last normal exit,

@@ -195,7 +195,8 @@ Chainlink feed per token and refuses a token without a fresh price, a swap that 
 than 2% of what the vault sells, and swaps that would take more than 2% of the vault's value in
 a week, each loss measured against the vault's value at that moment. It has
 no owner: its feeds and limits are fixed at deployment, and changing them means appointing
-another guard with the 7-day wait. Mint, redemption and liquidation never call it. The
+another guard with the 7-day wait; the new guard continues the week's loss count of the one it
+replaces. Mint, redemption and liquidation never call it. The
 proposed feeds are `PRICE_FEEDS` in `scripts/pilot/config.ts`; six of the 11 components have
 no Ethereum feed and cannot be swapped.
 

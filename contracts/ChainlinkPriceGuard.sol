@@ -16,11 +16,13 @@ interface IChainlinkFeed {
         returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
 }
 
-/// @dev The vault views the guard reads to value the vault.
+/// @dev The vault views the guard reads to value the vault and to continue the week's count.
 interface IGRETVaultReserves {
     function components() external view returns (address[] memory);
 
     function excluded(address token) external view returns (bool);
+
+    function previousPriceGuard() external view returns (address);
 }
 
 /// @title Chainlink price guard of the GRET vault
@@ -30,7 +32,8 @@ interface IGRETVaultReserves {
 /// happens, which is what every GRET loses, so mints and redemptions in between do not stretch the
 /// limit. A token without a feed, or whose price is stale, cannot be swapped.
 /// It has no owner: tokens, feeds and limits are fixed at deployment. Changing them means
-/// deploying another guard, which the vault applies only after its seven-day wait.
+/// deploying another guard, which the vault applies only after its seven-day wait. A replacement
+/// continues the week's count of the guard it replaced, so it does not open a second budget.
 /// @dev Each feed must quote one whole token in US dollars, with nothing to convert. A loss the
 /// feeds do not see, such as a token that trades below the asset its feed prices, is not limited.
 /// Mint, redemption and liquidation never call the guard.
@@ -109,7 +112,7 @@ contract ChainlinkPriceGuard is IPriceGuard {
         uint256 week = block.timestamp / WEEK;
         if (week != currentWeek) {
             currentWeek = week;
-            weeklyLoss = 0;
+            weeklyLoss = _inheritedLoss(week);
         }
         // Buy tokens have arrived and sell tokens have not left. Exclude the receipt so the
         // denominator is pre-swap backing, not both sides of the exchange.
@@ -142,6 +145,19 @@ contract ChainlinkPriceGuard is IPriceGuard {
         }
         uint256 scale = 10 ** (uint256(config.tokenDecimals) + feed.decimals());
         return Math.mulDiv(amount, uint256(answer) * 1e18, scale, rounding);
+    }
+
+    /// @dev The loss the guard this one replaced recorded in `week`. The vault's seven-day wait lets
+    /// at most one replacement take effect per week, so one predecessor is enough. A predecessor
+    /// that does not report a matching week, or answers with malformed data, counts as zero.
+    function _inheritedLoss(uint256 week) private view returns (uint256) {
+        address previous = IGRETVaultReserves(vault).previousPriceGuard();
+        if (previous == address(0)) return 0;
+        (bool ok, bytes memory data) = previous.staticcall(abi.encodeCall(this.currentWeek, ()));
+        if (!ok || data.length != 32 || abi.decode(data, (uint256)) != week) return 0;
+        (ok, data) = previous.staticcall(abi.encodeCall(this.weeklyLoss, ()));
+        if (!ok || data.length != 32) return 0;
+        return abi.decode(data, (uint256));
     }
 
     /// @dev Live active backing immediately before the swap: the incoming buy amount is
