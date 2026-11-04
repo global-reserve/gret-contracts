@@ -167,8 +167,8 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
 
       const hash = await vault.write.proposeGovernance([carol.account.address], { account: governance.account });
       const readyAt = (await blockTimestamp(hash)) + SEVEN_DAYS;
-      assert.equal(await vault.read.pendingGovernance(), getAddress(carol.account.address));
-      assert.equal(await vault.read.pendingGovernanceReadyAt(), readyAt);
+      assert.equal((await vault.read.governanceProposal())[0], getAddress(carol.account.address));
+      assert.equal((await vault.read.governanceProposal())[1], readyAt);
 
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.acceptGovernance({ account: carol.account }),
@@ -186,7 +186,7 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.acceptGovernance({ account: bob.account }),
         vault,
-        "NotPendingGovernance",
+        "NotProposed",
         [getAddress(bob.account.address)],
       );
 
@@ -198,8 +198,8 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
         [getAddress(governance.account.address), getAddress(carol.account.address)],
       );
       assert.equal(await vault.read.governance(), getAddress(carol.account.address));
-      assert.equal(await vault.read.pendingGovernance(), zeroAddress);
-      assert.equal(await vault.read.pendingGovernanceReadyAt(), 0n);
+      assert.equal((await vault.read.governanceProposal())[0], zeroAddress);
+      assert.equal((await vault.read.governanceProposal())[1], 0n);
     });
 
     it("the new governance takes every power and the previous one loses them", async () => {
@@ -237,12 +237,12 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
       await networkHelpers.time.increase(6n * 24n * 60n * 60n);
 
       const hash = await vault.write.proposeGovernance([bob.account.address], { account: governance.account });
-      assert.equal(await vault.read.pendingGovernanceReadyAt(), (await blockTimestamp(hash)) + SEVEN_DAYS);
+      assert.equal((await vault.read.governanceProposal())[1], (await blockTimestamp(hash)) + SEVEN_DAYS);
       await networkHelpers.time.increase(SEVEN_DAYS);
       await viem.assertions.revertWithCustomError(
         vault.write.acceptGovernance({ account: carol.account }),
         vault,
-        "NotPendingGovernance",
+        "NotProposed",
       );
 
       await viem.assertions.emitWithArgs(
@@ -254,12 +254,12 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
       await viem.assertions.revertWithCustomError(
         vault.write.acceptGovernance({ account: bob.account }),
         vault,
-        "NotPendingGovernance",
+        "NotProposed",
       );
       await viem.assertions.revertWithCustomError(
         vault.write.cancelGovernanceProposal({ account: governance.account }),
         vault,
-        "NoPendingGovernance",
+        "NoPendingProposal",
       );
       assert.equal(await vault.read.governance(), getAddress(governance.account.address));
     });

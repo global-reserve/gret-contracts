@@ -72,9 +72,9 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
       assert.equal(await vault.read.totalSupply(), 0n);
       assert.deepEqual(await vault.read.previewRedeem([0n]), [0n, 0n, 0n]);
       assert.equal(await vault.read.governance(), getAddress(governance.account.address));
-      assert.equal(await vault.read.pendingGovernance(), zeroAddress);
+      assert.equal((await vault.read.governanceProposal())[0], zeroAddress);
       assert.equal(await vault.read.rebalancer(), zeroAddress);
-      assert.equal(await vault.read.pendingRebalancer(), zeroAddress);
+      assert.equal((await vault.read.rebalancerProposal())[0], zeroAddress);
       assert.equal(await vault.read.liquidationActive(), false);
     });
 

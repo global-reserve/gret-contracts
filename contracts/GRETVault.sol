@@ -61,28 +61,31 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     uint256 public constant FEE_INCREASE_DELAY = 7 days;
     uint256 private constant FEE_DENOMINATOR = 10_000;
 
+    /// @dev A successor waiting out its notice: who takes over, and from when.
+    struct Proposal {
+        address next;
+        uint256 readyAt;
+    }
+
     /// @notice Starts liquidation, manages component activation and changes the basket; appoints
     /// the rebalancer and its own successor.
     address public governance;
-    address public pendingGovernance;
-    /// @notice Earliest timestamp at which `pendingGovernance` may accept.
-    uint256 public pendingGovernanceReadyAt;
+    /// @notice Proposed successor of `governance`, which may accept from `readyAt`; zero if none.
+    Proposal public governanceProposal;
 
     /// @notice Exchanges one component for another at the price it chooses, within the limits of
     /// the price guard. Zero when nobody can, as at deployment.
     address public rebalancer;
-    address public pendingRebalancer;
-    /// @notice Earliest timestamp at which `pendingRebalancer` may accept.
-    uint256 public pendingRebalancerReadyAt;
+    /// @notice Proposed rebalancer, which may accept from `readyAt`; zero if none.
+    Proposal public rebalancerProposal;
     /// @notice Prices every swap and refuses the ones that lose too much. None at deployment, and
     /// without one there are no swaps.
     IPriceGuard public priceGuard;
     /// @notice The guard that `applyPriceGuard` last replaced, from which the next one can continue
     /// the week's loss count; zero until the first replacement.
     address public previousPriceGuard;
-    address public pendingPriceGuard;
-    /// @notice Earliest timestamp at which `pendingPriceGuard` may be applied.
-    uint256 public pendingPriceGuardReadyAt;
+    /// @notice Proposed price guard, which anyone may apply from `readyAt`; zero if none.
+    Proposal public priceGuardProposal;
     /// @notice Earliest timestamp at which an announced token may join the basket; zero if none.
     mapping(address token => uint256) public componentReadyAt;
     /// @notice Earliest timestamp at which a proposed write-off may take effect; zero if none.
@@ -207,13 +210,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     error ZeroAmount();
     error SharesBelowMin(uint256 shares, uint256 minShares);
     error NotGovernance(address caller);
-    error NotPendingGovernance(address caller);
-    error NoPendingGovernance();
     error NotRebalancer(address caller);
-    error NotPendingRebalancer(address caller);
-    error NoPendingRebalancer();
     error NoPriceGuard();
-    error NoPendingPriceGuard();
     error NotAComponent(address token);
     error SameComponent(address token);
     error SwapExceedsReserve(address token, uint256 amount, uint256 reserve);
@@ -228,6 +226,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     error FeeAboveMax(uint256 fee);
     error NoPendingFees();
     error NoFeeRecipient();
+    error NoPendingProposal();
+    error NotProposed(address caller);
     error NotReady(uint256 readyAt);
     error ProposalExpired(uint256 expiredAt);
 
@@ -535,38 +535,26 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// `BASKET_CHANGE_DELAY`. Replaces any pending proposal and restarts the wait.
     function proposeRebalancer(address next) external onlyGovernance {
         if (next == address(0)) revert ZeroAddress();
-        uint256 readyAt = block.timestamp + BASKET_CHANGE_DELAY;
-        pendingRebalancer = next;
-        pendingRebalancerReadyAt = readyAt;
-        emit RebalancerProposed(next, readyAt);
+        emit RebalancerProposed(next, _propose(rebalancerProposal, next, BASKET_CHANGE_DELAY));
     }
 
     /// @notice Discards the pending rebalancer.
     function cancelRebalancerProposal() public onlyGovernance {
-        address pending = pendingRebalancer;
-        if (pending == address(0)) revert NoPendingRebalancer();
-        delete pendingRebalancer;
-        delete pendingRebalancerReadyAt;
-        emit RebalancerProposalCancelled(pending);
+        emit RebalancerProposalCancelled(_cancel(rebalancerProposal));
     }
 
     /// @notice The proposed rebalancer takes over after the wait, proving it can call the vault.
     function acceptRebalancer() external {
-        if (msg.sender != pendingRebalancer) revert NotPendingRebalancer(msg.sender);
-        uint256 readyAt = pendingRebalancerReadyAt;
-        _requireReady(readyAt);
-
+        _accept(rebalancerProposal);
         address previous = rebalancer;
         rebalancer = msg.sender;
-        delete pendingRebalancer;
-        delete pendingRebalancerReadyAt;
         emit RebalancerChanged(previous, msg.sender);
     }
 
     /// @notice Leaves the vault without a rebalancer at once, and discards a pending one: taking
     /// the power away needs no wait.
     function revokeRebalancer() external onlyGovernance {
-        if (pendingRebalancer != address(0)) cancelRebalancerProposal();
+        if (rebalancerProposal.next != address(0)) cancelRebalancerProposal();
         address previous = rebalancer;
         delete rebalancer;
         emit RebalancerChanged(previous, address(0));
@@ -578,34 +566,21 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// EIP-7702 accounts are refused; the notice binds an address, not the code behind a proxy.
     function proposePriceGuard(address next) external onlyGovernance {
         _requireContract(next);
-        uint256 readyAt = block.timestamp + BASKET_CHANGE_DELAY;
-        pendingPriceGuard = next;
-        pendingPriceGuardReadyAt = readyAt;
-        emit PriceGuardProposed(next, readyAt);
+        emit PriceGuardProposed(next, _propose(priceGuardProposal, next, BASKET_CHANGE_DELAY));
     }
 
     /// @notice Discards the pending price guard.
     function cancelPriceGuardProposal() external onlyGovernance {
-        address pending = pendingPriceGuard;
-        if (pending == address(0)) revert NoPendingPriceGuard();
-        delete pendingPriceGuard;
-        delete pendingPriceGuardReadyAt;
-        emit PriceGuardProposalCancelled(pending);
+        emit PriceGuardProposalCancelled(_cancel(priceGuardProposal));
     }
 
     /// @notice Governance decided when it proposed the guard: once the wait is over, anyone can
     /// apply it.
     function applyPriceGuard() external {
-        address next = pendingPriceGuard;
-        if (next == address(0)) revert NoPendingPriceGuard();
-        uint256 readyAt = pendingPriceGuardReadyAt;
-        _requireReady(readyAt);
-
+        address next = _take(priceGuardProposal);
         address previous = address(priceGuard);
         priceGuard = IPriceGuard(next);
         previousPriceGuard = previous;
-        delete pendingPriceGuard;
-        delete pendingPriceGuardReadyAt;
         emit PriceGuardChanged(previous, next);
     }
 
@@ -859,32 +834,21 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// @notice First step of a governance change; replaces any pending one and restarts the wait.
     function proposeGovernance(address next) external onlyGovernance {
         if (next == address(0)) revert ZeroAddress();
-        uint256 readyAt = block.timestamp + GOVERNANCE_TRANSFER_DELAY;
-        pendingGovernance = next;
-        pendingGovernanceReadyAt = readyAt;
+        uint256 readyAt = _propose(governanceProposal, next, GOVERNANCE_TRANSFER_DELAY);
         emit GovernanceProposed(next, readyAt);
     }
 
     /// @notice Discards the pending governance.
     function cancelGovernanceProposal() external onlyGovernance {
-        address pending = pendingGovernance;
-        if (pending == address(0)) revert NoPendingGovernance();
-        delete pendingGovernance;
-        delete pendingGovernanceReadyAt;
-        emit GovernanceProposalCancelled(pending);
+        emit GovernanceProposalCancelled(_cancel(governanceProposal));
     }
 
     /// @notice Second step: the proposed address takes over once the wait has passed, proving it
     /// can call the vault.
     function acceptGovernance() external {
-        if (msg.sender != pendingGovernance) revert NotPendingGovernance(msg.sender);
-        uint256 readyAt = pendingGovernanceReadyAt;
-        _requireReady(readyAt);
-
+        _accept(governanceProposal);
         address previous = governance;
         governance = msg.sender;
-        delete pendingGovernance;
-        delete pendingGovernanceReadyAt;
         emit GovernanceTransferred(previous, msg.sender);
     }
 
@@ -1121,6 +1085,37 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         (bool ok, bytes memory data) =
             address(token).staticcall(abi.encodeCall(IERC20.balanceOf, (address(this))));
         return ok && data.length >= 32 ? abi.decode(data, (uint256)) : 0;
+    }
+
+    /// @dev Names `next` to take over once `delay` has passed, replacing any earlier proposal.
+    function _propose(Proposal storage proposal, address next, uint256 delay)
+        private
+        returns (uint256 readyAt)
+    {
+        readyAt = block.timestamp + delay;
+        proposal.next = next;
+        proposal.readyAt = readyAt;
+    }
+
+    /// @dev Discards a pending proposal and returns whom it named.
+    function _cancel(Proposal storage proposal) private returns (address next) {
+        next = proposal.next;
+        if (next == address(0)) revert NoPendingProposal();
+        delete proposal.next;
+        delete proposal.readyAt;
+    }
+
+    /// @dev Clears a proposal whose notice has passed and returns whom it named.
+    function _take(Proposal storage proposal) private returns (address next) {
+        uint256 readyAt = proposal.readyAt;
+        next = _cancel(proposal);
+        _requireReady(readyAt);
+    }
+
+    /// @dev Like `_take`, for a successor that accepts in person, proving it can call the vault.
+    function _accept(Proposal storage proposal) private {
+        if (msg.sender != proposal.next) revert NotProposed(msg.sender);
+        _take(proposal);
     }
 
     /// @dev A proposal can be executed from `readyAt` until `EXECUTION_WINDOW` later.

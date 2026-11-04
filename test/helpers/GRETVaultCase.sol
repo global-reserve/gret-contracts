@@ -108,6 +108,14 @@ abstract contract GRETVaultCase is Test {
         values[1] = b;
         values[2] = c;
     }
+
+    function _pendingPriceGuard() internal view returns (address next) {
+        (next,) = vault.priceGuardProposal();
+    }
+
+    function _priceGuardReadyAt() internal view returns (uint256 readyAt) {
+        (, readyAt) = vault.priceGuardProposal();
+    }
 }
 
 /// @dev Hypothetical token behaviors, not claims about the current components.

@@ -247,7 +247,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         ChainlinkPriceGuard b = _guard();
         vm.prank(GOVERNANCE);
         vault.proposePriceGuard(address(b));
-        vm.warp(vault.pendingPriceGuardReadyAt());
+        vm.warp(_priceGuardReadyAt());
         _refresh();
         _smallLoss(a);
         uint256 fromA = a.weeklyLoss();
@@ -271,7 +271,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         ChainlinkPriceGuard b = _guard(); // honest, identical configuration
         vm.prank(GOVERNANCE);
         vault.proposePriceGuard(address(b));
-        vm.warp(vault.pendingPriceGuardReadyAt());
+        vm.warp(_priceGuardReadyAt());
         _refresh();
         uint256 week = block.timestamp / W;
 
@@ -289,7 +289,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         ChainlinkPriceGuard c = _guard();
         vm.prank(GOVERNANCE);
         vault.proposePriceGuard(address(c));
-        assertGt(vault.pendingPriceGuardReadyAt() / W, week);
+        assertGt(_priceGuardReadyAt() / W, week);
     }
 
     /// A and B at the end of week N, then B at the start of N+1: two budgets, as with one guard
@@ -303,7 +303,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         vm.warp(block.timestamp + W - 120);
         vm.prank(GOVERNANCE);
         vault.proposePriceGuard(address(b)); // ready 120 s before the boundary S + 2W
-        vm.warp(vault.pendingPriceGuardReadyAt());
+        vm.warp(_priceGuardReadyAt());
         _refresh();
         uint256 start = block.timestamp;
         uint256 v0 = _usd(a);
@@ -333,7 +333,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         vm.warp(block.timestamp + W - 120);
         vm.prank(GOVERNANCE);
         vault.proposePriceGuard(address(b));
-        vm.warp(vault.pendingPriceGuardReadyAt());
+        vm.warp(_priceGuardReadyAt());
         _refresh();
         uint256 start = block.timestamp;
         uint256 v0 = _usd(a);
@@ -346,7 +346,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         vm.warp(block.timestamp + 180);
         _refresh();
         _drain(b);
-        vm.warp(vault.pendingPriceGuardReadyAt());
+        vm.warp(_priceGuardReadyAt());
         _refresh();
         assertEq(block.timestamp / W, (start + 180) / W); // still week N+1
         vault.applyPriceGuard();
@@ -364,7 +364,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         ChainlinkPriceGuard b = _guard();
         vm.prank(GOVERNANCE);
         vault.proposePriceGuard(address(b));
-        vm.warp(vault.pendingPriceGuardReadyAt());
+        vm.warp(_priceGuardReadyAt());
         _refresh();
         vault.applyPriceGuard();
         _smallLoss(b);
@@ -554,7 +554,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         vault.swap(address(healthy), 2e18, address(faulty), 1, "");
         // Later the owner flips it; the vault sees no proposal and no notice.
         sw.setAcceptAll(true);
-        assertEq(vault.pendingPriceGuard(), address(0));
+        assertEq(_pendingPriceGuard(), address(0));
         vm.prank(REBALANCER);
         vault.swap(address(healthy), 2e18, address(faulty), 1, "");
         assertEq(vault.reserves()[0], 0);
@@ -573,7 +573,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         vm.expectRevert(abi.encodeWithSelector(GRETVault.InvalidContract.selector, eoa));
         vault.announceComponent(eoa);
         vm.stopPrank();
-        assertEq(vault.pendingPriceGuard(), address(0));
+        assertEq(_pendingPriceGuard(), address(0));
         assertEq(vault.componentReadyAt(eoa), 0);
     }
 
@@ -593,6 +593,6 @@ contract GRETVaultGuardTest is GRETVaultCase {
         vm.etch(other, abi.encodePacked(hex"ef0200", address(0xBEEF)));
         vm.prank(GOVERNANCE);
         vault.proposePriceGuard(other);
-        assertEq(vault.pendingPriceGuard(), other);
+        assertEq(_pendingPriceGuard(), other);
     }
 }

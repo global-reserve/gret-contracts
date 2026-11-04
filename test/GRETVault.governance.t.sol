@@ -201,7 +201,8 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         }
         assertEq(reverted, 2 * n);
         // Bumps used up: the next prepared redemption goes through, still inside the notice.
-        assertLt(block.timestamp, vault.pendingRebalancerReadyAt());
+        (, uint256 rebalancerReadyAt) = vault.rebalancerProposal();
+        assertLt(block.timestamp, rebalancerReadyAt);
         uint256 current = vault.basketVersion();
         vm.prank(BOB);
         vault.redeem(SHARE, _pair(0, 0), current);

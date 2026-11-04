@@ -91,8 +91,8 @@ describe("GRETVault: rebalancing and basket changes", async () => {
 
       const hash = await vault.write.proposeRebalancer([dave.account.address], { account: governance.account });
       const readyAt = (await blockTimestamp(hash)) + SEVEN_DAYS;
-      assert.equal(await vault.read.pendingRebalancer(), getAddress(dave.account.address));
-      assert.equal(await vault.read.pendingRebalancerReadyAt(), readyAt);
+      assert.equal((await vault.read.rebalancerProposal())[0], getAddress(dave.account.address));
+      assert.equal((await vault.read.rebalancerProposal())[1], readyAt);
 
       await networkHelpers.time.setNextBlockTimestamp(readyAt - 1n);
       await viem.assertions.revertWithCustomErrorWithArgs(
@@ -104,7 +104,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.acceptRebalancer({ account: bob.account }),
         vault,
-        "NotPendingRebalancer",
+        "NotProposed",
         [getAddress(bob.account.address)],
       );
 
@@ -116,8 +116,8 @@ describe("GRETVault: rebalancing and basket changes", async () => {
         [zeroAddress, getAddress(dave.account.address)],
       );
       assert.equal(await vault.read.rebalancer(), getAddress(dave.account.address));
-      assert.equal(await vault.read.pendingRebalancer(), zeroAddress);
-      assert.equal(await vault.read.pendingRebalancerReadyAt(), 0n);
+      assert.equal((await vault.read.rebalancerProposal())[0], zeroAddress);
+      assert.equal((await vault.read.rebalancerProposal())[1], 0n);
     });
 
     it("governance revokes it at once; a new proposal restarts the wait and cancelling clears it", async () => {
@@ -143,17 +143,17 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await viem.assertions.revertWithCustomError(
         vault.write.cancelRebalancerProposal({ account: governance.account }),
         vault,
-        "NoPendingRebalancer",
+        "NoPendingProposal",
       );
       await vault.write.proposeRebalancer([dave.account.address], { account: governance.account });
       await networkHelpers.time.increase(6n * 24n * 60n * 60n);
       const hash = await vault.write.proposeRebalancer([carol.account.address], { account: governance.account });
-      assert.equal(await vault.read.pendingRebalancerReadyAt(), (await blockTimestamp(hash)) + SEVEN_DAYS);
+      assert.equal((await vault.read.rebalancerProposal())[1], (await blockTimestamp(hash)) + SEVEN_DAYS);
       await networkHelpers.time.increase(SEVEN_DAYS);
       await viem.assertions.revertWithCustomError(
         vault.write.acceptRebalancer({ account: dave.account }),
         vault,
-        "NotPendingRebalancer",
+        "NotProposed",
       );
 
       await viem.assertions.emitWithArgs(
@@ -170,7 +170,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await viem.assertions.revertWithCustomError(
         vault.write.acceptRebalancer({ account: carol.account }),
         vault,
-        "NotPendingRebalancer",
+        "NotProposed",
       );
       assert.equal(await vault.read.rebalancer(), zeroAddress);
     });
@@ -213,7 +213,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
         () => vault.write.applyPriceGuard({ account: alice.account }),
         () => vault.write.cancelPriceGuardProposal({ account: governance.account }),
       ]) {
-        await viem.assertions.revertWithCustomError(call(), vault, "NoPendingPriceGuard");
+        await viem.assertions.revertWithCustomError(call(), vault, "NoPendingProposal");
       }
 
       // A new proposal replaces the pending one and restarts the wait; cancelling clears it.
@@ -221,8 +221,8 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await networkHelpers.time.increase(SEVEN_DAYS);
       const hash = await vault.write.proposePriceGuard([guard.address], { account: governance.account });
       const readyAt = (await blockTimestamp(hash)) + SEVEN_DAYS;
-      assert.equal(await vault.read.pendingPriceGuard(), getAddress(guard.address));
-      assert.equal(await vault.read.pendingPriceGuardReadyAt(), readyAt);
+      assert.equal((await vault.read.priceGuardProposal())[0], getAddress(guard.address));
+      assert.equal((await vault.read.priceGuardProposal())[1], readyAt);
       await networkHelpers.time.setNextBlockTimestamp(readyAt - 1n);
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.applyPriceGuard({ account: alice.account }),
@@ -236,8 +236,8 @@ describe("GRETVault: rebalancing and basket changes", async () => {
         getAddress(guard.address),
       ]);
       assert.equal(await vault.read.priceGuard(), getAddress(guard.address));
-      assert.equal(await vault.read.pendingPriceGuard(), zeroAddress);
-      assert.equal(await vault.read.pendingPriceGuardReadyAt(), 0n);
+      assert.equal((await vault.read.priceGuardProposal())[0], zeroAddress);
+      assert.equal((await vault.read.priceGuardProposal())[1], 0n);
 
       await vault.write.proposePriceGuard([other.address], { account: governance.account });
       await viem.assertions.revertWithCustomError(
@@ -833,11 +833,11 @@ describe("GRETVault: rebalancing and basket changes", async () => {
         { readyAt: await vault.read.writeOffReadyAt([faulty.address]), run: () => vault.write.writeOffComponent([faulty.address]) },
         { readyAt: await vault.read.pendingFeesReadyAt(), run: () => vault.write.applyFees() },
         {
-          readyAt: await vault.read.pendingRebalancerReadyAt(),
+          readyAt: (await vault.read.rebalancerProposal())[1],
           run: () => vault.write.acceptRebalancer({ account: alice.account }),
         },
         {
-          readyAt: await vault.read.pendingGovernanceReadyAt(),
+          readyAt: (await vault.read.governanceProposal())[1],
           run: () => vault.write.acceptGovernance({ account: carol.account }),
         },
       ];
@@ -864,12 +864,12 @@ describe("GRETVault: rebalancing and basket changes", async () => {
         [getAddress(alice.account.address)],
       );
       assert.equal(await vault.read.rebalancer(), zeroAddress);
-      assert.equal(await vault.read.pendingRebalancer(), zeroAddress);
+      assert.equal((await vault.read.rebalancerProposal())[0], zeroAddress);
       await networkHelpers.time.increase(SEVEN_DAYS);
       await viem.assertions.revertWithCustomError(
         vault.write.acceptRebalancer({ account: alice.account }),
         vault,
-        "NotPendingRebalancer",
+        "NotProposed",
       );
     });
   });

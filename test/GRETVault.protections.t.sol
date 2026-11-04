@@ -398,7 +398,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.expectRevert(abi.encodeWithSelector(GRETVault.ProposalExpired.selector, expiredAt));
         vault.applyFees();
         vm.stopPrank();
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.NotPendingRebalancer.selector, REBALANCER));
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.NotProposed.selector, REBALANCER));
         vm.prank(REBALANCER);
         vault.acceptRebalancer();
         assertEq(vault.componentCount(), 2);
