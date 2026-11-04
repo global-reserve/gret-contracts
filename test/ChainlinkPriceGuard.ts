@@ -111,7 +111,7 @@ describe("ChainlinkPriceGuard", async () => {
     it("only the vault records swaps", async () => {
       const { tokens, guard, dave } = await networkHelpers.loadFixture(guardFixture);
       await viem.assertions.revertWithCustomErrorWithArgs(
-        guard.write.checkSwap([tokens[0].address, 1n, tokens[1].address, 1n], { account: dave.account }),
+        guard.write.checkSwap([tokens[0].address, 1n, tokens[1].address, 1n, "0x"], { account: dave.account }),
         guard,
         "NotVault",
         [getAddress(dave.account.address)],
@@ -161,8 +161,8 @@ describe("ChainlinkPriceGuard", async () => {
       const { vault, tokens, guard, dave } = await networkHelpers.loadFixture(guardFixture);
       const [a, , c] = tokens.map((token) => token.address);
       // $100 of A for $100 of C, then for $120 of C.
-      await vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.5", 18)], { account: dave.account });
-      await vault.write.swap([a, parseUnits("1", 18), c, parseUnits("3", 18)], { account: dave.account });
+      await vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.5", 18), "0x"], { account: dave.account });
+      await vault.write.swap([a, parseUnits("1", 18), c, parseUnits("3", 18), "0x"], { account: dave.account });
       assert.equal(await guard.read.weeklyLoss(), 0n);
       assert.equal(await guard.read.currentWeek(), 0n);
     });
@@ -172,20 +172,20 @@ describe("ChainlinkPriceGuard", async () => {
       const [a, , c] = tokens.map((token) => token.address);
       // The original drain: everything for 1 wei.
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.swap([a, INITIAL_AMOUNTS[0] * 2n, c, 1n], { account: dave.account }),
+        vault.write.swap([a, INITIAL_AMOUNTS[0] * 2n, c, 1n, "0x"], { account: dave.account }),
         guard,
         "SwapLossTooHigh",
         [parseUnits("400", 18), 40n],
       );
       // $100 of A for $97.96 of C loses 2.04%.
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.449", 18)], { account: dave.account }),
+        vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.449", 18), "0x"], { account: dave.account }),
         guard,
         "SwapLossTooHigh",
         [parseUnits("100", 18), parseUnits("97.96", 18)],
       );
       // Exactly 2% passes: $2 of the vault's $960.
-      const hash = await vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.45", 18)], { account: dave.account });
+      const hash = await vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.45", 18), "0x"], { account: dave.account });
       const share = shareOf(parseUnits("2", 18), parseUnits("960", 18));
       await viem.assertions.emitWithArgs(Promise.resolve(hash), guard, "LossRecorded", [
         getAddress(a),
@@ -202,8 +202,8 @@ describe("ChainlinkPriceGuard", async () => {
       const { vault, tokens, feeds, guard, dave } = await networkHelpers.loadFixture(guardFixture);
       const [a, , c] = tokens.map((token) => token.address);
       // Each swap loses $1.90, 1.9% of the $100 it sells, counted against the vault's value then.
-      const aForC = () => vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.4525", 18)], { account: dave.account });
-      const cForA = () => vault.write.swap([c, parseUnits("2.5", 18), a, parseUnits("0.981", 18)], { account: dave.account });
+      const aForC = () => vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.4525", 18), "0x"], { account: dave.account });
+      const cForA = () => vault.write.swap([c, parseUnits("2.5", 18), a, parseUnits("0.981", 18), "0x"], { account: dave.account });
       const loss = parseUnits("1.9", 18);
       let value = parseUnits("960", 18);
       let expected = 0n;
@@ -229,8 +229,8 @@ describe("ChainlinkPriceGuard", async () => {
     it("keeps the week's count when the vault empties and starts again", async () => {
       const { vault, tokens, guard, alice, bob, dave } = await networkHelpers.loadFixture(guardFixture);
       const [a, , c] = tokens.map((token) => token.address);
-      const aForC = () => vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.4525", 18)], { account: dave.account });
-      const cForA = () => vault.write.swap([c, parseUnits("2.5", 18), a, parseUnits("0.981", 18)], { account: dave.account });
+      const aForC = () => vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.4525", 18), "0x"], { account: dave.account });
+      const cForA = () => vault.write.swap([c, parseUnits("2.5", 18), a, parseUnits("0.981", 18), "0x"], { account: dave.account });
       for (let i = 0; i < 10; i++) await (i % 2 === 0 ? aForC() : cForA());
       const used = await guard.read.weeklyLoss();
       await vault.write.redeem([INITIAL_SHARES, [0n, 0n, 0n], 0n], { account: bob.account });
@@ -251,7 +251,7 @@ describe("ChainlinkPriceGuard", async () => {
       // Both changes count immediately; the incoming swap payment is excluded.
       await faulty.write.slash([vault.address, parseUnits("5", 18)]);
       await tokens[0].write.mint([vault.address, parseUnits("10", 18)]);
-      const aForB = () => vault.write.swap([a, parseUnits("1", 18), b, 123_125n], { account: dave.account });
+      const aForB = () => vault.write.swap([a, parseUnits("1", 18), b, 123_125n, "0x"], { account: dave.account });
       await aForB();
       const first = shareOf(parseUnits("1.5", 18), parseUnits("1760", 18));
       assert.equal(await guard.read.weeklyLoss(), first);
@@ -266,20 +266,20 @@ describe("ChainlinkPriceGuard", async () => {
       const { vault, tokens, feeds, guard, dave } = await networkHelpers.loadFixture(partialFixture);
       const [a, b, c] = tokens.map((token) => token.address);
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.5", 18)], { account: dave.account }),
+        vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.5", 18), "0x"], { account: dave.account }),
         guard,
         "NoFeed",
         [getAddress(c)],
       );
       // $100 of A for $98.50 of B; C is left out, so the vault counts as $560.
-      await vault.write.swap([a, parseUnits("1", 18), b, 123_125n], { account: dave.account });
+      await vault.write.swap([a, parseUnits("1", 18), b, 123_125n, "0x"], { account: dave.account });
       assert.equal(await guard.read.weeklyLoss(), shareOf(parseUnits("1.5", 18), parseUnits("560", 18)));
 
       // A stale price stops every swap of that token.
       const stale = BigInt(await networkHelpers.time.latest()) - DAY - 10n;
       await feeds[0].write.setRound([PRICES[0], stale]);
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.swap([a, parseUnits("1", 18), b, 125_000n], { account: dave.account }),
+        vault.write.swap([a, parseUnits("1", 18), b, 125_000n, "0x"], { account: dave.account }),
         guard,
         "StalePrice",
         [getAddress(a), stale],
@@ -291,10 +291,10 @@ describe("ChainlinkPriceGuard", async () => {
       const [a, b, c] = tokens.map((token) => token.address);
       await feeds[1].write.setRound([PRICES[1], BigInt(await networkHelpers.time.latest()) - DAY - 10n]);
       // $100 of A for $98.10 of C; B is left out, so the vault counts as $800.
-      await vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.4525", 18)], { account: dave.account });
+      await vault.write.swap([a, parseUnits("1", 18), c, parseUnits("2.4525", 18), "0x"], { account: dave.account });
       assert.equal(await guard.read.weeklyLoss(), shareOf(parseUnits("1.9", 18), parseUnits("800", 18)));
       await viem.assertions.revertWithCustomError(
-        vault.write.swap([b, 1n, a, 1n], { account: dave.account }),
+        vault.write.swap([b, 1n, a, 1n, "0x"], { account: dave.account }),
         guard,
         "StalePrice",
       );

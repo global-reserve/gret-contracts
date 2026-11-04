@@ -82,10 +82,16 @@ contract SwitchableGuard is IPriceGuard {
         acceptAll = value;
     }
 
-    function checkSwap(address sell, uint256 sellAmount, address buy, uint256 received) external {
+    function checkSwap(
+        address sell,
+        uint256 sellAmount,
+        address buy,
+        uint256 received,
+        bytes calldata data
+    ) external {
         require(msg.sender == vault);
         if (acceptAll) return;
-        inner.checkSwap(sell, sellAmount, buy, received);
+        inner.checkSwap(sell, sellAmount, buy, received, data);
     }
 
     // The inner ChainlinkPriceGuard values "its vault" (this contract) through these views.
@@ -152,7 +158,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
             uint256 amount = vault.reserves()[dir] >> shift;
             if (amount == 0) break;
             uint256 received = guard.valueOf(sold, amount) * 9801 / 10_000 * 1e18 / guard.valueOf(bought, 1e18);
-            try vault.swap(sold, amount, bought, received) {
+            try vault.swap(sold, amount, bought, received, "") {
                 ++accepted;
                 dir ^= 1;
             } catch (bytes memory reason) {
@@ -199,7 +205,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         uint256 received = guard.valueOf(address(healthy), 1e18) * 9801 / 10_000 * 1e18
             / guard.valueOf(address(faulty), 1e18);
         vm.prank(REBALANCER);
-        vault.swap(address(healthy), 1e18, address(faulty), received);
+        vault.swap(address(healthy), 1e18, address(faulty), received, "");
     }
 
     /// Control: one guard, one fixed week.
@@ -394,7 +400,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
 
         uint256 rBefore = r.balanceOf(REBALANCER);
         vm.prank(REBALANCER);
-        target.swap(address(r), 5e6, address(h), 2e6);
+        target.swap(address(r), 5e6, address(h), 2e6, "");
         assertEq(r.balanceOf(REBALANCER) - rBefore, 5e6); // 5 whole R, $200
         assertEq(target.reserves()[1], 0);
         assertEq(target.reserves()[0], 2e18 + 2e6);
@@ -421,7 +427,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
 
         uint256 hBefore = h.balanceOf(REBALANCER);
         vm.prank(REBALANCER);
-        target.swap(address(h), 2e18, address(u), 5e6); // 5e6 units = 5e-12 U now
+        target.swap(address(h), 2e18, address(u), 5e6, ""); // 5e6 units = 5e-12 U now
         assertEq(h.balanceOf(REBALANCER) - hBefore, 2e18); // all of H, $200
         assertEq(target.reserves()[0], 0);
         assertEq(g.weeklyLoss(), 0);
@@ -458,7 +464,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         (GRETVault target, MockERC20 h, SenderFreezeToken s, ChainlinkPriceGuard g) = _writtenOffSetup();
         vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentExcluded.selector, address(s)));
         vm.prank(REBALANCER);
-        target.swap(address(h), 4e18, address(s), 10e18);
+        target.swap(address(h), 4e18, address(s), 10e18, "");
         assertEq(g.weeklyLoss(), 0);
         assertEq(target.reserves()[0], 4e18);
         assertEq(target.reserves()[1], 0);
@@ -468,7 +474,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         (GRETVault target, MockERC20 h, SenderFreezeToken s,) = _writtenOffSetup();
         vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentExcluded.selector, address(s)));
         vm.prank(REBALANCER);
-        target.swap(address(h), 1, address(s), 3);
+        target.swap(address(h), 1, address(s), 3, "");
         uint256 version = target.basketVersion();
         vm.prank(ALICE);
         uint256[] memory paid = target.redeem(SHARE, _pair(0, 0), version);
@@ -499,7 +505,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         uint256 hSold = vault.reserves()[0];
         uint256 fBought = (hSold * 5 + 1) / 2;
         vm.prank(REBALANCER);
-        vault.swap(address(healthy), hSold, address(faulty), fBought);
+        vault.swap(address(healthy), hSold, address(faulty), fBought, "");
         // Rebalancer's gain at market prices: H at $100, F at $39.24.
         uint256 gain1 = hSold * 100 - fBought * 3924 / 100;
 
@@ -507,7 +513,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         uint256 fSold = vault.reserves()[1] / 2;
         uint256 hBought = (fSold * 2 + 4) / 5;
         vm.prank(REBALANCER);
-        vault.swap(address(faulty), fSold, address(healthy), hBought);
+        vault.swap(address(faulty), fSold, address(healthy), hBought, "");
         uint256 gain2 = fSold * 4076 / 100 - hBought * 100;
 
         assertEq(g.weeklyLoss(), recorded); // nothing recorded, even with the budget exhausted
@@ -525,7 +531,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         uint256 sold = 1e18; // $100 of H
         uint256 received = g.valueOf(address(healthy), sold) * 9801 / 10_000 * 1e18 / g.valueOf(address(faulty), 1e18);
         vm.prank(REBALANCER);
-        vault.swap(address(healthy), sold, address(faulty), received);
+        vault.swap(address(healthy), sold, address(faulty), received, "");
         uint256 marketReceived = received * 3924 / 100; // F at $39.24
         uint256 lossBpsMarket = (sold * 100 - marketReceived) * 10_000 / (sold * 100);
         assertGt(lossBpsMarket, 380);
@@ -545,12 +551,12 @@ contract GRETVaultGuardTest is GRETVaultCase {
         // During and right after the notice it behaves like ChainlinkPriceGuard.
         vm.prank(REBALANCER);
         vm.expectPartialRevert(ChainlinkPriceGuard.SwapLossTooHigh.selector);
-        vault.swap(address(healthy), 2e18, address(faulty), 1);
+        vault.swap(address(healthy), 2e18, address(faulty), 1, "");
         // Later the owner flips it; the vault sees no proposal and no notice.
         sw.setAcceptAll(true);
         assertEq(vault.pendingPriceGuard(), address(0));
         vm.prank(REBALANCER);
-        vault.swap(address(healthy), 2e18, address(faulty), 1);
+        vault.swap(address(healthy), 2e18, address(faulty), 1, "");
         assertEq(vault.reserves()[0], 0);
     }
 

@@ -327,17 +327,17 @@ contract GRETVaultLiveBalanceTest is Test {
         faulty.mint(address(this), 98.1e18);
         faulty.approve(address(vault), type(uint256).max);
         healthy.approve(address(vault), type(uint256).max);
-        vault.swap(address(healthy), 100e18, address(faulty), 98.1e18);
+        vault.swap(address(healthy), 100e18, address(faulty), 98.1e18, "");
         assertEq(guard.weeklyLoss(), 0.019e18);
         vm.expectPartialRevert(ChainlinkPriceGuard.WeeklyLossTooHigh.selector);
-        vault.swap(address(faulty), 98.1e18, address(healthy), 96.2361e18);
+        vault.swap(address(faulty), 98.1e18, address(healthy), 96.2361e18, "");
     }
 
     function test_liveBalance_excludedComponentCannotBeBoughtBackByRebalancer() public {
         _guard(); _writeOff();
         faulty.mint(address(this), 100e18); faulty.approve(address(vault), type(uint256).max);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentExcluded.selector, address(faulty)));
-        vault.swap(address(healthy), 1e18, address(faulty), 1e18);
+        vault.swap(address(healthy), 1e18, address(faulty), 1e18, "");
     }
 
     function test_liveBalance_sensitiveViewsRejectTokenCallbacks() public {

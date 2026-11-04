@@ -497,15 +497,18 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// @notice Exchanges `sellAmount` of one component for `buyAmount` of another: the rebalancer
     /// delivers first and receives after. The price guard must accept the exchange; without a guard
     /// there are no swaps. Mint and redemption follow the new reserves, so this is how the amounts
-    /// per GRET change.
+    /// per GRET change. `guardData` goes to the guard unchanged, for one that needs prices signed
+    /// by an oracle; the vault never reads it.
     /// @dev Both components must be active. The vault measures receipts with the mint tolerance and
     /// the guard prices them. Selling a whole balance stops mint from asking for that component;
     /// removing it still needs an empty balance, which a donation can prevent.
-    function swap(address sell, uint256 sellAmount, address buy, uint256 buyAmount)
-        external
-        nonReentrant
-        returns (uint256 received)
-    {
+    function swap(
+        address sell,
+        uint256 sellAmount,
+        address buy,
+        uint256 buyAmount,
+        bytes calldata guardData
+    ) external nonReentrant returns (uint256 received) {
         if (msg.sender != rebalancer) revert NotRebalancer(msg.sender);
         _requireNotLiquidating();
         _indexOf(sell);
@@ -523,7 +526,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
 
         received = _pull(buyIndex, buyAmount, IERC20(buy).balanceOf(address(this)));
         // The guard excludes this measured receipt when reconstructing pre-swap backing.
-        guard.checkSwap(sell, sellAmount, buy, received);
+        guard.checkSwap(sell, sellAmount, buy, received, guardData);
         IERC20(sell).safeTransfer(msg.sender, sellAmount);
         emit Swapped(sell, sellAmount, buy, received);
     }

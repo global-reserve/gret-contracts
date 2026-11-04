@@ -88,7 +88,7 @@ describe("GRETVault: adversarial components and callers", async () => {
       [
         "swap",
         ({ vault, tokens }) =>
-          encodeFunctionData({ abi: vault.abi, functionName: "swap", args: [tokens[0].address, 1n, tokens[1].address, 1n] }),
+          encodeFunctionData({ abi: vault.abi, functionName: "swap", args: [tokens[0].address, 1n, tokens[1].address, 1n, "0x"] }),
       ],
       [
         "addComponent",
@@ -123,7 +123,7 @@ describe("GRETVault: adversarial components and callers", async () => {
         "swap",
         false,
         ({ vault, tokens, faulty }) =>
-          vault.write.swap([tokens[0].address, 1n, faulty.address, 1n], { account: faulty.address }),
+          vault.write.swap([tokens[0].address, 1n, faulty.address, 1n, "0x"], { account: faulty.address }),
       ],
     ];
 

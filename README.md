@@ -165,7 +165,7 @@ Functions of `GRETVault`, besides the standard ERC-20 ones and EIP-2612 `permit`
 | `rescue(token, to, amount)` | Governance | Withdraws foreign tokens, or ordinary components only with zero normal supply; never historically written-off tokens; reverts if another component's balance drops |
 | `proposeGovernance(next)` / `cancelGovernanceProposal()` | Governance | Proposes or discards the next governance |
 | `acceptGovernance()` | Proposed governance | Takes over the role, 7 to 14 days after the proposal |
-| `swap(sell, sellAmount, buy, buyAmount)` | Rebalancer | Delivers `buyAmount` of one component and takes `sellAmount` of another's reserve; the price guard must accept it |
+| `swap(sell, sellAmount, buy, buyAmount, guardData)` | Rebalancer | Delivers `buyAmount` of one component and takes `sellAmount` of another's reserve; the price guard must accept it and receives `guardData` unchanged |
 | `proposeRebalancer(next)` / `cancelRebalancerProposal()` / `revokeRebalancer()` | Governance | Proposes or discards the next rebalancer, or removes the current and pending ones at once |
 | `acceptRebalancer()` | Proposed rebalancer | Takes over the role, 7 to 14 days after the proposal; there is none at deployment |
 | `proposePriceGuard(guard)` / `cancelPriceGuardProposal()` | Governance | Proposes or discards the contract that must accept every swap; never the vault or an EIP-7702 account |

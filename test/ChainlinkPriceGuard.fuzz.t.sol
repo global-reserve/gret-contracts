@@ -114,7 +114,7 @@ contract ChainlinkPriceGuardFuzzTest is Test {
                 / guard.valueOf(address(tokens[buy]), 10 ** tokens[buy].decimals());
             if (buyAmount == 0) continue;
             vm.prank(REBALANCER);
-            try vault.swap(address(tokens[sell]), sellAmount, address(tokens[buy]), buyAmount) {} catch {}
+            try vault.swap(address(tokens[sell]), sellAmount, address(tokens[buy]), buyAmount, "") {} catch {}
         }
         assertLe(guard.weeklyLoss(), 2e16);
         assertGe(_aliceValue() + TOLERANCE, valueBefore * 9_800 / 10_000);

@@ -141,12 +141,15 @@ redemption and swaps never call it.
 
 ## Rebalancing and price guard
 
-Only the appointed rebalancer may `swap(sell, sellAmount, buy, buyAmount)`, and only in normal
-mode with positive supply. Both tokens must be registered, distinct and active, and both
-amounts positive. A swap cannot silently reactivate a written-off or newly added component.
-Sell amount cannot exceed its live balance. The vault pulls the buy token, measures the
-receipt with mint's tolerance, calls its guard, and sends the sell amount only after
-approval. Every failure reverts the entire exchange.
+Only the appointed rebalancer may `swap(sell, sellAmount, buy, buyAmount, guardData)`, and only
+in normal mode with positive supply. Both tokens must be registered, distinct and active, and
+both amounts positive. A swap cannot silently reactivate a written-off or newly added
+component. Sell amount cannot exceed its live balance. The vault pulls the buy token, measures
+the receipt with mint's tolerance, calls its guard, and sends the sell amount only after
+approval. Every failure reverts the entire exchange. `guardData` reaches the guard unchanged
+and the vault never reads it, so a later guard can take prices signed by an oracle (a pull
+oracle) without a new vault; the rebalancer chooses those bytes, so such a guard must
+authenticate them. `ChainlinkPriceGuard` ignores them.
 
 The vault and guard must be deployed as a compatible pair. `IPriceGuard.checkSwap` is called
 after the buy tokens have arrived and before the sell tokens leave. In `ChainlinkPriceGuard`,

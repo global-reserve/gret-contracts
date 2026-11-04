@@ -18,7 +18,7 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
     function test_donationBlocksRemovalUntilAnotherSale() public {
         _appoint(vault, address(new MockPriceGuard()));
         vm.prank(REBALANCER);
-        vault.swap(address(healthy), 2e18, address(faulty), 1);
+        vault.swap(address(healthy), 2e18, address(faulty), 1, "");
         healthy.mint(address(vault), 11);
         vm.startPrank(GOVERNANCE);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentNotEmpty.selector, address(healthy), 11));
@@ -27,7 +27,7 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vault.deactivateEmptyComponent(address(healthy));
         vm.stopPrank();
         vm.prank(REBALANCER);
-        vault.swap(address(healthy), 11, address(faulty), 1);
+        vault.swap(address(healthy), 11, address(faulty), 1, "");
         vm.prank(GOVERNANCE);
         vault.removeComponent(address(healthy));
         assertEq(vault.componentCount(), 1);
@@ -41,7 +41,7 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         uint256 marketBefore = 2 * 100e18 + 5 * marketPrice;
         vm.recordLogs();
         vm.prank(REBALANCER);
-        vault.swap(address(healthy), 2e18, address(faulty), 5e18);
+        vault.swap(address(healthy), 2e18, address(faulty), 5e18, "");
         Vm.Log[] memory logs = vm.getRecordedLogs();
         for (uint256 i; i < logs.length; ++i) {
             assertNotEq(logs[i].topics[0], ChainlinkPriceGuard.LossRecorded.selector);
@@ -81,8 +81,8 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vault.acceptRebalancer();
         vault.applyPriceGuard();
         vm.startPrank(REBALANCER);
-        vault.swap(address(healthy), 2e18, address(faulty), 1);
-        vault.swap(address(faulty), 5e18 + 1, address(healthy), 1);
+        vault.swap(address(healthy), 2e18, address(faulty), 1, "");
+        vault.swap(address(faulty), 5e18 + 1, address(healthy), 1, "");
         vm.stopPrank();
         assertEq(vault.balanceOf(BOB), SHARE);
         assertEq(healthy.balanceOf(address(vault)), 1);
@@ -268,7 +268,7 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vm.prank(BOB);
         vault.mint(1e9, _pair(type(uint256).max, type(uint256).max), 0, 0);
         vm.prank(REBALANCER);
-        vault.swap(address(healthy), whole, address(faulty), 1);
+        vault.swap(address(healthy), whole, address(faulty), 1, "");
         assertGt(vault.reserves()[0], 0);
         vm.expectRevert(
             abi.encodeWithSelector(GRETVault.ComponentNotEmpty.selector, address(healthy), vault.reserves()[0])

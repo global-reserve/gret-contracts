@@ -341,14 +341,14 @@ contract GRETVaultExitsTest is GRETVaultCase {
 
         // Normal: a 1% loss passes.
         vm.prank(REBALANCER);
-        v.swap(address(healthy), 1e18, address(b), 0.99e18);
+        v.swap(address(healthy), 1e18, address(b), 0.99e18, "");
         uint256 normalLoss = guard.weeklyLoss();
         vm.revertToState(snap);
 
         // Reverting balanceOf: M counts as zero and the loss weighs more.
         m.setMode(OddBalanceToken.Mode.Revert);
         vm.prank(REBALANCER);
-        v.swap(address(healthy), 1e18, address(b), 0.99e18);
+        v.swap(address(healthy), 1e18, address(b), 0.99e18, "");
         uint256 revertLoss = guard.weeklyLoss();
         assertGt(revertLoss, normalLoss);
         vm.revertToState(snap);
@@ -358,7 +358,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
         for (uint256 i; i < 2; ++i) {
             m.setMode(malformed[i]);
             vm.prank(REBALANCER);
-            v.swap(address(healthy), 1e18, address(b), 0.99e18);
+            v.swap(address(healthy), 1e18, address(b), 0.99e18, "");
             assertEq(guard.weeklyLoss(), revertLoss);
             vm.revertToState(snap);
         }

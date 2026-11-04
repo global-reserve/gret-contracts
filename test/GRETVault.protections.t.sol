@@ -414,14 +414,14 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.startPrank(REBALANCER);
         // $200 of H for 1 wei of F.
         vm.expectRevert(abi.encodeWithSelector(ChainlinkPriceGuard.SwapLossTooHigh.selector, 200e18, 40));
-        vault.swap(address(healthy), 2e18, address(faulty), 1);
+        vault.swap(address(healthy), 2e18, address(faulty), 1, "");
         // Each swap loses $1.90, 1.9% of the $100 it sells and about 0.48% of the vault.
-        vault.swap(address(healthy), 1e18, address(faulty), 2.4525e18);
-        vault.swap(address(healthy), 1e18, address(faulty), 2.4525e18);
-        vault.swap(address(faulty), 2.5e18, address(healthy), 0.981e18);
-        vault.swap(address(faulty), 2.5e18, address(healthy), 0.981e18);
+        vault.swap(address(healthy), 1e18, address(faulty), 2.4525e18, "");
+        vault.swap(address(healthy), 1e18, address(faulty), 2.4525e18, "");
+        vault.swap(address(faulty), 2.5e18, address(healthy), 0.981e18, "");
+        vault.swap(address(faulty), 2.5e18, address(healthy), 0.981e18, "");
         vm.expectPartialRevert(ChainlinkPriceGuard.WeeklyLossTooHigh.selector);
-        vault.swap(address(faulty), 2.5e18, address(healthy), 0.981e18);
+        vault.swap(address(faulty), 2.5e18, address(healthy), 0.981e18, "");
         vm.stopPrank();
         uint256 expected;
         uint256 value = 400e18;
@@ -441,7 +441,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.startPrank(REBALANCER);
         vault.mint(99 * SHARE, _pair(198e18, 495e18), 99 * SHARE, 0);
         // With $40,000 in the vault, a swap that loses $0.10.
-        vault.swap(address(healthy), 1e18, address(faulty), 2.4975e18);
+        vault.swap(address(healthy), 1e18, address(faulty), 2.4975e18, "");
         vault.redeem(99 * SHARE, _pair(0, 0), 0);
         vm.stopPrank();
         assertLe(_lossySwapsUntilRefused(guard), 2);
@@ -455,7 +455,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.prank(BOB);
         vault.mint(99 * SHARE, _pair(198e18, 495e18), 99 * SHARE, 0);
         vm.prank(REBALANCER);
-        vault.swap(address(healthy), 1e18, address(faulty), 2.4975e18);
+        vault.swap(address(healthy), 1e18, address(faulty), 2.4975e18, "");
         vm.prank(BOB);
         vault.redeem(99 * SHARE, _pair(0, 0), 0);
         assertLe(_lossySwapsUntilRefused(guard), 2);
@@ -501,9 +501,9 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         // Each swap sells a whole healthy reserve for 98% of its value. The first takes 1% of the
         // $200 left; the second would take 2% more.
         vm.startPrank(REBALANCER);
-        target.swap(address(healthy), 100e18, address(other), 98e18);
+        target.swap(address(healthy), 100e18, address(other), 98e18, "");
         vm.expectPartialRevert(ChainlinkPriceGuard.WeeklyLossTooHigh.selector);
-        target.swap(address(other), 198e18, address(healthy), 194.04e18);
+        target.swap(address(other), 198e18, address(healthy), 194.04e18, "");
         vm.stopPrank();
         assertEq(guard.weeklyLoss(), 1e16);
         assertEq(healthy.balanceOf(address(target)) + other.balanceOf(address(target)), 198e18);
@@ -540,7 +540,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         last.mint(REBALANCER, 2e18);
         vm.startPrank(REBALANCER);
         last.approve(address(target), 2e18);
-        target.swap(address(first), 2e18, address(last), 2e18);
+        target.swap(address(first), 2e18, address(last), 2e18, "");
         vm.stopPrank();
         // Alice signs against [A, B, C], explicitly requiring 100 B.
         uint256[] memory signedMinima = _three(0, 100e18, 0);
@@ -565,7 +565,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
                 passed % 2 == 0 ? (address(healthy), address(faulty)) : (address(faulty), address(healthy));
             uint256 amount = vault.reserves()[passed % 2];
             uint256 received = guard.valueOf(sold, amount) * 981 / 1000 * 1e18 / guard.valueOf(bought, 1e18);
-            try vault.swap(sold, amount, bought, received) {}
+            try vault.swap(sold, amount, bought, received, "") {}
             catch (bytes memory reason) {
                 assertEq(bytes4(reason), ChainlinkPriceGuard.WeeklyLossTooHigh.selector);
                 break;

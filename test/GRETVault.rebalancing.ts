@@ -66,7 +66,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
 
       for (const account of [governance, alice]) {
         await viem.assertions.revertWithCustomErrorWithArgs(
-          vault.write.swap([tokens[0].address, 1n, tokens[1].address, 1n], { account: account.account }),
+          vault.write.swap([tokens[0].address, 1n, tokens[1].address, 1n, "0x"], { account: account.account }),
           vault,
           "NotRebalancer",
           [getAddress(account.account.address)],
@@ -135,7 +135,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
         [getAddress(dave.account.address), zeroAddress],
       );
       await viem.assertions.revertWithCustomError(
-        vault.write.swap([tokens[0].address, 1n, tokens[1].address, 1n], { account: dave.account }),
+        vault.write.swap([tokens[0].address, 1n, tokens[1].address, 1n, "0x"], { account: dave.account }),
         vault,
         "NotRebalancer",
       );
@@ -186,7 +186,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
 
       assert.equal(await vault.read.priceGuard(), zeroAddress);
       await viem.assertions.revertWithCustomError(
-        vault.write.swap([tokens[0].address, 1n, tokens[1].address, 1n], { account: dave.account }),
+        vault.write.swap([tokens[0].address, 1n, tokens[1].address, 1n, "0x"], { account: dave.account }),
         vault,
         "NoPriceGuard",
       );
@@ -269,19 +269,24 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       const { vault, tokens, guard, dave } = basket;
       const [a, b] = tokens;
 
-      await vault.write.swap([a.address, INITIAL_AMOUNTS[0], b.address, INITIAL_AMOUNTS[1]], { account: dave.account });
+      // The rebalancer's data reaches the guard unchanged, for instance prices signed by an oracle.
+      const signedPrices = "0x5ec0de";
+      await vault.write.swap([a.address, INITIAL_AMOUNTS[0], b.address, INITIAL_AMOUNTS[1], signedPrices], {
+        account: dave.account,
+      });
       assert.equal(await guard.read.calls(), 1n);
       assert.equal(await guard.read.lastSell(), getAddress(a.address));
       assert.equal(await guard.read.lastSellAmount(), INITIAL_AMOUNTS[0]);
       assert.equal(await guard.read.lastBuy(), getAddress(b.address));
       assert.equal(await guard.read.lastReceived(), INITIAL_AMOUNTS[1]);
+      assert.equal(await guard.read.lastData(), signedPrices);
       assert.deepEqual(await guard.read.reservesSeen(), doubled);
 
       await guard.write.setRefuse([true]);
       const reserves = await vault.read.reserves();
       const daveBefore = await balancesOf(basket, dave.account.address);
       await viem.assertions.revertWithCustomError(
-        vault.write.swap([a.address, 1n, b.address, 1n], { account: dave.account }),
+        vault.write.swap([a.address, 1n, b.address, 1n, "0x"], { account: dave.account }),
         guard,
         "SwapRefused",
       );
@@ -312,7 +317,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       const daveBefore = await balancesOf(basket, dave.account.address);
 
       await viem.assertions.emitWithArgs(
-        vault.write.swap([a.address, sold, b.address, bought], { account: dave.account }),
+        vault.write.swap([a.address, sold, b.address, bought, "0x"], { account: dave.account }),
         vault,
         "Swapped",
         [getAddress(a.address), sold, getAddress(b.address), bought],
@@ -347,7 +352,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
 
       await faulty.write.setFault([Fault.ShortByOneOnTransfer]);
       await viem.assertions.emitWithArgs(
-        vault.write.swap([a, 1n, faulty.address, bought], { account: dave.account }),
+        vault.write.swap([a, 1n, faulty.address, bought, "0x"], { account: dave.account }),
         vault,
         "Swapped",
         [getAddress(a), 1n, getAddress(faulty.address), bought - 1n],
@@ -357,7 +362,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await faulty.write.setFault([Fault.FeeOnTransfer]);
       const large = parseUnits("1", 18);
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.swap([a, 1n, faulty.address, large], { account: dave.account }),
+        vault.write.swap([a, 1n, faulty.address, large, "0x"], { account: dave.account }),
         vault,
         "UnexpectedBalance",
         [2n, large, large - large / 100n],
@@ -369,7 +374,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       const [a, b] = tokens.map((token) => token.address);
       await tokens[0].write.mint([vault.address, 10n ** 18n]);
       const swap = (sell: `0x${string}`, sellAmount: bigint, buy: `0x${string}`, buyAmount: bigint) =>
-        vault.write.swap([sell, sellAmount, buy, buyAmount], { account: dave.account });
+        vault.write.swap([sell, sellAmount, buy, buyAmount, "0x"], { account: dave.account });
 
       await viem.assertions.revertWithCustomErrorWithArgs(
         swap(a, doubled[0] + 10n ** 18n + 1n, b, 1n),
@@ -401,19 +406,19 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await faulty.write.slash([vault.address, loss]);
 
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.swap([faulty.address, left + 1n, a, 1n], { account: dave.account }),
+        vault.write.swap([faulty.address, left + 1n, a, 1n, "0x"], { account: dave.account }),
         vault,
         "SwapExceedsReserve",
         [getAddress(faulty.address), left + 1n, left],
       );
-      await vault.write.swap([faulty.address, left, a, 1n], { account: dave.account });
+      await vault.write.swap([faulty.address, left, a, 1n, "0x"], { account: dave.account });
       assert.deepEqual(await vault.read.reserves(), [doubled[0] + 1n, doubled[1], 0n]);
     });
 
     it("refuses to mint once swaps and losses empty every reserve, so GRET is never backed by nothing", async () => {
       const { vault, tokens, faulty, bob, dave } = await networkHelpers.loadFixture(rebalancerFixture);
-      await vault.write.swap([tokens[0].address, doubled[0], faulty.address, 1n], { account: dave.account });
-      await vault.write.swap([tokens[1].address, doubled[1], faulty.address, 1n], { account: dave.account });
+      await vault.write.swap([tokens[0].address, doubled[0], faulty.address, 1n, "0x"], { account: dave.account });
+      await vault.write.swap([tokens[1].address, doubled[1], faulty.address, 1n, "0x"], { account: dave.account });
       await faulty.write.slash([vault.address, doubled[2] + 2n]);
 
       assert.deepEqual(await vault.read.reserves(), [0n, 0n, 0n]);
@@ -455,7 +460,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       assert.equal(await vault.read.componentReadyAt([d]), readyAt);
       // The rebalancer cannot buy it with the reserves while it waits.
       await viem.assertions.revertWithCustomError(
-        vault.write.swap([tokens[0].address, 1n, d, 1n], { account: dave.account }),
+        vault.write.swap([tokens[0].address, 1n, d, 1n, "0x"], { account: dave.account }),
         vault,
         "NotAComponent",
       );
@@ -498,7 +503,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
 
       await vault.write.activateComponent([d], { account: governance.account });
       const boughtD = parseUnits("50", 6);
-      await vault.write.swap([tokens[0].address, INITIAL_AMOUNTS[0], d, boughtD], { account: dave.account });
+      await vault.write.swap([tokens[0].address, INITIAL_AMOUNTS[0], d, boughtD, "0x"], { account: dave.account });
       const reserves = [doubled[0] - INITIAL_AMOUNTS[0], doubled[1], doubled[2], boughtD];
       assert.deepEqual(await vault.read.reserves(), reserves);
       const expected = reserves.map((reserve) => mulDivUp(INITIAL_SHARES, reserve, 2n * INITIAL_SHARES));
@@ -565,7 +570,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       );
 
       // The rebalancer sells all of A; five donated base units fit the removal dust bound.
-      await vault.write.swap([a, doubled[0], b, INITIAL_AMOUNTS[1]], { account: dave.account });
+      await vault.write.swap([a, doubled[0], b, INITIAL_AMOUNTS[1], "0x"], { account: dave.account });
       await tokens[0].write.mint([vault.address, 5n]);
       await viem.assertions.emitWithArgs(
         vault.write.removeComponent([a], { account: governance.account }),
@@ -614,7 +619,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       // A leaves and D joins: the basket keeps three entries, but each position holds another token.
       await vault.write.announceComponent([tokenD.address], { account: governance.account });
       await networkHelpers.time.increase(SEVEN_DAYS);
-      await vault.write.swap([tokens[0].address, doubled[0], tokens[1].address, INITIAL_AMOUNTS[1]], {
+      await vault.write.swap([tokens[0].address, doubled[0], tokens[1].address, INITIAL_AMOUNTS[1], "0x"], {
         account: dave.account,
       });
       await vault.write.removeComponent([tokens[0].address], { account: governance.account });
@@ -642,7 +647,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await vault.write.activateLiquidation({ account: governance.account });
 
       for (const call of [
-        () => vault.write.swap([tokens[0].address, 1n, tokens[1].address, 1n], { account: dave.account }),
+        () => vault.write.swap([tokens[0].address, 1n, tokens[1].address, 1n, "0x"], { account: dave.account }),
         () => vault.write.addComponent([tokenD.address], { account: governance.account }),
         () => vault.write.removeComponent([tokens[0].address], { account: governance.account }),
       ]) {

@@ -116,7 +116,14 @@ contract ChainlinkPriceGuard is IPriceGuard {
     }
 
     /// @inheritdoc IPriceGuard
-    function checkSwap(address sell, uint256 sellAmount, address buy, uint256 received) external {
+    /// @dev Prices come from the feeds only, so the rebalancer's data is ignored.
+    function checkSwap(
+        address sell,
+        uint256 sellAmount,
+        address buy,
+        uint256 received,
+        bytes calldata
+    ) external {
         if (msg.sender != vault) revert NotVault(msg.sender);
         // What leaves is valued up and what arrives down, so rounding never hides a loss.
         uint256 soldValue = _value(sell, sellAmount, Math.Rounding.Ceil);

@@ -353,7 +353,7 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
     await networkHelpers.setBalance(vault.address, parseEther("1"));
     const gasOf = async (hash: Hex) => (await publicClient.waitForTransactionReceipt({ hash })).gasUsed - 21_000n;
     const fairGas = await gasOf(
-      await guard.write.checkSwap([paxg, sold, cbBTC, satoshisFor(10_000n) + 1n], { account: vault.address }),
+      await guard.write.checkSwap([paxg, sold, cbBTC, satoshisFor(10_000n) + 1n, "0x"], { account: vault.address }),
     );
     assert.equal(await guard.read.weeklyLoss(), 0n);
     // Reconstruct the pre-trade value independently, then deliver the incoming buy token.
@@ -369,7 +369,7 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
     const incoming = satoshisFor(9_810n);
     const bitcoin = await viem.getContractAt("MockERC20", cbBTC);
     await bitcoin.write.transfer([vault.address, incoming], { account: alice.account });
-    const lossHash = await guard.write.checkSwap([paxg, sold, cbBTC, incoming], { account: vault.address });
+    const lossHash = await guard.write.checkSwap([paxg, sold, cbBTC, incoming, "0x"], { account: vault.address });
     const lossGas = await gasOf(lossHash);
     const [recorded] = parseEventLogs({
       abi: guard.abi,
@@ -381,7 +381,7 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
     assert.equal(weeklyLoss, (loss * 10n ** 18n + priced - 1n) / priced);
     assert.equal(await guard.read.weeklyLoss(), weeklyLoss);
     await viem.assertions.revertWithCustomError(
-      guard.write.checkSwap([paxg, sold, cbBTC, satoshisFor(9_500n)], { account: vault.address }),
+      guard.write.checkSwap([paxg, sold, cbBTC, satoshisFor(9_500n), "0x"], { account: vault.address }),
       guard,
       "SwapLossTooHigh",
     );
@@ -439,7 +439,7 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
     for (let i = 0; i < tokens.length; i++) {
       const next = (i + 1) % tokens.length;
       const reserve = (await vault.read.reserves())[i];
-      const hash = await vault.write.swap([tokens[i], reserve / 2n, tokens[next], units[next]], { account: bob.account });
+      const hash = await vault.write.swap([tokens[i], reserve / 2n, tokens[next], units[next], "0x"], { account: bob.account });
       swapGas = (await publicClient.waitForTransactionReceipt({ hash })).gasUsed;
       await assertBacked();
     }
@@ -447,7 +447,7 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
     // bob sells all the cbBTC, governance removes it, and the rest keep their order.
     const cbBTC = tokens[8];
     const cbBTCReserve = (await vault.read.reserves())[8];
-    await vault.write.swap([cbBTC, cbBTCReserve, tokens[7], units[7]], { account: bob.account });
+    await vault.write.swap([cbBTC, cbBTCReserve, tokens[7], units[7], "0x"], { account: bob.account });
     await vault.write.removeComponent([cbBTC], { account: governance.account });
     const remaining = tokens.filter((token) => token !== cbBTC);
     assert.deepEqual(await vault.read.components(), remaining);

@@ -269,7 +269,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
     /// Sells 1 H ($100) for 2.46 F ($98.40): a $1.60 loss, 1.6% of the value sold.
     function _losingSwap() internal {
         vm.prank(REBALANCER);
-        vault.swap(address(healthy), 1e18, address(faulty), 246e16);
+        vault.swap(address(healthy), 1e18, address(faulty), 246e16, "");
     }
 
     function test_swapLossSharedWithoutDodge() public {

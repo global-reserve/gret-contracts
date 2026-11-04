@@ -169,7 +169,7 @@ contract GRETVaultHandler is Test {
         if (held == 0) return;
         uint256 amount = bound(seed, 1, held);
         _fund(buy, address(this), amount);
-        try vault.swap(address(tokens[sell]), amount, address(tokens[buy]), amount) {
+        try vault.swap(address(tokens[sell]), amount, address(tokens[buy]), amount, "") {
             successes["swap"]++;
         } catch {}
     }

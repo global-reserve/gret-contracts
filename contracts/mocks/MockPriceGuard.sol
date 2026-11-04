@@ -19,6 +19,7 @@ contract MockPriceGuard is IPriceGuard {
     uint256 public lastSellAmount;
     address public lastBuy;
     uint256 public lastReceived;
+    bytes public lastData;
     uint256[] private _reservesSeen;
 
     error SwapRefused();
@@ -27,13 +28,20 @@ contract MockPriceGuard is IPriceGuard {
         refuse = refuse_;
     }
 
-    function checkSwap(address sell, uint256 sellAmount, address buy, uint256 received) external {
+    function checkSwap(
+        address sell,
+        uint256 sellAmount,
+        address buy,
+        uint256 received,
+        bytes calldata data
+    ) external {
         if (refuse) revert SwapRefused();
         ++calls;
         lastSell = sell;
         lastSellAmount = sellAmount;
         lastBuy = buy;
         lastReceived = received;
+        lastData = data;
         IERC20[] memory tokens = IReserves(msg.sender).components();
         delete _reservesSeen;
         for (uint256 i; i < tokens.length; ++i) {

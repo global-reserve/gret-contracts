@@ -74,7 +74,7 @@ contract GRETVaultComponentsTest is Test {
         uint256 buyAmount = 1e12 + (random >> 128) % 1e12;
         uint256 oldVersion = vault.basketVersion();
         vm.prank(REBALANCER);
-        vault.swap(sold, expectedReserve[sold], bought, buyAmount);
+        vault.swap(sold, expectedReserve[sold], bought, buyAmount, "");
         expectedReserve[sold] = 0;
         expectedReserve[bought] += buyAmount;
 
