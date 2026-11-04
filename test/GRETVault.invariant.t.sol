@@ -48,7 +48,7 @@ contract GRETVaultHandler is Test {
             }
         }
         vm.prank(actors[0]);
-        vault.mint(1e18, initial, 1e18, 0);
+        vault.mint(1e18, actors[0], initial, 1e18, 0);
         everMinted[actors[0]] = true;
         vault.setFeeRecipient(actors[4]);
         vault.proposeRebalancer(address(this));
@@ -76,7 +76,7 @@ contract GRETVaultHandler is Test {
             }
         }
         vm.prank(actor);
-        try vault.mint(shares, limits, 1, version) returns (uint256 minted, uint256[] memory received) {
+        try vault.mint(shares, actor, limits, 1, version) returns (uint256 minted, uint256[] memory received) {
             if (minted + fee != shares || vault.totalSupply() != before_.supply + shares ||
                 vault.balanceOf(actor) != before_.actorShares + shares - fee ||
                 vault.balanceOf(actors[4]) != before_.recipientShares + fee) violation = true;
@@ -113,7 +113,7 @@ contract GRETVaultHandler is Test {
             }
         }
         vm.prank(actor);
-        try vault.redeemSkipping(shares, limits, skipped, version) returns (uint256[] memory paid) {
+        try vault.redeemSkipping(shares, actor, limits, skipped, version) returns (uint256[] memory paid) {
             if (vault.totalSupply() + burned != before_.supply ||
                 vault.balanceOf(actor) + shares != before_.actorShares + (actor == actors[4] ? fee : 0) ||
                 vault.balanceOf(actors[4]) + (actor == actors[4] ? shares : 0) != before_.recipientShares + fee) {

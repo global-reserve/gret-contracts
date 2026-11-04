@@ -121,7 +121,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
             vm.startPrank(user);
             healthy.approve(address(v), MAX);
             m.approve(address(v), MAX);
-            v.mint(SHARE, _pair(MAX, MAX), SHARE, 0);
+            v.mint(SHARE, user, _pair(MAX, MAX), SHARE, 0);
             vm.stopPrank();
         }
     }
@@ -143,16 +143,16 @@ contract GRETVaultExitsTest is GRETVaultCase {
     /// in full by redeeming the whole supply.
     function test_soleHolderLeavesInFullDespiteFee() public {
         vm.prank(ALICE);
-        vault.mint(19e18, _pair(MAX, MAX), 0, 0);
+        vault.mint(19e18, ALICE, _pair(MAX, MAX), 0, 0);
         _setRedeemFee(vault, ALICE, 500);
 
         vm.prank(ALICE);
-        vault.redeem(10e18, _pair(0, 0), 0);
+        vault.redeem(10e18, ALICE, _pair(0, 0), 0);
         assertEq(vault.totalSupply(), 10.5e18, "the fee stays in the supply");
         assertEq(vault.balanceOf(ALICE), 10.5e18);
 
         vm.prank(ALICE);
-        vault.redeem(10.5e18, _pair(0, 0), 0);
+        vault.redeem(10.5e18, ALICE, _pair(0, 0), 0);
         assertEq(vault.totalSupply(), 0);
         assertEq(healthy.balanceOf(address(vault)), 0);
         assertEq(faulty.balanceOf(address(vault)), 0);
@@ -162,20 +162,20 @@ contract GRETVaultExitsTest is GRETVaultCase {
     /// over, the holder of every GRET leaves without a fee, though the fee is still positive.
     function test_handOverOfFeeGretFreesLastHolder() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(MAX, MAX), 0, 0);
+        vault.mint(SHARE, BOB, _pair(MAX, MAX), 0, 0);
         _setRedeemFee(vault, CAROL, 500);
         vm.prank(ALICE);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
         assertEq(vault.balanceOf(CAROL), 0.05e18);
 
         vm.expectRevert(abi.encodeWithSelector(GRETVault.SupplyBelowMinimum.selector, 0.1e18));
         vm.prank(BOB);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, BOB, _pair(0, 0), 0);
 
         vm.prank(CAROL);
         vault.transfer(BOB, 0.05e18);
         vm.prank(BOB);
-        vault.redeem(1.05e18, _pair(0, 0), 0);
+        vault.redeem(1.05e18, BOB, _pair(0, 0), 0);
         assertEq(vault.totalSupply(), 0);
         assertEq(vault.balanceOf(CAROL), 0);
     }
@@ -187,18 +187,18 @@ contract GRETVaultExitsTest is GRETVaultCase {
         extra = bound(extra, 0, 1000e18);
         if (extra != 0) {
             vm.prank(ALICE);
-            vault.mint(extra, _pair(MAX, MAX), 0, 0);
+            vault.mint(extra, ALICE, _pair(MAX, MAX), 0, 0);
         }
         _setRedeemFee(vault, ALICE, fee);
         x = bound(x, 1, vault.totalSupply() - 1);
         vm.prank(ALICE);
-        try vault.redeem(x, _pair(0, 0), 0) {
+        try vault.redeem(x, ALICE, _pair(0, 0), 0) {
             assertGe(vault.totalSupply(), 1e18);
         } catch {}
         uint256 s = vault.totalSupply();
         assertEq(vault.balanceOf(ALICE), s);
         vm.prank(ALICE);
-        vault.redeem(s, _pair(0, 0), 0);
+        vault.redeem(s, ALICE, _pair(0, 0), 0);
         assertEq(vault.totalSupply(), 0);
         assertEq(healthy.balanceOf(address(vault)), 0);
         assertEq(faulty.balanceOf(address(vault)), 0);
@@ -210,7 +210,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
 
     function _redeemCall(GRETVault v) internal returns (bool ok, bytes memory ret) {
         vm.prank(ALICE);
-        (ok, ret) = address(v).call(abi.encodeCall(GRETVault.redeem, (SHARE, _pair(0, 0), 0)));
+        (ok, ret) = address(v).call(abi.encodeCall(GRETVault.redeem, (SHARE, ALICE, _pair(0, 0), 0)));
     }
 
     function test_redeemFailsClosedOnBrokenBalanceRead() public {
@@ -234,7 +234,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
         vm.prank(ALICE);
         address[] memory skipped = new address[](1);
         skipped[0] = address(m);
-        uint256[] memory paid = v.redeemSkipping(SHARE, _pair(0, 0), skipped, 0);
+        uint256[] memory paid = v.redeemSkipping(SHARE, ALICE, _pair(0, 0), skipped, 0);
         assertEq(paid[0], 2e18);
         assertEq(paid[1], 0);
         vm.revertToState(snap);
@@ -317,8 +317,8 @@ contract GRETVaultExitsTest is GRETVaultCase {
         healthy.approve(address(v), MAX);
         b.approve(address(v), MAX);
         m.approve(address(v), MAX);
-        v.mint(SHARE, _three(MAX, MAX, MAX), 0, 0);
-        v.mint(9e18, _three(MAX, MAX, MAX), 0, 0);
+        v.mint(SHARE, ALICE, _three(MAX, MAX, MAX), 0, 0);
+        v.mint(9e18, ALICE, _three(MAX, MAX, MAX), 0, 0);
         vm.stopPrank();
         vm.startPrank(REBALANCER);
         b.approve(address(v), MAX);
@@ -460,7 +460,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
 
     function _redeemCallGas(GRETVault v, uint256 g) internal returns (bool ok, bytes memory ret) {
         vm.prank(ALICE);
-        (ok, ret) = address(v).call{gas: g}(abi.encodeCall(GRETVault.redeem, (SHARE, _pair(0, 0), 0)));
+        (ok, ret) = address(v).call{gas: g}(abi.encodeCall(GRETVault.redeem, (SHARE, ALICE, _pair(0, 0), 0)));
     }
 
     /// @dev 11 components (10 mocks + the expensive one last, the attacker's best position): the
@@ -491,18 +491,18 @@ contract GRETVaultExitsTest is GRETVaultCase {
             for (uint256 i; i < 11; ++i) {
                 basket[i].approve(address(v), MAX);
             }
-            v.mint(SHARE, maxIn, 0, 0);
+            v.mint(SHARE, user, maxIn, 0, 0);
             vm.stopPrank();
         }
         m.slash(address(v), 1e18);
         m.setBurn(40_000_000);
         vm.prank(ALICE);
-        (bool ok,) = address(v).call{gas: 16_700_000}(abi.encodeCall(GRETVault.redeem, (SHARE, zero, 0)));
+        (bool ok,) = address(v).call{gas: 16_700_000}(abi.encodeCall(GRETVault.redeem, (SHARE, ALICE, zero, 0)));
         assertFalse(ok);
         address[] memory skipped = new address[](1);
         skipped[0] = address(m);
         vm.prank(ALICE);
-        uint256[] memory paid = v.redeemSkipping{gas: 16_700_000}(SHARE, zero, skipped, 0);
+        uint256[] memory paid = v.redeemSkipping{gas: 16_700_000}(SHARE, ALICE, zero, skipped, 0);
         for (uint256 i; i < 10; ++i) assertEq(paid[i], 1e18);
         assertEq(paid[10], 0);
     }
@@ -520,7 +520,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
         if (_coolList.length != 0) vm.cool(address(v));
         uint256 before = m.rawBalanceOf(ALICE);
         vm.prank(ALICE);
-        (bool ok,) = address(v).call{gas: g}(abi.encodeCall(GRETVault.redeem, (SHARE, zero, 0)));
+        (bool ok,) = address(v).call{gas: g}(abi.encodeCall(GRETVault.redeem, (SHARE, ALICE, zero, 0)));
         stale = ok && m.rawBalanceOf(ALICE) - before == 1e18;
         vm.revertToState(snap);
     }
@@ -537,7 +537,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
             n.mint(user, 100e18);
             vm.startPrank(user);
             n.approve(address(v), MAX);
-            v.mint(SHARE, _one(MAX), SHARE, 0);
+            v.mint(SHARE, user, _one(MAX), SHARE, 0);
             vm.stopPrank();
         }
         _liquidateBoth(v);
@@ -587,7 +587,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
         address[] memory skipped = new address[](1);
         skipped[0] = address(faulty);
         vm.prank(ALICE);
-        paid = vault.redeemSkipping(SHARE, _pair(0, 0), skipped, 0);
+        paid = vault.redeemSkipping(SHARE, ALICE, _pair(0, 0), skipped, 0);
     }
 
     function test_jitMintCapturesSkippedShare() public {
@@ -608,12 +608,12 @@ contract GRETVaultExitsTest is GRETVaultCase {
         uint256 hBefore = healthy.balanceOf(entrant);
         uint256 fBefore = faulty.rawBalanceOf(entrant);
         vm.prank(entrant);
-        vault.mint(SHARE, _pair(MAX, MAX), SHARE, 0);
+        vault.mint(SHARE, entrant, _pair(MAX, MAX), SHARE, 0);
         _aliceSkipsF();
         assertEq(vault.reserves()[1], 10e18, "the skipped share stays in the reserve");
         assertEq(faulty.rawBalanceOf(address(vault)), 10e18);
         vm.prank(entrant);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, entrant, _pair(0, 0), 0);
         assertEq(vault.totalSupply(), 0);
         assertEq(healthy.balanceOf(entrant), hBefore);
         assertEq(faulty.rawBalanceOf(entrant) - fBefore, 5e18, "entrant gains the skipped 5 F");
@@ -625,22 +625,22 @@ contract GRETVaultExitsTest is GRETVaultCase {
         vault.setMintPaused(true);
         vm.expectRevert(GRETVault.MintIsPaused.selector);
         vm.prank(entrant);
-        vault.mint(SHARE, _pair(MAX, MAX), SHARE, 0);
+        vault.mint(SHARE, entrant, _pair(MAX, MAX), SHARE, 0);
         _aliceSkipsF();
         assertEq(faulty.rawBalanceOf(address(vault)), 5e18);
     }
 
     function test_jitShareWhenSkipperIsNotLast() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(MAX, MAX), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(MAX, MAX), SHARE, 0);
         faulty.setBlocked(ALICE, true);
         address entrant = REBALANCER;
         uint256 fBefore = faulty.rawBalanceOf(entrant);
         vm.prank(entrant);
-        vault.mint(SHARE, _pair(MAX, MAX), SHARE, 0);
+        vault.mint(SHARE, entrant, _pair(MAX, MAX), SHARE, 0);
         _aliceSkipsF();
         vm.prank(entrant);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, entrant, _pair(0, 0), 0);
         uint256 gain = faulty.rawBalanceOf(entrant) - fBefore;
         assertEq(gain, 2.5e18);
     }

@@ -23,8 +23,8 @@ describe("GRETVault: emergency liquidation", async () => {
   async function holdersFixture() {
     const basket = await deployBasket(viem);
     const { vault, alice, bob, dave } = basket;
-    await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
-    await vault.write.mint([INITIAL_SHARES / 3n, NO_MAX, 0n, 0n], { account: bob.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES / 3n, bob.account.address, NO_MAX, 0n, 0n], { account: bob.account });
     await vault.write.transfer([dave.account.address, INITIAL_SHARES / 4n], { account: alice.account });
     return basket;
   }
@@ -143,12 +143,12 @@ describe("GRETVault: emergency liquidation", async () => {
       await vault.write.activateLiquidation({ account: governance.account });
 
       await viem.assertions.revertWithCustomError(
-        vault.write.mint([1n, NO_MAX, 0n, 0n], { account: alice.account }),
+        vault.write.mint([1n, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account }),
         vault,
         "LiquidationIsActive",
       );
       await viem.assertions.revertWithCustomError(
-        vault.write.redeem([1n, NO_MIN, 0n], { account: alice.account }),
+        vault.write.redeem([1n, alice.account.address, NO_MIN, 0n], { account: alice.account }),
         vault,
         "LiquidationIsActive",
       );

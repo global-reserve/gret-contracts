@@ -85,7 +85,7 @@ contract GRETVaultAccountingTest is Test {
         uint256 beforeRounding = rounding.balanceOf(BOB);
         uint256 effectiveReserve = rounding.balanceOf(address(vault));
         vm.prank(BOB);
-        (uint256 issued,) = vault.mint(shares, _pair(type(uint256).max, type(uint256).max), 1, 0);
+        (uint256 issued,) = vault.mint(shares, BOB, _pair(type(uint256).max, type(uint256).max), 1, 0);
 
         uint256 supply = vault.totalSupply();
         uint256[] memory reserves = vault.reserves();
@@ -95,7 +95,7 @@ contract GRETVaultAccountingTest is Test {
         assertGe(rounding.balanceOf(address(vault)), reserves[1], "rounding reserve insolvent");
 
         vm.prank(BOB);
-        vault.redeem(issued, _pair(0, 0), 0);
+        vault.redeem(issued, BOB, _pair(0, 0), 0);
         assertLe(healthy.balanceOf(BOB), beforeHealthy, "healthy roundtrip profit");
         assertLe(rounding.balanceOf(BOB), beforeRounding, "rounding roundtrip profit");
     }
@@ -117,7 +117,7 @@ contract GRETVaultAccountingTest is Test {
             vm.stopPrank();
         }
         vm.prank(ALICE);
-        vault.mint(SHARE, _pair(2e18, initial), SHARE, 0);
+        vault.mint(SHARE, ALICE, _pair(2e18, initial), SHARE, 0);
     }
 
     function _pair(uint256 a, uint256 b) private pure returns (uint256[] memory amounts) {
@@ -151,15 +151,15 @@ contract GRETVaultLiveBalanceTest is Test {
             vm.stopPrank();
         }
         vm.prank(ALICE);
-        vault.mint(SHARE, _pair(100e18, 100e18), SHARE, 0);
+        vault.mint(SHARE, ALICE, _pair(100e18, 100e18), SHARE, 0);
     }
 
     function test_liveBalance_existingDividendCannotBeCaptured() public {
         healthy.mint(address(vault), 10e18);
         uint256 before = healthy.balanceOf(BOB);
         vm.startPrank(BOB);
-        vault.mint(9 * SHARE, _pair(990e18, 900e18), 9 * SHARE, 0);
-        vault.redeem(9 * SHARE, _pair(0, 0), 0);
+        vault.mint(9 * SHARE, BOB, _pair(990e18, 900e18), 9 * SHARE, 0);
+        vault.redeem(9 * SHARE, BOB, _pair(0, 0), 0);
         vm.stopPrank();
         assertEq(healthy.balanceOf(BOB), before);
         assertEq(vault.reserves()[0], 110e18);
@@ -170,8 +170,8 @@ contract GRETVaultLiveBalanceTest is Test {
         healthy.mint(address(vault), donation);
         uint256 before = healthy.balanceOf(BOB);
         vm.startPrank(BOB);
-        vault.mint(shares, _pair(type(uint256).max, type(uint256).max), shares, 0);
-        vault.redeem(shares, _pair(0, 0), 0);
+        vault.mint(shares, BOB, _pair(type(uint256).max, type(uint256).max), shares, 0);
+        vault.redeem(shares, BOB, _pair(0, 0), 0);
         vm.stopPrank();
         assertLe(healthy.balanceOf(BOB), before);
         assertGe(vault.reserves()[0], 100e18 + donation);
@@ -182,8 +182,8 @@ contract GRETVaultLiveBalanceTest is Test {
         _writeOff();
         vault.setMintPaused(false);
         vm.startPrank(BOB);
-        vault.mint(SHARE, _pair(100e18, 0), SHARE, 0);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.mint(SHARE, BOB, _pair(100e18, 0), SHARE, 0);
+        vault.redeem(SHARE, BOB, _pair(0, 0), 0);
         vm.stopPrank();
         assertEq(faulty.rawBalanceOf(address(vault)), 100e18);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.TokenWrittenOff.selector, address(faulty)));
@@ -194,14 +194,14 @@ contract GRETVaultLiveBalanceTest is Test {
         faulty.slash(address(vault), 100e18);
         faulty.setBlocked(BOB, true);
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(100e18, 0), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(100e18, 0), SHARE, 0);
         faulty.mint(address(vault), 1);
         vm.expectRevert(abi.encodeWithSelector(MockFaultyERC20.AccountBlocked.selector, BOB));
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(100e18, 1), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(100e18, 1), SHARE, 0);
         vault.deactivateEmptyComponent(address(faulty));
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(100e18, 0), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(100e18, 0), SHARE, 0);
     }
 
     function test_liveBalance_newComponentStaysInactiveUntilExplicitActivation() public {
@@ -249,25 +249,25 @@ contract GRETVaultLiveBalanceTest is Test {
         uint256[] memory quote = vault.previewRedeemSkipping(SHARE, skipped);
         assertEq(quote[0], 100e18); assertEq(quote[1], 0);
         vm.prank(ALICE);
-        vault.redeemSkipping(SHARE, quote, skipped, 0);
+        vault.redeemSkipping(SHARE, ALICE, quote, skipped, 0);
     }
 
     function test_liveBalance_bootstrapOwnsOldActiveReceipts() public {
         vm.prank(ALICE);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
         healthy.mint(address(vault), 10e18);
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(100e18, 100e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(100e18, 100e18), SHARE, 0);
         assertEq(vault.previewRedeem(SHARE)[0], 110e18);
     }
 
     function test_liveBalance_emptyNormalComponentCanBeRescuedButNotAfterRestart() public {
         vm.prank(ALICE);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
         healthy.mint(address(vault), 10);
         vault.rescue(address(healthy), ALICE, 10);
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(100e18, 100e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(100e18, 100e18), SHARE, 0);
         healthy.mint(address(vault), 10);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.BackingToken.selector, address(healthy)));
         vault.rescue(address(healthy), ALICE, 10);
@@ -344,7 +344,7 @@ contract GRETVaultLiveBalanceTest is Test {
         faulty.setReentry(address(vault), abi.encodeCall(GRETVault.previewMint, (SHARE)));
         vm.expectRevert(bytes4(keccak256("ReentrancyGuardReentrantCall()")));
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(100e18, 100e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(100e18, 100e18), SHARE, 0);
         assertEq(vault.totalSupply(), SHARE);
     }
 

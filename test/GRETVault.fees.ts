@@ -30,8 +30,8 @@ describe("GRETVault: mint and redemption fees", async () => {
   async function holdersFixture() {
     const basket = await deployBasket(viem);
     const { vault, governance, alice, bob, carol } = basket;
-    await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
-    await vault.write.mint([INITIAL_SHARES / 3n, NO_MAX, 0n, 0n], { account: bob.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES / 3n, bob.account.address, NO_MAX, 0n, 0n], { account: bob.account });
     await vault.write.setFeeRecipient([carol.account.address], { account: governance.account });
     return basket;
   }
@@ -163,7 +163,7 @@ describe("GRETVault: mint and redemption fees", async () => {
       const fee = INITIAL_SHARES / 100n;
 
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.mint([INITIAL_SHARES, NO_MAX, INITIAL_SHARES, 0n], { account: dave.account }),
+        vault.write.mint([INITIAL_SHARES, dave.account.address, NO_MAX, INITIAL_SHARES, 0n], { account: dave.account }),
         vault,
         "SharesBelowMin",
         [INITIAL_SHARES - fee, INITIAL_SHARES],
@@ -171,7 +171,7 @@ describe("GRETVault: mint and redemption fees", async () => {
       const paid = await vault.read.previewMint([INITIAL_SHARES]);
       const daveBefore = await balancesOf(basket, dave.account.address);
       await viem.assertions.emitWithArgs(
-        vault.write.mint([INITIAL_SHARES, NO_MAX, INITIAL_SHARES - fee, 0n], { account: dave.account }),
+        vault.write.mint([INITIAL_SHARES, dave.account.address, NO_MAX, INITIAL_SHARES - fee, 0n], { account: dave.account }),
         vault,
         "FeeCharged",
         [getAddress(dave.account.address), getAddress(carol.account.address), fee],
@@ -194,7 +194,7 @@ describe("GRETVault: mint and redemption fees", async () => {
       await vault.write.setFeeRecipient([carol.account.address], { account: governance.account });
       await raiseFees(basket, 500n, 0n);
 
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
       assert.equal(await vault.read.totalSupply(), INITIAL_SHARES);
       assert.equal(await vault.read.balanceOf([alice.account.address]), (INITIAL_SHARES * 95n) / 100n);
       assert.equal(await vault.read.balanceOf([carol.account.address]), (INITIAL_SHARES * 5n) / 100n);
@@ -214,10 +214,10 @@ describe("GRETVault: mint and redemption fees", async () => {
       assert.deepEqual(await vault.read.previewRedeem([shares]), expected);
       const before = await balancesOf(basket, alice.account.address);
       await viem.assertions.emitWithArgs(
-        vault.write.redeem([shares, expected, 0n], { account: alice.account }),
+        vault.write.redeem([shares, alice.account.address, expected, 0n], { account: alice.account }),
         vault,
         "Redeemed",
-        [getAddress(alice.account.address), shares - fee, expected],
+        [getAddress(alice.account.address), getAddress(alice.account.address), shares - fee, expected],
       );
       const after = await balancesOf(basket, alice.account.address);
       assert.deepEqual(after.map((balance, i) => balance - before[i]), expected);
@@ -232,16 +232,16 @@ describe("GRETVault: mint and redemption fees", async () => {
       await raiseFees(basket, 100n, 100n);
 
       // 1% of 150 base units is 1.5, charged as 2.
-      await vault.write.mint([150n, NO_MAX, 0n, 0n], { account: alice.account });
+      await vault.write.mint([150n, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
       assert.equal(await vault.read.balanceOf([carol.account.address]), 2n);
       // A mint whose fee would take every share is refused.
       await viem.assertions.revertWithCustomError(
-        vault.write.mint([1n, NO_MAX, 0n, 0n], { account: alice.account }),
+        vault.write.mint([1n, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account }),
         vault,
         "ZeroShares",
       );
       // 1% of 50 base units is 0.5, charged as 1.
-      await vault.write.redeem([50n, NO_MIN, 0n], { account: alice.account });
+      await vault.write.redeem([50n, alice.account.address, NO_MIN, 0n], { account: alice.account });
       assert.equal(await vault.read.balanceOf([carol.account.address]), 3n);
     });
 
@@ -265,11 +265,11 @@ describe("GRETVault: mint and redemption fees", async () => {
     it("redeeming the whole supply pays no fee, so a sole holder can always leave", async () => {
       const basket = await networkHelpers.loadFixture(basketFixture);
       const { vault, governance, alice, carol } = basket;
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
       await vault.write.setFeeRecipient([carol.account.address], { account: governance.account });
       await raiseFees(basket, 0n, 500n);
 
-      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account });
+      await vault.write.redeem([INITIAL_SHARES, alice.account.address, NO_MIN, 0n], { account: alice.account });
       assert.equal(await vault.read.totalSupply(), 0n);
       assert.equal(await vault.read.balanceOf([carol.account.address]), 0n);
     });
@@ -277,23 +277,23 @@ describe("GRETVault: mint and redemption fees", async () => {
     it("the recipient's GRET stays in the supply, so another last holder cannot leave it below 1 GRET", async () => {
       const basket = await networkHelpers.loadFixture(basketFixture);
       const { vault, governance, alice, bob, carol } = basket;
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: bob.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, bob.account.address, NO_MAX, 0n, 0n], { account: bob.account });
       await vault.write.setFeeRecipient([carol.account.address], { account: governance.account });
       await raiseFees(basket, 0n, 500n);
 
       const fee = (INITIAL_SHARES * 500n) / BPS;
-      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account });
+      await vault.write.redeem([INITIAL_SHARES, alice.account.address, NO_MIN, 0n], { account: alice.account });
       assert.equal(await vault.read.balanceOf([carol.account.address]), fee);
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: bob.account }),
+        vault.write.redeem([INITIAL_SHARES, bob.account.address, NO_MIN, 0n], { account: bob.account }),
         vault,
         "SupplyBelowMinimum",
         [2n * fee],
       );
       // Once the recipient hands its GRET over, bob holds the whole supply and leaves without a fee.
       await vault.write.transfer([bob.account.address, fee], { account: carol.account });
-      await vault.write.redeem([INITIAL_SHARES + fee, NO_MIN, 0n], { account: bob.account });
+      await vault.write.redeem([INITIAL_SHARES + fee, bob.account.address, NO_MIN, 0n], { account: bob.account });
       assert.equal(await vault.read.totalSupply(), 0n);
     });
   });

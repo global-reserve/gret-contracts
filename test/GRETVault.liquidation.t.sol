@@ -34,7 +34,7 @@ contract GRETVaultLiquidationConservationTest is Test {
         token.mint(_holder(0), initial[0]);
         vm.startPrank(_holder(0));
         token.approve(address(vault), initial[0]);
-        vault.mint(SHARES, initial, SHARES, 0);
+        vault.mint(SHARES, _holder(0), initial, SHARES, 0);
         for (uint256 i = 1; i < HOLDERS; ++i) vault.transfer(_holder(i), SHARES / HOLDERS);
         vm.stopPrank();
         vault.activateLiquidation();
@@ -153,7 +153,7 @@ contract GRETVaultLiquidationShortfallTest is Test {
             vm.startPrank(holders[k]);
             h.approve(address(vault), type(uint256).max);
             f.approve(address(vault), type(uint256).max);
-            vault.mint(vault.totalSupply() == 0 ? 1e18 : shares[k], maxIn, 0, 0);
+            vault.mint(vault.totalSupply() == 0 ? 1e18 : shares[k], holders[k], maxIn, 0, 0);
             vm.stopPrank();
         }
         vm.prank(GOVERNANCE);

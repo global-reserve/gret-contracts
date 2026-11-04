@@ -43,7 +43,7 @@ abstract contract GRETVaultCase is Test {
             vm.stopPrank();
         }
         vm.prank(ALICE);
-        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        vault.mint(SHARE, ALICE, _pair(2e18, 5e18), SHARE, 0);
     }
 
     /// @dev Appoints the rebalancer and `guard` through the vault's seven-day wait.
@@ -86,7 +86,7 @@ abstract contract GRETVaultCase is Test {
             token.mint(user, initial);
             vm.startPrank(user);
             token.approve(address(single), initial);
-            single.mint(SHARE, _one(initial), SHARE, 0);
+            single.mint(SHARE, user, _one(initial), SHARE, 0);
             vm.stopPrank();
         }
     }

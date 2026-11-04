@@ -23,7 +23,7 @@ contract WriteOffBundler {
         for (uint256 i; i < maxIn.length; ++i) {
             maxIn[i] = type(uint256).max;
         }
-        (minted,) = vault.mint(shares, maxIn, 0, vault.basketVersion());
+        (minted,) = vault.mint(shares, address(this), maxIn, 0, vault.basketVersion());
     }
 }
 
@@ -36,11 +36,11 @@ contract VersionReadingWallet {
             tokens[i].approve(address(vault), type(uint256).max);
             maxIn[i] = type(uint256).max;
         }
-        vault.mint(shares, maxIn, shares, vault.basketVersion());
+        vault.mint(shares, address(this), maxIn, shares, vault.basketVersion());
     }
 
     function redeemNow(GRETVault vault, uint256 shares) external returns (uint256[] memory) {
-        return vault.redeem(shares, new uint256[](vault.componentCount()), vault.basketVersion());
+        return vault.redeem(shares, address(this), new uint256[](vault.componentCount()), vault.basketVersion());
     }
 }
 
@@ -59,7 +59,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         faulty.setBlocked(address(vault), true);
         vm.expectRevert(abi.encodeWithSelector(MockFaultyERC20.AccountBlocked.selector, address(vault)));
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        vault.mint(SHARE, BOB, _pair(type(uint256).max, type(uint256).max), 0, 0);
         vm.prank(GOVERNANCE);
         vault.proposeWriteOff(address(faulty));
         readyAt = vault.writeOffReadyAt(address(faulty));
@@ -87,7 +87,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         vault.setMintPaused(false);
         vm.stopPrank();
         vm.prank(ALICE);
-        uint256[] memory alice = vault.redeem(SHARE, _pair(0, 0), 0);
+        uint256[] memory alice = vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
         assertEq(alice[0], 2e18);
         assertEq(alice[1], 5e18);
     }
@@ -143,10 +143,10 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         vault.setMintPaused(false);
         vm.stopPrank();
         vm.prank(BOB);
-        (, uint256[] memory paid) = vault.mint(9 * SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        (, uint256[] memory paid) = vault.mint(9 * SHARE, BOB, _pair(type(uint256).max, type(uint256).max), 0, 0);
         assertEq(paid[1], 45e18);
         vm.prank(ALICE);
-        uint256[] memory alice = vault.redeem(SHARE, _pair(0, 0), 0);
+        uint256[] memory alice = vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
         assertEq(alice[1], 5e18);
     }
 
@@ -166,7 +166,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
 
     function test_versionBumpsRevertPreparedRedemptions() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
         uint256 n = 10;
         address[] memory junk = _announceJunk(n);
         vm.warp(block.timestamp + 7 days);
@@ -193,7 +193,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
                 vault.removeComponent(junk[k - n]);
             }
             vm.prank(BOB);
-            try vault.redeem(SHARE, minOut, v) {} catch (bytes memory reason) {
+            try vault.redeem(SHARE, BOB, minOut, v) {} catch (bytes memory reason) {
                 assertEq(reason, abi.encodeWithSelector(GRETVault.BasketChanged.selector, v, v + 1));
                 ++reverted;
             }
@@ -205,7 +205,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         assertLt(block.timestamp, rebalancerReadyAt);
         uint256 current = vault.basketVersion();
         vm.prank(BOB);
-        vault.redeem(SHARE, _pair(0, 0), current);
+        vault.redeem(SHARE, BOB, _pair(0, 0), current);
         assertEq(vault.balanceOf(BOB), 0);
     }
 
@@ -213,7 +213,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
     /// at once at any later time, so the bump capacity can be stockpiled long before a notice.
     function test_stockpiledJunkBumpsLongAfter() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
         address[] memory junk = _announceJunk(3);
         Junk late = new Junk();
         vm.prank(GOVERNANCE);
@@ -232,7 +232,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         vault.removeComponent(junk[1]); // not the last index: also shifts junk[2]
         vm.expectRevert(abi.encodeWithSelector(GRETVault.BasketChanged.selector, v, v + 1));
         vm.prank(BOB);
-        vault.redeem(SHARE, minOut, v);
+        vault.redeem(SHARE, BOB, minOut, v);
     }
 
     /// Mitigation check: a wallet that reads the version at execution is not affected by bumps in
@@ -275,7 +275,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
 
     function test_swapLossSharedWithoutDodge() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
         ChainlinkPriceGuard guard = _chainlinkGuard();
         uint256 aliceBefore = _gretValue(guard, SHARE);
         uint256 bobBefore = _wealth(guard, BOB);
@@ -287,15 +287,15 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
 
     function test_swapLossDodgedByRedeemThenMint() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
         ChainlinkPriceGuard guard = _chainlinkGuard();
         uint256 aliceBefore = _gretValue(guard, SHARE);
         uint256 bobBefore = _wealth(guard, BOB);
         vm.prank(BOB);
-        vault.redeem(SHARE, _pair(0, 0), 0); // sees the swap coming
+        vault.redeem(SHARE, BOB, _pair(0, 0), 0); // sees the swap coming
         _losingSwap();
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
         assertEq(aliceBefore - _gretValue(guard, SHARE), 16e17);
         assertEq(_wealth(guard, BOB), bobBefore);
         assertEq(guard.weeklyLoss(), 4e15);
@@ -322,7 +322,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         a.approve(address(v), 1e18);
         b.approve(address(v), 1e18);
         c.approve(address(v), 1e18);
-        v.mint(SHARE, _three(1e18, 1e18, 1e18), SHARE, 0);
+        v.mint(SHARE, ALICE, _three(1e18, 1e18, 1e18), SHARE, 0);
         vm.stopPrank();
 
         b.slash(address(v), 3e17);

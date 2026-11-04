@@ -322,8 +322,10 @@ balances and supply.
   of at least about 10,000 base units so one unit of rounding is a small relative change.
 - Initial issuance is exactly one GRET before fees. Subsequent receipts are measured; mint
   returns net `minted` and actual `received`. Exact input tokens produce the requested gross
-  issuance; rounding tokens can reduce it. `hasMinted` belongs to the caller: a router's mint
-  qualifies the router, not its underlying user.
+  issuance; rounding tokens can reduce it. The caller pays a mint and burns a redemption;
+  `to` receives the GRET or the components, and a redemption to zero or to the vault reverts.
+  `hasMinted` belongs to the caller: a router's mint qualifies the router, not its underlying
+  user.
 - There is no normal reserve ledger. Every active required balance is read before input or
   output transfers. Unreadable/reverting/malformed balances fail closed. Explicitly excluded
   or skipped tokens are not called. Initial amounts of zero are omitted during bootstrap.

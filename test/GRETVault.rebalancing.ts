@@ -41,8 +41,8 @@ describe("GRETVault: rebalancing and basket changes", async () => {
     const basket = await basketFixture();
     const { vault, governance, alice, bob, dave } = basket;
     const guard = await viem.deployContract("MockPriceGuard");
-    await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
-    await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: bob.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES, bob.account.address, NO_MAX, 0n, 0n], { account: bob.account });
     await vault.write.proposeRebalancer([dave.account.address], { account: governance.account });
     await vault.write.proposePriceGuard([guard.address], { account: governance.account });
     await networkHelpers.time.increase(SEVEN_DAYS);
@@ -62,7 +62,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
   describe("rebalancer", () => {
     it("starts empty, so nobody can swap, not even governance", async () => {
       const { vault, tokens, governance, alice } = await networkHelpers.loadFixture(basketFixture);
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
 
       for (const account of [governance, alice]) {
         await viem.assertions.revertWithCustomErrorWithArgs(
@@ -179,7 +179,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
   describe("price guard", () => {
     it("starts empty, and without a guard not even the rebalancer can swap", async () => {
       const { vault, tokens, governance, alice, dave } = await networkHelpers.loadFixture(basketFixture);
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
       await vault.write.proposeRebalancer([dave.account.address], { account: governance.account });
       await networkHelpers.time.increase(SEVEN_DAYS);
       await vault.write.acceptRebalancer({ account: dave.account });
@@ -298,8 +298,8 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       const { vault, guard, governance, alice, bob, carol } = await networkHelpers.loadFixture(rebalancerFixture);
       await guard.write.setRefuse([true]);
 
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: carol.account });
-      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, carol.account.address, NO_MAX, 0n, 0n], { account: carol.account });
+      await vault.write.redeem([INITIAL_SHARES, alice.account.address, NO_MIN, 0n], { account: alice.account });
       await vault.write.activateLiquidation({ account: governance.account });
       await vault.write.convertToClaims([INITIAL_SHARES], { account: bob.account });
       await vault.write.claim([0n, bob.account.address, 0n], { account: bob.account });
@@ -337,7 +337,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
         reserves.map((reserve) => mulDivUp(INITIAL_SHARES, reserve, 2n * INITIAL_SHARES)),
       );
       const bobBefore = await balancesOf(basket, bob.account.address);
-      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: bob.account });
+      await vault.write.redeem([INITIAL_SHARES, bob.account.address, NO_MIN, 0n], { account: bob.account });
       const bobAfter = await balancesOf(basket, bob.account.address);
       assert.deepEqual(
         bobAfter.map((balance, i) => balance - bobBefore[i]),
@@ -424,7 +424,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       assert.deepEqual(await vault.read.reserves(), [0n, 0n, 0n]);
       assert.deepEqual(await vault.read.previewMint([INITIAL_SHARES]), [0n, 0n, 0n]);
       await viem.assertions.revertWithCustomError(
-        vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: bob.account }),
+        vault.write.mint([INITIAL_SHARES, bob.account.address, NO_MAX, 0n, 0n], { account: bob.account }),
         vault,
         "EmptyBasket",
       );
@@ -488,13 +488,13 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       // Limits prepared for the old basket are refused, and arrays now have four entries; mint
       // skips D while it has no reserve.
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: carol.account }),
+        vault.write.mint([INITIAL_SHARES, carol.account.address, NO_MAX, 0n, 0n], { account: carol.account }),
         vault,
         "BasketChanged",
         [0n, 1n],
       );
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 1n], { account: carol.account }),
+        vault.write.mint([INITIAL_SHARES, carol.account.address, NO_MAX, 0n, 1n], { account: carol.account }),
         vault,
         "LengthMismatch",
         [4n, 3n],
@@ -510,7 +510,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       assert.deepEqual(await vault.read.previewMint([INITIAL_SHARES]), expected);
 
       const carolBefore = await tokenD.read.balanceOf([carol.account.address]);
-      await vault.write.mint([INITIAL_SHARES, [...NO_MAX, maxUint256], 0n, 1n], { account: carol.account });
+      await vault.write.mint([INITIAL_SHARES, carol.account.address, [...NO_MAX, maxUint256], 0n, 1n], { account: carol.account });
       assert.equal(carolBefore - (await tokenD.read.balanceOf([carol.account.address])), expected[3]);
       assert.equal(await vault.read.balanceOf([carol.account.address]), INITIAL_SHARES);
     });
@@ -587,8 +587,8 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       // Indexes moved down: income, mint and redemption follow the new order.
       await tokens[1].write.mint([vault.address, 7n]);
       assert.equal((await vault.read.reserves())[0], doubled[1] + INITIAL_AMOUNTS[1] + 7n);
-      await vault.write.mint([INITIAL_SHARES, [maxUint256, maxUint256], 0n, 1n], { account: carol.account });
-      await vault.write.redeem([INITIAL_SHARES, [0n, 0n], 1n], { account: bob.account });
+      await vault.write.mint([INITIAL_SHARES, carol.account.address, [maxUint256, maxUint256], 0n, 1n], { account: carol.account });
+      await vault.write.redeem([INITIAL_SHARES, bob.account.address, [0n, 0n], 1n], { account: bob.account });
 
       // What is left of A is now outside the basket, so governance decides on all of it.
       await vault.write.rescue([a, governance.account.address, 5n], { account: governance.account });
@@ -628,15 +628,15 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       assert.equal(await vault.read.basketVersion(), 2n);
 
       for (const call of [
-        () => vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account }),
-        () => vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account }),
-        () => vault.write.redeemSkipping([INITIAL_SHARES, NO_MIN, [], 0n], { account: alice.account }),
+        () => vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account }),
+        () => vault.write.redeem([INITIAL_SHARES, alice.account.address, NO_MIN, 0n], { account: alice.account }),
+        () => vault.write.redeemSkipping([INITIAL_SHARES, alice.account.address, NO_MIN, [], 0n], { account: alice.account }),
         () => vault.write.setInitialAmounts([INITIAL_AMOUNTS, 0n], { account: governance.account }),
       ]) {
         await viem.assertions.revertWithCustomErrorWithArgs(call(), vault, "BasketChanged", [0n, 2n]);
       }
       // The same arrays, prepared for the current basket, go through.
-      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 2n], { account: alice.account });
+      await vault.write.redeem([INITIAL_SHARES, alice.account.address, NO_MIN, 2n], { account: alice.account });
       assert.equal(await vault.read.balanceOf([alice.account.address]), 0n);
     });
 
@@ -664,7 +664,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
 
       // The issuer freezes the vault: redemption reverts and the component cannot be sold.
       await faulty.write.setBlocked([vault.address, true]);
-      await assert.rejects(vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account }));
+      await assert.rejects(vault.write.redeem([INITIAL_SHARES, alice.account.address, NO_MIN, 0n], { account: alice.account }));
       const hash = await vault.write.proposeWriteOff([c], { account: governance.account });
       const readyAt = (await blockTimestamp(hash)) + SEVEN_DAYS;
       assert.equal(await vault.read.writeOffReadyAt([c]), readyAt);
@@ -692,7 +692,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       // Mint and redemption continue without it. It stays in the basket for good.
       assert.deepEqual(await vault.read.previewMint([INITIAL_SHARES]), [INITIAL_AMOUNTS[0], INITIAL_AMOUNTS[1], 0n]);
       const before = await balancesOf(basket, alice.account.address);
-      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account });
+      await vault.write.redeem([INITIAL_SHARES, alice.account.address, NO_MIN, 0n], { account: alice.account });
       const after = await balancesOf(basket, alice.account.address);
       assert.deepEqual(after.map((balance, i) => balance - before[i]), [INITIAL_AMOUNTS[0], INITIAL_AMOUNTS[1], 0n]);
       await viem.assertions.revertWithCustomErrorWithArgs(
@@ -744,7 +744,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await vault.write.activateComponent([c], { account: governance.account });
       assert.deepEqual(await vault.read.reserves(), doubled);
       await vault.write.setMintPaused([false], { account: governance.account });
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: carol.account });
+      await vault.write.mint([INITIAL_SHARES, carol.account.address, NO_MAX, 0n, 0n], { account: carol.account });
       assert.equal(await faulty.read.balanceOf([vault.address]), doubled[2] + INITIAL_AMOUNTS[2]);
     });
 
@@ -909,12 +909,12 @@ describe("GRETVault: rebalancing and basket changes", async () => {
         await vault.read.previewMint([INITIAL_SHARES]),
         doubled.map((reserve) => reserve / 2n),
       );
-      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account });
-      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: bob.account });
+      await vault.write.redeem([INITIAL_SHARES, alice.account.address, NO_MIN, 0n], { account: alice.account });
+      await vault.write.redeem([INITIAL_SHARES, bob.account.address, NO_MIN, 0n], { account: bob.account });
 
       // Without supply, the next first mint contributes the new basket and skips the zero.
       const before = await balancesOf(basket, alice.account.address);
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
       const after = await balancesOf(basket, alice.account.address);
       assert.deepEqual(before.map((balance, i) => balance - after[i]), next);
       assert.deepEqual(await vault.read.reserves(), next);

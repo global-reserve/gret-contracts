@@ -93,7 +93,7 @@ describe("GRETVault: randomized sequences", async () => {
 
         if (state.supply === 0n) {
           const user = random.pick(minters);
-          await vault.write.mint([INITIAL_SHARES, INITIAL_AMOUNTS, 0n, 0n], { account: user.account });
+          await vault.write.mint([INITIAL_SHARES, user.account.address, INITIAL_AMOUNTS, 0n, 0n], { account: user.account });
         } else if (roll < 35) {
           const user = random.pick(minters);
           const shares = random.amount();
@@ -103,7 +103,7 @@ describe("GRETVault: randomized sequences", async () => {
             await token.write.mint([user.account.address, expected[i]]);
           }
           const before = await balancesOf(basket, user.account.address);
-          await vault.write.mint([shares, expected, 0n, 0n], { account: user.account });
+          await vault.write.mint([shares, user.account.address, expected, 0n, 0n], { account: user.account });
           const after = await balancesOf(basket, user.account.address);
           assert.deepEqual(before.map((balance, i) => balance - after[i]), expected);
         } else if (roll < 65) {
@@ -119,7 +119,7 @@ describe("GRETVault: randomized sequences", async () => {
           const remaining = state.supply - shares;
           if (remaining !== 0n && remaining < INITIAL_SHARES) {
             await viem.assertions.revertWithCustomErrorWithArgs(
-              vault.write.redeem([shares, NO_MIN, 0n], { account: user.account }),
+              vault.write.redeem([shares, user.account.address, NO_MIN, 0n], { account: user.account }),
               vault,
               "SupplyBelowMinimum",
               [remaining],
@@ -128,7 +128,7 @@ describe("GRETVault: randomized sequences", async () => {
           }
           const expected = state.reserves.map((reserve) => mulDivDown(shares, reserve, state.supply));
           const before = await balancesOf(basket, user.account.address);
-          await vault.write.redeem([shares, expected, 0n], { account: user.account });
+          await vault.write.redeem([shares, user.account.address, expected, 0n], { account: user.account });
           const after = await balancesOf(basket, user.account.address);
           assert.deepEqual(after.map((balance, i) => balance - before[i]), expected);
         } else if (roll < 85) {

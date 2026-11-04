@@ -193,7 +193,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
             vm.stopPrank();
         }
         vm.prank(ALICE);
-        target.mint(SHARE, _pair(amountA, amountB), SHARE, 0);
+        target.mint(SHARE, ALICE, _pair(amountA, amountB), SHARE, 0);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -445,7 +445,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         s = new SenderFreezeToken();
         target = _twoTokenVault(h, s, 2e18, 5e18);
         vm.prank(BOB);
-        target.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        target.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
         hFeed = new MockAggregator(8, 100e8);
         fFeed = new MockAggregator(8, 40e8);
         g = _guardFor(target, address(h), address(s), hFeed, fFeed);
@@ -477,7 +477,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
         target.swap(address(h), 1, address(s), 3, "");
         uint256 version = target.basketVersion();
         vm.prank(ALICE);
-        uint256[] memory paid = target.redeem(SHARE, _pair(0, 0), version);
+        uint256[] memory paid = target.redeem(SHARE, ALICE, _pair(0, 0), version);
         assertEq(paid[0], 2e18);
         assertEq(paid[1], 0);
     }

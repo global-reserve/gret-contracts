@@ -22,8 +22,8 @@ import {IPriceGuard} from "./IPriceGuard.sol";
 /// must pass a price guard, an external contract that holds the prices and the loss limits; every
 /// new rebalancer, price guard and component waits seven days. A component that stops working can
 /// be written off after the same wait. Governance can charge mint and redemption fees in GRET, at
-/// most 5% each; raising them waits too. It can pause minting at once, but never redemption.
-/// GRET supports EIP-2612 `permit`.
+/// most 5% each; raising them waits too. It can pause minting at once, but never redemption. GRET
+/// supports EIP-2612 `permit`.
 /// @dev Not independently audited. The specification, including the known limitations, is in
 /// docs/SPECIFICATION.md.
 contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
@@ -148,8 +148,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// paid unless a loss reduced the payout.
     mapping(address account => mapping(uint256 index => uint256)) public consumedRights;
 
-    event Minted(address indexed account, uint256 shares, uint256[] amounts);
-    event Redeemed(address indexed account, uint256 shares, uint256[] amounts);
+    event Minted(address indexed account, address indexed to, uint256 shares, uint256[] amounts);
+    event Redeemed(address indexed account, address indexed to, uint256 shares, uint256[] amounts);
     event ComponentActivationChanged(address indexed token, bool active);
     event LiquidationActivated(uint256 supply);
     event MintPauseChanged(bool paused);
@@ -260,15 +260,17 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     // ---------------------------------------------------------------------------------------------
 
     /// @notice Contributes every component in proportion to the reserves and mints up to `shares`
-    /// GRET: the mint fee goes to `feeRecipient` and the rest to the caller, reverting if the
-    /// caller would get fewer than `minShares`. The first mint (supply zero) contributes the
-    /// initial basket for exactly 1 GRET in total. Excluded or zero-balance components are not
-    /// asked for. `version` is the `basketVersion` that `maxAmountsIn` was prepared for.
+    /// GRET: the mint fee goes to `feeRecipient` and the rest to `to`, reverting if `to` would get
+    /// fewer than `minShares`. The caller pays the components. The first mint (supply zero)
+    /// contributes the initial basket for exactly 1 GRET in total. Excluded or zero-balance
+    /// components are not asked for. `version` is the `basketVersion` that `maxAmountsIn` was
+    /// prepared for.
     /// @dev Contributions round up. GRET is issued for what actually arrived, rounded down, so a
     /// component that delivers a few units less costs the minter, never the existing holders;
     /// `minShares` bounds that cost. Every limit is checked before any input is pulled.
     function mint(
         uint256 shares,
+        address to,
         uint256[] calldata maxAmountsIn,
         uint256 minShares,
         uint256 version
@@ -307,29 +309,29 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         if (minted == 0) revert ZeroShares();
         if (minted < minShares) revert SharesBelowMin(minted, minShares);
 
-        _mint(msg.sender, minted);
+        _mint(to, minted);
         if (fee != 0) {
             _mint(feeRecipient, fee);
             emit FeeCharged(msg.sender, feeRecipient, fee);
         }
         hasMinted[msg.sender] = true;
-        emit Minted(msg.sender, minted, received);
+        emit Minted(msg.sender, to, minted, received);
     }
 
     /// @notice Takes `shares` GRET from the caller: the redemption fee goes to `feeRecipient` and
-    /// the rest is burned for the proportional amount of every component; redeeming the whole
-    /// supply pays no fee. All or nothing: if any transfer fails the whole redemption reverts. The
-    /// supply left must be zero or at least `MIN_SUPPLY`. `version` is the `basketVersion` that
-    /// `minAmountsOut` was prepared for.
+    /// the rest is burned for the proportional amount of every component, which goes to `to`;
+    /// redeeming the whole supply pays no fee. All or nothing: if any transfer fails the whole
+    /// redemption reverts. The supply left must be zero or at least `MIN_SUPPLY`. `version` is the
+    /// `basketVersion` that `minAmountsOut` was prepared for.
     /// @dev Only for wallets that completed a mint. Amounts round down, in favor of the vault. Live
     /// balances include all income and losses before calculating proportional outputs.
-    function redeem(uint256 shares, uint256[] calldata minAmountsOut, uint256 version)
+    function redeem(uint256 shares, address to, uint256[] calldata minAmountsOut, uint256 version)
         external
         nonReentrant
         returns (uint256[] memory amounts)
     {
         _requireBasket(version, minAmountsOut.length);
-        return _redeem(shares, minAmountsOut, new bool[](_components.length));
+        return _redeem(shares, to, minAmountsOut, new bool[](_components.length));
     }
 
     /// @notice Like `redeem`, but leaves out the `skipped` components, for when one of them cannot
@@ -342,12 +344,13 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// component that still works.
     function redeemSkipping(
         uint256 shares,
+        address to,
         uint256[] calldata minAmountsOut,
         address[] calldata skipped,
         uint256 version
     ) external nonReentrant returns (uint256[] memory amounts) {
         _requireBasket(version, minAmountsOut.length);
-        amounts = _redeem(shares, minAmountsOut, _skipMask(skipped));
+        amounts = _redeem(shares, to, minAmountsOut, _skipMask(skipped));
         if (skipped.length != 0 && totalSupply() == 0) _setMintPaused(true);
     }
 
@@ -931,13 +934,17 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         }
     }
 
-    function _redeem(uint256 shares, uint256[] calldata minAmountsOut, bool[] memory skip)
-        private
-        returns (uint256[] memory amounts)
-    {
+    function _redeem(
+        uint256 shares,
+        address to,
+        uint256[] calldata minAmountsOut,
+        bool[] memory skip
+    ) private returns (uint256[] memory amounts) {
         _requireNotLiquidating();
         if (!hasMinted[msg.sender]) revert RedemptionNotEnabled(msg.sender);
         if (shares == 0) revert ZeroShares();
+        if (to == address(0)) revert ZeroAddress();
+        if (to == address(this)) revert InvalidRecipient();
 
         uint256 fee;
         (amounts, fee) = _redemptionAmounts(shares, skip);
@@ -957,9 +964,9 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         }
         _burn(msg.sender, burned);
         for (uint256 i; i < count; ++i) {
-            if (amounts[i] != 0) _components[i].safeTransfer(msg.sender, amounts[i]);
+            if (amounts[i] != 0) _components[i].safeTransfer(to, amounts[i]);
         }
-        emit Redeemed(msg.sender, burned, amounts);
+        emit Redeemed(msg.sender, to, burned, amounts);
     }
 
     /// @dev Redeeming the whole supply pays no fee: fee GRET would otherwise stay in the supply and

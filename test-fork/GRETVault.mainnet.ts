@@ -208,9 +208,9 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
         await erc20.write.approve([vault.address, maxUint256], { account: alice.account });
       });
       await step("mint", async () => {
-        await vault.write.mint([INITIAL_SHARES, [maxUint256], 0n, 0n], { account: alice.account });
+        await vault.write.mint([INITIAL_SHARES, alice.account.address, [maxUint256], 0n, 0n], { account: alice.account });
         const before = await balanceOf(token, alice.account.address);
-        await vault.write.mint([INITIAL_SHARES, [unit], 0n, 0n], { account: alice.account });
+        await vault.write.mint([INITIAL_SHARES, alice.account.address, [unit], 0n, 0n], { account: alice.account });
         const paid = before - (await balanceOf(token, alice.account.address));
         assert.ok(paid <= unit && paid + ROUNDING >= unit, `paid ${paid}`);
         const supply = await vault.read.totalSupply();
@@ -221,7 +221,7 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
       await step("redeem", async () => {
         const before = await balanceOf(token, alice.account.address);
         const [expected] = await vault.read.previewRedeem([INITIAL_SHARES / 2n]);
-        await vault.write.redeem([INITIAL_SHARES / 2n, [expected], 0n], { account: alice.account });
+        await vault.write.redeem([INITIAL_SHARES / 2n, alice.account.address, [expected], 0n], { account: alice.account });
         const got = (await balanceOf(token, alice.account.address)) - before;
         assert.ok(got <= expected && got + ROUNDING >= expected, `got ${got} of ${expected}`);
         await assertAccounting();
@@ -273,9 +273,9 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
     const min = tokens.map(() => 0n);
     const gas = async (hash: Hex) => (await publicClient.waitForTransactionReceipt({ hash })).gasUsed;
 
-    await vault.write.mint([INITIAL_SHARES, max, 0n, 0n], { account: alice.account });
-    const mintGas = await gas(await vault.write.mint([INITIAL_SHARES, max, 0n, 0n], { account: bob.account }));
-    const redeemGas = await gas(await vault.write.redeem([INITIAL_SHARES / 2n, min, 0n], { account: alice.account }));
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, max, 0n, 0n], { account: alice.account });
+    const mintGas = await gas(await vault.write.mint([INITIAL_SHARES, bob.account.address, max, 0n, 0n], { account: bob.account }));
+    const redeemGas = await gas(await vault.write.redeem([INITIAL_SHARES / 2n, alice.account.address, min, 0n], { account: alice.account }));
     const heldAfterRedeem = await Promise.all(tokens.map((token) => balanceOf(token, vault.address)));
     for (const [i, reserve] of (await vault.read.reserves()).entries()) {
       assert.ok(heldAfterRedeem[i] >= reserve && heldAfterRedeem[i] - reserve <= 5n * ROUNDING, BASKET[i].symbol);
@@ -309,8 +309,8 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
       await erc20.write.approve([vault.address, maxUint256], { account: alice.account });
     }
     const max = tokens.map(() => maxUint256);
-    await vault.write.mint([INITIAL_SHARES, max, 0n, 0n], { account: alice.account });
-    await vault.write.mint([99n * INITIAL_SHARES, max, 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, max, 0n, 0n], { account: alice.account });
+    await vault.write.mint([99n * INITIAL_SHARES, alice.account.address, max, 0n, 0n], { account: alice.account });
     const guard = await viem.deployContract("ChainlinkPriceGuard", [
       vault.address,
       PRICE_FEEDS.map(({ symbol }) => tokens[index(symbol)]),
@@ -410,8 +410,8 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
       }
     }
     const max = (count: number) => Array.from({ length: count }, () => maxUint256);
-    await vault.write.mint([INITIAL_SHARES, max(joining), 0n, 0n], { account: alice.account });
-    await vault.write.mint([INITIAL_SHARES, max(joining), 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, max(joining), 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, max(joining), 0n, 0n], { account: alice.account });
 
     // bob becomes the rebalancer and DBCon a component, both after the vault's 7-day wait. These
     // swaps test the tokens, not prices, so the guard accepts every swap.
@@ -455,8 +455,8 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
     // One addition and one removal: amounts by position are now prepared for version 2.
     const version = await vault.read.basketVersion();
     assert.equal(version, 2n);
-    await vault.write.mint([INITIAL_SHARES, max(remaining.length), 0n, version], { account: alice.account });
-    await vault.write.redeem([INITIAL_SHARES, remaining.map(() => 0n), version], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, max(remaining.length), 0n, version], { account: alice.account });
+    await vault.write.redeem([INITIAL_SHARES, alice.account.address, remaining.map(() => 0n), version], { account: alice.account });
     await assertBacked();
     console.log(`Gas of one swap with the real components and a test guard that records it: ${swapGas}`);
   });

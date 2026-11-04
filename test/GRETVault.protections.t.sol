@@ -80,7 +80,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(vault.basketVersion(), version);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.AmountInAboveMax.selector, 0, 2e18, 0));
         vm.prank(BOB);
-        vault.mint(SHARE, quote, SHARE, version);
+        vault.mint(SHARE, BOB, quote, SHARE, version);
         assertEq(vault.totalSupply(), SHARE);
     }
 
@@ -95,7 +95,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(vault.basketVersion(), version);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.AmountOutBelowMin.selector, 1, 0, 5e18));
         vm.prank(ALICE);
-        vault.redeem(SHARE, quote, version);
+        vault.redeem(SHARE, ALICE, quote, version);
         assertEq(vault.balanceOf(ALICE), SHARE);
     }
 
@@ -108,7 +108,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(vault.basketVersion(), version);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.AmountOutBelowMin.selector, 1, 0, 10));
         vm.prank(ALICE);
-        vault.redeem(SHARE, quote, version);
+        vault.redeem(SHARE, ALICE, quote, version);
         assertEq(vault.balanceOf(ALICE), SHARE);
     }
 
@@ -117,8 +117,8 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         healthy.mint(address(vault), 100e18);
         uint256 before = healthy.balanceOf(BOB);
         vm.startPrank(BOB);
-        vault.mint(99 * SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0);
-        vault.redeem(99 * SHARE, _pair(0, 0), 0);
+        vault.mint(99 * SHARE, BOB, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        vault.redeem(99 * SHARE, BOB, _pair(0, 0), 0);
         vm.stopPrank();
         assertEq(healthy.balanceOf(BOB), before);
         assertEq(vault.reserves()[0], 102e18);
@@ -126,19 +126,19 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
 
     function test_brokenBalanceCannotOverpayFirstRedeemer() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        vault.mint(SHARE, BOB, _pair(type(uint256).max, type(uint256).max), 0, 0);
         faulty.slash(address(vault), 5e18);
         faulty.setFault(MockFaultyERC20.Fault.RevertOnBalanceOf);
         vm.expectRevert(MockFaultyERC20.BalanceOfBlocked.selector);
         vm.prank(ALICE);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
         assertEq(faulty.rawBalanceOf(address(vault)), 5e18);
         assertEq(vault.balanceOf(ALICE), SHARE);
     }
 
     function test_emptyLiquidationIsRejected() public {
         vm.prank(ALICE);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
         vm.expectRevert(GRETVault.NoSupply.selector);
         vm.prank(GOVERNANCE);
         vault.activateLiquidation();
@@ -148,7 +148,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
     /// `minAmount` lets the claimant refuse an unexpected cut and keep the right pending.
     function test_claimMinimumRefusesUnexpectedCut() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        vault.mint(SHARE, BOB, _pair(type(uint256).max, type(uint256).max), 0, 0);
         vm.prank(GOVERNANCE);
         vault.activateLiquidation();
         vm.prank(ALICE);
@@ -179,7 +179,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         // One base unit of F short issues only 10/11 of a share, below the minimum: nothing moves.
         vm.expectRevert(abi.encodeWithSelector(GRETVault.SharesBelowMin.selector, 10 * SHARE / 11, minShares));
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(2e18, 11), minShares, 0);
+        vault.mint(SHARE, BOB, _pair(2e18, 11), minShares, 0);
         assertEq(healthy.balanceOf(BOB), before);
         assertEq(vault.balanceOf(BOB), 0);
     }
@@ -192,14 +192,14 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         faulty.slash(address(vault), 5e18);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.RedemptionNotEnabled.selector, BOB));
         vm.prank(BOB);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, BOB, _pair(0, 0), 0);
 
         uint256 before = healthy.balanceOf(BOB);
         vm.startPrank(BOB);
-        (uint256 minted, uint256[] memory paid) = vault.mint(SHARE, _pair(type(uint256).max, 0), 0, 0);
+        (uint256 minted, uint256[] memory paid) = vault.mint(SHARE, BOB, _pair(type(uint256).max, 0), 0, 0);
         assertEq(minted, SHARE);
         assertEq(paid[1], 0);
-        vault.redeem(2 * SHARE, _pair(0, 0), 0);
+        vault.redeem(2 * SHARE, BOB, _pair(0, 0), 0);
         vm.stopPrank();
         assertEq(healthy.balanceOf(BOB), before + 2e18);
         assertEq(vault.totalSupply(), 0);
@@ -213,22 +213,22 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.expectEmit(address(vault));
         emit GRETVault.MintPauseChanged(true);
         vm.prank(ALICE);
-        vault.redeemSkipping(SHARE, _pair(0, 0), skipped, 0);
+        vault.redeemSkipping(SHARE, ALICE, _pair(0, 0), skipped, 0);
         assertEq(vault.totalSupply(), 0);
         assertTrue(vault.mintPaused());
         assertEq(faulty.balanceOf(address(vault)), 5e18);
 
         vm.expectRevert(GRETVault.MintIsPaused.selector);
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
 
         vm.startPrank(GOVERNANCE);
         vault.rescue(address(faulty), ALICE, 5e18); // back to the holder who skipped it
         vault.setMintPaused(false);
         vm.stopPrank();
         vm.startPrank(BOB);
-        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
-        uint256[] memory paid = vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.mint(SHARE, BOB, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
+        uint256[] memory paid = vault.redeem(SHARE, BOB, _pair(0, 0), 0);
         vm.stopPrank();
         assertEq(paid[0], 2e18);
         assertEq(paid[1], 5e18);
@@ -237,7 +237,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
     /// A normal exit of the whole supply pays out every active balance, so it does not pause.
     function test_normalLastExitLeavesNothingAndDoesNotPause() public {
         vm.prank(ALICE);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
         assertEq(vault.totalSupply(), 0);
         assertEq(healthy.balanceOf(address(vault)), 0);
         assertEq(faulty.balanceOf(address(vault)), 0);
@@ -247,11 +247,11 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
     /// A skipping exit that leaves holders behind does not pause either.
     function test_skippingExitThatLeavesHoldersDoesNotPause() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(type(uint256).max, type(uint256).max), SHARE, 0);
         address[] memory skipped = new address[](1);
         skipped[0] = address(faulty);
         vm.prank(ALICE);
-        vault.redeemSkipping(SHARE, _pair(0, 0), skipped, 0);
+        vault.redeemSkipping(SHARE, ALICE, _pair(0, 0), skipped, 0);
         assertEq(vault.totalSupply(), SHARE);
         assertFalse(vault.mintPaused());
     }
@@ -298,7 +298,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
     /// leave with the other components during the seven-day notice of a new rebalancer.
     function test_holdersExitDuringRebalancerNoticeBySkipping() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
         faulty.setBlocked(address(vault), true);
         vm.prank(GOVERNANCE);
         vault.proposeWriteOff(address(faulty));
@@ -312,14 +312,14 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.stopPrank();
         vm.expectRevert(abi.encodeWithSelector(MockFaultyERC20.AccountBlocked.selector, address(vault)));
         vm.prank(BOB);
-        vault.redeem(SHARE / 4, _pair(0, 0), 0);
+        vault.redeem(SHARE / 4, BOB, _pair(0, 0), 0);
 
         // During the notice, Bob leaves with his share of everything that still moves.
         address[] memory skipped = new address[](1);
         skipped[0] = address(faulty);
         uint256 before = healthy.balanceOf(BOB);
         vm.prank(BOB);
-        vault.redeemSkipping(SHARE / 4, _pair(0, 0), skipped, 0);
+        vault.redeemSkipping(SHARE / 4, BOB, _pair(0, 0), skipped, 0);
         assertEq(healthy.balanceOf(BOB) - before, 5e17);
     }
 
@@ -335,19 +335,19 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.startPrank(ALICE);
         healthy.approve(address(target), type(uint256).max);
         burner.approve(address(target), type(uint256).max);
-        target.mint(SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        target.mint(SHARE, ALICE, _pair(type(uint256).max, type(uint256).max), 0, 0);
         vm.stopPrank();
 
         burner.enable();
         vm.expectRevert();
         vm.prank(ALICE);
-        target.redeem{gas: 5_000_000}(SHARE, _pair(0, 0), 0);
+        target.redeem{gas: 5_000_000}(SHARE, ALICE, _pair(0, 0), 0);
 
         address[] memory skipped = new address[](1);
         skipped[0] = address(burner);
         uint256 before = healthy.balanceOf(ALICE);
         vm.prank(ALICE);
-        target.redeemSkipping{gas: 5_000_000}(SHARE, _pair(0, 0), skipped, 0);
+        target.redeemSkipping{gas: 5_000_000}(SHARE, ALICE, _pair(0, 0), skipped, 0);
         assertEq(healthy.balanceOf(ALICE) - before, 2e18);
     }
 
@@ -439,10 +439,10 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         ChainlinkPriceGuard guard = _chainlinkGuard();
         uint256 before = _aliceValue(guard);
         vm.startPrank(REBALANCER);
-        vault.mint(99 * SHARE, _pair(198e18, 495e18), 99 * SHARE, 0);
+        vault.mint(99 * SHARE, REBALANCER, _pair(198e18, 495e18), 99 * SHARE, 0);
         // With $40,000 in the vault, a swap that loses $0.10.
         vault.swap(address(healthy), 1e18, address(faulty), 2.4975e18, "");
-        vault.redeem(99 * SHARE, _pair(0, 0), 0);
+        vault.redeem(99 * SHARE, REBALANCER, _pair(0, 0), 0);
         vm.stopPrank();
         assertLe(_lossySwapsUntilRefused(guard), 2);
         assertGe(_aliceValue(guard), before * 98 / 100);
@@ -453,11 +453,11 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         ChainlinkPriceGuard guard = _chainlinkGuard();
         uint256 before = _aliceValue(guard);
         vm.prank(BOB);
-        vault.mint(99 * SHARE, _pair(198e18, 495e18), 99 * SHARE, 0);
+        vault.mint(99 * SHARE, BOB, _pair(198e18, 495e18), 99 * SHARE, 0);
         vm.prank(REBALANCER);
         vault.swap(address(healthy), 1e18, address(faulty), 2.4975e18, "");
         vm.prank(BOB);
-        vault.redeem(99 * SHARE, _pair(0, 0), 0);
+        vault.redeem(99 * SHARE, BOB, _pair(0, 0), 0);
         assertLe(_lossySwapsUntilRefused(guard), 2);
         assertGe(_aliceValue(guard), before * 98 / 100);
     }
@@ -478,7 +478,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         healthy.approve(address(target), type(uint256).max);
         other.approve(address(target), type(uint256).max);
         faulty.approve(address(target), type(uint256).max);
-        target.mint(SHARE, initial, SHARE, 0);
+        target.mint(SHARE, ALICE, initial, SHARE, 0);
         vm.stopPrank();
         vm.startPrank(REBALANCER);
         healthy.approve(address(target), type(uint256).max);
@@ -531,7 +531,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
             first.approve(address(target), 1e18);
             protectedToken.approve(address(target), 100e18);
             last.approve(address(target), 100e18);
-            target.mint(SHARE, initial, SHARE, 0);
+            target.mint(SHARE, user, initial, SHARE, 0);
             vm.stopPrank();
         }
         vm.prank(GOVERNANCE);
@@ -551,7 +551,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         protectedToken.slash(address(target), 180e18);
         vm.prank(ALICE);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.BasketChanged.selector, signedVersion, signedVersion + 2));
-        target.redeem(SHARE, signedMinima, signedVersion);
+        target.redeem(SHARE, ALICE, signedMinima, signedVersion);
         assertEq(protectedToken.balanceOf(ALICE), 0);
         assertEq(target.balanceOf(ALICE), SHARE);
     }

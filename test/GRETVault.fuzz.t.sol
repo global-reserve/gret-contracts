@@ -40,7 +40,7 @@ contract GRETVaultFuzzTest is Test {
         }
         uint256 initialShares = vault.INITIAL_SHARES();
         vm.prank(ALICE);
-        vault.mint(initialShares, _filled(type(uint256).max), 0, 0);
+        vault.mint(initialShares, ALICE, _filled(type(uint256).max), 0, 0);
     }
 
     /// Entering and leaving right away never returns more of any component than was paid,
@@ -48,7 +48,7 @@ contract GRETVaultFuzzTest is Test {
     function testFuzz_mintThenRedeemNeverProfits(uint256 otherShares, uint256 donation, uint256 shares) public {
         otherShares = bound(otherShares, 1, 1e24);
         vm.prank(ALICE);
-        vault.mint(otherShares, _filled(type(uint256).max), 0, 0);
+        vault.mint(otherShares, ALICE, _filled(type(uint256).max), 0, 0);
         donation = bound(donation, 0, 1e24);
         if (donation != 0) {
             tokens[0].mint(address(vault), donation);
@@ -57,8 +57,8 @@ contract GRETVaultFuzzTest is Test {
         shares = bound(shares, 1, 1e24);
         uint256[3] memory before = _balances(BOB);
         vm.startPrank(BOB);
-        vault.mint(shares, _filled(type(uint256).max), 0, 0);
-        vault.redeem(shares, _filled(0), 0);
+        vault.mint(shares, BOB, _filled(type(uint256).max), 0, 0);
+        vault.redeem(shares, BOB, _filled(0), 0);
         vm.stopPrank();
 
         uint256[3] memory afterRoundtrip = _balances(BOB);
@@ -97,7 +97,7 @@ contract GRETVaultFuzzTest is Test {
     function testFuzz_redeemPaysFloorOfProportion(uint256 otherShares, uint256 shares) public {
         otherShares = bound(otherShares, 1, 1e24);
         vm.prank(BOB);
-        vault.mint(otherShares, _filled(type(uint256).max), 0, 0);
+        vault.mint(otherShares, BOB, _filled(type(uint256).max), 0, 0);
         uint256 balance = vault.balanceOf(ALICE);
         shares = bound(shares, 1, balance);
         uint256[] memory reserves = vault.reserves();
@@ -107,11 +107,11 @@ contract GRETVaultFuzzTest is Test {
         if (supply - shares < vault.MIN_SUPPLY()) {
             vm.expectRevert(abi.encodeWithSelector(GRETVault.SupplyBelowMinimum.selector, supply - shares));
             vm.prank(ALICE);
-            vault.redeem(shares, _filled(0), 0);
+            vault.redeem(shares, ALICE, _filled(0), 0);
             return;
         }
         vm.prank(ALICE);
-        uint256[] memory out = vault.redeem(shares, _filled(0), 0);
+        uint256[] memory out = vault.redeem(shares, ALICE, _filled(0), 0);
 
         for (uint256 i; i < 3; ++i) {
             assertEq(out[i], Math.mulDiv(shares, reserves[i], supply), "redeem amount");

@@ -40,8 +40,8 @@ describe("ChainlinkPriceGuard", async () => {
       priced.map((i) => feeds[i].address),
       priced.map(() => DAY),
     ]);
-    await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
-    await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: bob.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES, bob.account.address, NO_MAX, 0n, 0n], { account: bob.account });
     await vault.write.proposeRebalancer([dave.account.address], { account: governance.account });
     await vault.write.proposePriceGuard([guard.address], { account: governance.account });
     const now = BigInt(await networkHelpers.time.latest());
@@ -233,11 +233,11 @@ describe("ChainlinkPriceGuard", async () => {
       const cForA = () => vault.write.swap([c, parseUnits("2.5", 18), a, parseUnits("0.981", 18), "0x"], { account: dave.account });
       for (let i = 0; i < 10; i++) await (i % 2 === 0 ? aForC() : cForA());
       const used = await guard.read.weeklyLoss();
-      await vault.write.redeem([INITIAL_SHARES, [0n, 0n, 0n], 0n], { account: bob.account });
-      await vault.write.redeem([INITIAL_SHARES, [0n, 0n, 0n], 0n], { account: alice.account });
+      await vault.write.redeem([INITIAL_SHARES, bob.account.address, [0n, 0n, 0n], 0n], { account: bob.account });
+      await vault.write.redeem([INITIAL_SHARES, alice.account.address, [0n, 0n, 0n], 0n], { account: alice.account });
       assert.equal(await vault.read.totalSupply(), 0n);
       // The vault starts over at $480; $1.90 more is 0.4% of it, above what is left of the 2%.
-      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
       await viem.assertions.revertWithCustomErrorWithArgs(aForC(), guard, "WeeklyLossTooHigh", [
         used + shareOf(parseUnits("1.9", 18), parseUnits("480", 18)),
         LIMIT,

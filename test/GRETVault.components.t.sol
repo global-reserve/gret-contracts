@@ -45,7 +45,7 @@ contract GRETVaultComponentsTest is Test {
             }
         }
         vm.prank(ALICE);
-        vault.mint(SHARE, initial, SHARE, 0);
+        vault.mint(SHARE, ALICE, initial, SHARE, 0);
         vm.startPrank(GOVERNANCE);
         vault.proposeRebalancer(REBALANCER);
         vault.proposePriceGuard(address(new MockPriceGuard()));
@@ -105,10 +105,10 @@ contract GRETVaultComponentsTest is Test {
         // Restoring the same length must not make previously prepared positional calls valid.
         vm.expectRevert(abi.encodeWithSelector(GRETVault.BasketChanged.selector, oldVersion, oldVersion + 2));
         vm.prank(BOB);
-        vault.mint(SHARE, new uint256[](4), 0, oldVersion);
+        vault.mint(SHARE, BOB, new uint256[](4), 0, oldVersion);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.BasketChanged.selector, oldVersion, oldVersion + 2));
         vm.prank(ALICE);
-        vault.redeem(SHARE, new uint256[](4), oldVersion);
+        vault.redeem(SHARE, ALICE, new uint256[](4), oldVersion);
 
         // Give the re-added token a distinct reserve, so later removals exercise every position.
         MockERC20(sold).mint(address(vault), donation * 1e10);
@@ -127,7 +127,7 @@ contract GRETVaultComponentsTest is Test {
             inputs[i] = product / supply + (product % supply == 0 ? 0 : 1);
         }
         vm.prank(BOB);
-        (uint256 minted, uint256[] memory received) = vault.mint(shares, inputs, shares, version);
+        (uint256 minted, uint256[] memory received) = vault.mint(shares, BOB, inputs, shares, version);
         assertEq(minted, shares);
         for (uint256 i; i < order.length; ++i) {
             assertEq(received[i], inputs[i]);
@@ -142,7 +142,7 @@ contract GRETVaultComponentsTest is Test {
             balancesBefore[i] = IERC20(order[i]).balanceOf(BOB);
         }
         vm.prank(BOB);
-        uint256[] memory paid = vault.redeem(shares, outputs, version);
+        uint256[] memory paid = vault.redeem(shares, BOB, outputs, version);
         for (uint256 i; i < order.length; ++i) {
             assertEq(paid[i], outputs[i]);
             assertEq(IERC20(order[i]).balanceOf(BOB) - balancesBefore[i], outputs[i]);
@@ -155,7 +155,7 @@ contract GRETVaultComponentsTest is Test {
     function _restartWithReorderedInitialAmounts() private {
         uint256 version = vault.basketVersion();
         vm.prank(ALICE);
-        vault.redeem(SHARE, new uint256[](order.length), version);
+        vault.redeem(SHARE, ALICE, new uint256[](order.length), version);
         for (uint256 i; i < order.length; ++i) expectedReserve[order[i]] = 0;
         _assertAccounting();
         assertEq(vault.totalSupply(), 0);
@@ -168,7 +168,7 @@ contract GRETVaultComponentsTest is Test {
         vm.prank(GOVERNANCE);
         vault.setInitialAmounts(initial, version);
         vm.prank(ALICE);
-        vault.mint(SHARE, initial, SHARE, version);
+        vault.mint(SHARE, ALICE, initial, SHARE, version);
         for (uint256 i; i < order.length; ++i) expectedReserve[order[i]] = initial[i];
         _assertAccounting();
         assertEq(vault.totalSupply(), SHARE);

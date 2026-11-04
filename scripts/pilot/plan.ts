@@ -185,7 +185,7 @@ export async function mintTransactions(client: Reader, vault: Address, account: 
     data: encodeFunctionData({
       abi: vaultAbi,
       functionName: "mint",
-      args: [shares, needed, shares - shares / 1000n, version],
+      args: [shares, account, needed, shares - shares / 1000n, version],
     }),
   });
   return { needed, txs };
@@ -200,6 +200,6 @@ export async function redeemTransaction(client: Reader, vault: Address, account:
   return {
     label: `Redeem ${formatUnits(shares, 18)} GRET`,
     to: vault,
-    data: encodeFunctionData({ abi: vaultAbi, functionName: "redeem", args: [shares, out, version] }),
+    data: encodeFunctionData({ abi: vaultAbi, functionName: "redeem", args: [shares, account, out, version] }),
   } satisfies PlannedTx;
 }

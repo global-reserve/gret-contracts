@@ -53,7 +53,7 @@ try {
   }
   const shares = await vault.read.INITIAL_SHARES();
   // The first mint issues exactly INITIAL_SHARES, so that is also the minimum.
-  await vault.write.mint([shares, initialAmounts, shares, await vault.read.basketVersion()]);
+  await vault.write.mint([shares, deployer.account.address, initialAmounts, shares, await vault.read.basketVersion()]);
 
   const reserves = await vault.read.reserves();
   console.table(

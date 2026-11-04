@@ -67,11 +67,11 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
 
         vm.startPrank(BOB);
         vm.expectRevert(GRETVault.MintIsPaused.selector);
-        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.RedemptionNotEnabled.selector, BOB));
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, BOB, _pair(0, 0), 0);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.RedemptionNotEnabled.selector, BOB));
-        vault.redeemSkipping(SHARE, _pair(0, 0), new address[](0), 0);
+        vault.redeemSkipping(SHARE, BOB, _pair(0, 0), new address[](0), 0);
         vm.expectRevert(GRETVault.LiquidationNotActive.selector);
         vault.convertToClaims(SHARE);
         vm.stopPrank();
@@ -99,9 +99,9 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         skipped[0] = address(faulty);
         vm.startPrank(BOB);
         vm.expectRevert(abi.encodeWithSelector(MockFaultyERC20.AccountBlocked.selector, address(vault)));
-        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.RedemptionNotEnabled.selector, BOB));
-        vault.redeemSkipping(SHARE / 2, _pair(0, 0), skipped, 0);
+        vault.redeemSkipping(SHARE / 2, BOB, _pair(0, 0), skipped, 0);
         vm.stopPrank();
     }
 
@@ -110,10 +110,10 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
     function test_entryBeforeFutureDonationStillSharesIt() public {
         uint256 before = healthy.balanceOf(BOB);
         vm.prank(BOB);
-        vault.mint(99 * SHARE, _pair(198e18, 495e18), 99 * SHARE, 0);
+        vault.mint(99 * SHARE, BOB, _pair(198e18, 495e18), 99 * SHARE, 0);
         healthy.mint(address(vault), 100e18);
         vm.prank(BOB);
-        vault.redeem(99 * SHARE, _pair(0, 0), 0);
+        vault.redeem(99 * SHARE, BOB, _pair(0, 0), 0);
         assertEq(healthy.balanceOf(BOB) - before, 99e18);
     }
 
@@ -132,14 +132,14 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         healthy.mint(CAROL, 1e24);
         vm.startPrank(CAROL);
         healthy.approve(address(vault), type(uint256).max);
-        vault.mint(9 * SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0); // pays no faulty at all
+        vault.mint(9 * SHARE, CAROL, _pair(type(uint256).max, type(uint256).max), 0, 0); // pays no faulty at all
         vm.stopPrank();
 
         faulty.setFault(MockFaultyERC20.Fault.None);
         vm.prank(GOVERNANCE);
         vault.activateComponent(address(faulty));
         vm.prank(CAROL);
-        vault.redeem(9 * SHARE, _pair(0, 0), 0);
+        vault.redeem(9 * SHARE, CAROL, _pair(0, 0), 0);
         // 9 of 10 GRET: 90% of the 5 faulty that Alice held.
         assertEq(faulty.balanceOf(CAROL), 45e17);
         assertEq(healthy.balanceOf(CAROL), 1e24);
@@ -151,28 +151,28 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         // Still works when an incoming component loses one base unit.
         faulty.setFault(MockFaultyERC20.Fault.ShortByOneOnTransfer);
         vm.prank(BOB);
-        (uint256 dust,) = vault.mint(1e12, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        (uint256 dust,) = vault.mint(1e12, BOB, _pair(type(uint256).max, type(uint256).max), 0, 0);
         assertGt(dust, 0);
         assertLt(dust, SHARE);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.SupplyBelowMinimum.selector, dust));
         vm.prank(ALICE);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
 
         // Alice can redeem only the tiny excess over MIN_SUPPLY without cooperation.
         vm.prank(ALICE);
-        vault.redeem(dust, _pair(0, 0), 0);
+        vault.redeem(dust, ALICE, _pair(0, 0), 0);
         assertEq(vault.totalSupply(), SHARE);
         assertEq(vault.balanceOf(ALICE), SHARE - dust);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.SupplyBelowMinimum.selector, SHARE - dust));
         vm.prank(ALICE);
-        vault.redeem(dust, _pair(0, 0), 0);
+        vault.redeem(dust, ALICE, _pair(0, 0), 0);
     }
 
     /// Fee GRET below 1 GRET held by the recipient keeps the last holder from leaving in full,
     /// even after both fees are cut to zero, until the recipient hands it over.
     function test_feeRecipientHoldsBackLastHolder() public {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
         vm.startPrank(GOVERNANCE);
         vault.setFeeRecipient(CAROL);
         vault.proposeFees(0, 500);
@@ -180,17 +180,17 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vm.warp(block.timestamp + 7 days);
         vault.applyFees();
         vm.prank(ALICE);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
         vm.prank(GOVERNANCE);
         vault.proposeFees(0, 0);
 
         vm.expectRevert(abi.encodeWithSelector(GRETVault.SupplyBelowMinimum.selector, 5e16));
         vm.prank(BOB);
-        vault.redeem(SHARE, _pair(0, 0), 0);
+        vault.redeem(SHARE, BOB, _pair(0, 0), 0);
         vm.prank(CAROL);
         vault.transfer(BOB, 5e16);
         vm.prank(BOB);
-        vault.redeem(SHARE + 5e16, _pair(0, 0), 0);
+        vault.redeem(SHARE + 5e16, BOB, _pair(0, 0), 0);
         assertEq(vault.totalSupply(), 0);
     }
 
@@ -199,7 +199,7 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         faulty.setFault(MockFaultyERC20.Fault.FeeOnTransfer);
         uint256 before = faulty.balanceOf(ALICE);
         vm.prank(ALICE);
-        uint256[] memory reported = vault.redeem(SHARE, _pair(2e18, 5e18), 0);
+        uint256[] memory reported = vault.redeem(SHARE, ALICE, _pair(2e18, 5e18), 0);
         assertEq(reported[1], 5e18);
         assertEq(faulty.balanceOf(ALICE) - before, 495e16);
         assertEq(vault.balanceOf(ALICE), 0);
@@ -228,13 +228,13 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         GRETVault single = _single(token, 100e18);
         token.enable();
         vm.prank(ALICE);
-        single.redeem(SHARE, _one(100e18), 0);
+        single.redeem(SHARE, ALICE, _one(100e18), 0);
         assertEq(single.reserves()[0], 99e18);
         assertEq(token.balanceOf(address(single)), 99e18);
         // The last transfer now needs more than the entire balance.
         vm.expectRevert();
         vm.prank(BOB);
-        single.redeem(SHARE, _one(0), 0);
+        single.redeem(SHARE, BOB, _one(0), 0);
         assertEq(single.balanceOf(BOB), SHARE);
     }
 
@@ -266,7 +266,7 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         _appoint(vault, address(new MockPriceGuard()));
         uint256 whole = vault.reserves()[0];
         vm.prank(BOB);
-        vault.mint(1e9, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        vault.mint(1e9, BOB, _pair(type(uint256).max, type(uint256).max), 0, 0);
         vm.prank(REBALANCER);
         vault.swap(address(healthy), whole, address(faulty), 1, "");
         assertGt(vault.reserves()[0], 0);
@@ -289,7 +289,7 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
             token.mint(user, 1);
             vm.startPrank(user);
             token.approve(address(single), 1);
-            single.mint(SHARE, _one(1), SHARE, 0);
+            single.mint(SHARE, user, _one(1), SHARE, 0);
             vm.stopPrank();
         }
         vm.prank(GOVERNANCE);
@@ -313,7 +313,7 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
 contract GRETVaultRecoveryLimitationsTest is GRETVaultCase {
     function _both() private {
         vm.prank(BOB);
-        vault.mint(SHARE, _pair(2e18, 5e18), SHARE, 0);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
         vm.prank(GOVERNANCE);
         vault.activateLiquidation();
         vm.prank(ALICE);
@@ -347,7 +347,7 @@ contract GRETVaultRecoveryLimitationsTest is GRETVaultCase {
         k = bound(k, 1, 100);
         cutBps = bound(cutBps, 1, 9_999);
         vm.prank(BOB);
-        vault.mint(k * SHARE, _pair(2e18 * k, 5e18 * k), k * SHARE, 0);
+        vault.mint(k * SHARE, BOB, _pair(2e18 * k, 5e18 * k), k * SHARE, 0);
         vm.prank(GOVERNANCE);
         vault.activateLiquidation();
         vm.prank(ALICE);

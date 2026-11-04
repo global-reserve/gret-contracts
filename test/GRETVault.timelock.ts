@@ -24,7 +24,7 @@ describe("GRETVault: governance evolves without changing the vault", async () =>
 
   async function multisigFixture() {
     const basket = await deployBasket(viem);
-    await basket.vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: basket.alice.account });
+    await basket.vault.write.mint([INITIAL_SHARES, basket.alice.account.address, NO_MAX, 0n, 0n], { account: basket.alice.account });
     // Only the multisig proposes and executes; the timelock administers itself. Executing must not
     // be open: anyone could otherwise wrap a ready activation between their own mint and redemption.
     const timelock = await viem.deployContract("TimelockController", [

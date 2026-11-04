@@ -58,8 +58,8 @@ contract ChainlinkPriceGuardFuzzTest is Test {
             }
         }
         vm.startPrank(ALICE);
-        vault.mint(1e18, _noMax(), 0, 0);
-        vault.mint(99e18, _noMax(), 0, 0);
+        vault.mint(1e18, ALICE, _noMax(), 0, 0);
+        vault.mint(99e18, ALICE, _noMax(), 0, 0);
         vm.stopPrank();
 
         vm.startPrank(GOVERNANCE);
@@ -90,7 +90,7 @@ contract ChainlinkPriceGuardFuzzTest is Test {
                 uint256 shares = vault.balanceOf(ALICE) * (1 + (r >> 72) % 10_000) / 100;
                 uint256 version = vault.basketVersion();
                 vm.prank(BOB);
-                vault.mint(shares, _noMax(), 0, version);
+                vault.mint(shares, BOB, _noMax(), 0, version);
                 continue;
             }
             if (action == 1) {
@@ -98,7 +98,7 @@ contract ChainlinkPriceGuardFuzzTest is Test {
                 if (shares == 0) continue;
                 uint256 version = vault.basketVersion();
                 vm.prank(BOB);
-                vault.redeem(shares, new uint256[](3), version);
+                vault.redeem(shares, BOB, new uint256[](3), version);
                 continue;
             }
             uint256 sell = r % 3;

@@ -23,8 +23,8 @@ describe("GRETVault: adversarial components and callers", async () => {
   async function holdersFixture() {
     const basket = await deployBasket(viem);
     const { vault, alice, bob } = basket;
-    await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
-    await vault.write.mint([INITIAL_SHARES / 3n, NO_MAX, 0n, 0n], { account: bob.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES / 3n, bob.account.address, NO_MAX, 0n, 0n], { account: bob.account });
     return basket;
   }
 
@@ -48,8 +48,8 @@ describe("GRETVault: adversarial components and callers", async () => {
       await token.write.mint([alice.account.address, parseUnits("1000000", 18)]);
       await token.write.approve([vault.address, maxUint256], { account: alice.account });
     }
-    await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
-    await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
     await networkHelpers.impersonateAccount(faulty.address);
     await networkHelpers.setBalance(faulty.address, parseEther("10"));
     const guard = await viem.deployContract("MockPriceGuard");
@@ -66,11 +66,12 @@ describe("GRETVault: adversarial components and callers", async () => {
   describe("reentrancy from every external call into every state-changing function", () => {
     type Setup = Awaited<ReturnType<typeof hostileGovernanceFixture>>;
     const reentries: [string, (setup: Setup) => `0x${string}`][] = [
-      ["mint", ({ vault }) => encodeFunctionData({ abi: vault.abi, functionName: "mint", args: [1n, NO_MAX, 0n, 0n] })],
-      ["redeem", ({ vault }) => encodeFunctionData({ abi: vault.abi, functionName: "redeem", args: [1n, NO_MIN, 0n] })],
+      ["mint", ({ vault, faulty }) => encodeFunctionData({ abi: vault.abi, functionName: "mint", args: [1n, faulty.address, NO_MAX, 0n, 0n] })],
+      ["redeem", ({ vault, faulty }) => encodeFunctionData({ abi: vault.abi, functionName: "redeem", args: [1n, faulty.address, NO_MIN, 0n] })],
       [
         "redeemSkipping",
-        ({ vault }) => encodeFunctionData({ abi: vault.abi, functionName: "redeemSkipping", args: [1n, NO_MIN, [], 0n] }),
+        ({ vault, faulty }) =>
+          encodeFunctionData({ abi: vault.abi, functionName: "redeemSkipping", args: [1n, faulty.address, NO_MIN, [], 0n] }),
       ],
       ["activateComponent", ({ vault, tokens }) => encodeFunctionData({ abi: vault.abi, functionName: "activateComponent", args: [tokens[0].address] })],
       ["deactivateEmptyComponent", ({ vault, tokens }) => encodeFunctionData({ abi: vault.abi, functionName: "deactivateEmptyComponent", args: [tokens[0].address] })],
@@ -111,8 +112,8 @@ describe("GRETVault: adversarial components and callers", async () => {
       ],
     ];
     const entries: [string, boolean, (setup: Setup) => Promise<`0x${string}`>][] = [
-      ["mint", false, ({ vault, alice }) => vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account })],
-      ["redeem", false, ({ vault, alice }) => vault.write.redeem([INITIAL_SHARES / 2n, NO_MIN, 0n], { account: alice.account })],
+      ["mint", false, ({ vault, alice }) => vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account })],
+      ["redeem", false, ({ vault, alice }) => vault.write.redeem([INITIAL_SHARES / 2n, alice.account.address, NO_MIN, 0n], { account: alice.account })],
       [
         "rescue",
         false,
@@ -134,7 +135,7 @@ describe("GRETVault: adversarial components and callers", async () => {
           const { vault, faulty, alice } = setup;
           if (entryName === "rescue") {
             // Registered components can only be rescued with zero normal supply.
-            await vault.write.redeem([await vault.read.totalSupply(), NO_MIN, 0n], { account: alice.account });
+            await vault.write.redeem([await vault.read.totalSupply(), alice.account.address, NO_MIN, 0n], { account: alice.account });
             await faulty.write.mint([vault.address, 10n]);
           }
           if (inLiquidation) {
@@ -168,9 +169,9 @@ describe("GRETVault: adversarial components and callers", async () => {
       await tokenA.write.approve([vault.address, maxUint256], { account: alice.account });
       await usdtLike.write.approve([vault.address, maxUint256], { account: alice.account });
 
-      await vault.write.mint([INITIAL_SHARES, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
-      await vault.write.mint([INITIAL_SHARES, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
-      await vault.write.redeem([INITIAL_SHARES, [0n, 0n], 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
+      await vault.write.redeem([INITIAL_SHARES, alice.account.address, [0n, 0n], 0n], { account: alice.account });
       await usdtLike.write.mint([vault.address, 5n]);
       await viem.assertions.revertWithCustomError(
         vault.write.rescue([usdtLike.address, alice.account.address, 5n], { account: governance.account }),
@@ -198,11 +199,11 @@ describe("GRETVault: adversarial components and callers", async () => {
       await faulty.write.mint([alice.account.address, 10n]);
       await tokenA.write.approve([vault.address, maxUint256], { account: alice.account });
       await faulty.write.approve([vault.address, maxUint256], { account: alice.account });
-      await vault.write.mint([INITIAL_SHARES, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
-      await vault.write.mint([INITIAL_SHARES, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
       await faulty.write.setFault([Fault.RevertOnZeroTransfer]);
 
-      await vault.write.redeem([INITIAL_SHARES / 2n, [0n, 0n], 0n], { account: alice.account });
+      await vault.write.redeem([INITIAL_SHARES / 2n, alice.account.address, [0n, 0n], 0n], { account: alice.account });
       assert.equal(await faulty.read.balanceOf([vault.address]), 2n);
 
       await vault.write.activateLiquidation({ account: governance.account });
@@ -230,14 +231,14 @@ describe("GRETVault: adversarial components and callers", async () => {
       await zero.write.approve([vault.address, maxUint256], { account: alice.account });
       await big.write.approve([vault.address, maxUint256], { account: alice.account });
 
-      await vault.write.mint([INITIAL_SHARES, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
-      await vault.write.mint([7n * INITIAL_SHARES + 1n, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
+      await vault.write.mint([7n * INITIAL_SHARES + 1n, alice.account.address, [maxUint256, maxUint256], 0n, 0n], { account: alice.account });
       const shares = 7n * INITIAL_SHARES + 1n;
       assert.deepEqual(await vault.read.reserves(), [
         3n + mulDivUp(shares, 3n, INITIAL_SHARES),
         huge + mulDivUp(shares, huge, INITIAL_SHARES),
       ]);
-      await vault.write.redeem([await vault.read.totalSupply(), [0n, 0n], 0n], { account: alice.account });
+      await vault.write.redeem([await vault.read.totalSupply(), alice.account.address, [0n, 0n], 0n], { account: alice.account });
       assert.deepEqual(await vault.read.reserves(), [0n, 0n]);
     });
 
@@ -249,9 +250,9 @@ describe("GRETVault: adversarial components and callers", async () => {
       const vault = await viem.deployContract("GRETVault", [[token.address], [2n ** 255n], governance.account.address]);
       await token.write.mint([alice.account.address, 2n ** 255n]);
       await token.write.approve([vault.address, maxUint256], { account: alice.account });
-      await vault.write.mint([INITIAL_SHARES, [maxUint256], 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, [maxUint256], 0n, 0n], { account: alice.account });
 
-      await viem.assertions.revert(vault.write.mint([4n * INITIAL_SHARES, [maxUint256], 0n, 0n], { account: alice.account }));
+      await viem.assertions.revert(vault.write.mint([4n * INITIAL_SHARES, alice.account.address, [maxUint256], 0n, 0n], { account: alice.account }));
       assert.deepEqual(await vault.read.reserves(), [2n ** 255n]);
       assert.equal(await vault.read.totalSupply(), INITIAL_SHARES);
     });
@@ -264,13 +265,13 @@ describe("GRETVault: adversarial components and callers", async () => {
       await faulty.write.setBlocked([vault.address, true]);
 
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.redeem([INITIAL_SHARES / 10n, NO_MIN, 0n], { account: alice.account }),
+        vault.write.redeem([INITIAL_SHARES / 10n, alice.account.address, NO_MIN, 0n], { account: alice.account }),
         faulty,
         "AccountBlocked",
         [getAddress(vault.address)],
       );
       await viem.assertions.revertWithCustomError(
-        vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: bob.account }),
+        vault.write.mint([INITIAL_SHARES, bob.account.address, NO_MAX, 0n, 0n], { account: bob.account }),
         faulty,
         "AccountBlocked",
       );
@@ -301,11 +302,11 @@ describe("GRETVault: adversarial components and callers", async () => {
 
       // Normal redemption is all or nothing, so the frozen holder cannot use it; others can.
       await viem.assertions.revertWithCustomError(
-        vault.write.redeem([1n, NO_MIN, 0n], { account: bob.account }),
+        vault.write.redeem([1n, bob.account.address, NO_MIN, 0n], { account: bob.account }),
         faulty,
         "AccountBlocked",
       );
-      await vault.write.redeem([INITIAL_SHARES / 10n, NO_MIN, 0n], { account: alice.account });
+      await vault.write.redeem([INITIAL_SHARES / 10n, alice.account.address, NO_MIN, 0n], { account: alice.account });
 
       await vault.write.activateLiquidation({ account: governance.account });
       await vault.write.convertToClaims([await vault.read.balanceOf([bob.account.address])], { account: bob.account });
@@ -398,12 +399,12 @@ describe("GRETVault: adversarial components and callers", async () => {
       const min = tokens.map(() => 0n);
       const gasOf = async (hash: `0x${string}`) => (await publicClient.waitForTransactionReceipt({ hash })).gasUsed;
 
-      await vault.write.mint([INITIAL_SHARES, max, 0n, version], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, max, 0n, version], { account: alice.account });
       const mintGas = await gasOf(
-        await vault.write.mint([INITIAL_SHARES, max, 0n, version], { account: alice.account }),
+        await vault.write.mint([INITIAL_SHARES, alice.account.address, max, 0n, version], { account: alice.account }),
       );
       const redeemGas = await gasOf(
-        await vault.write.redeem([INITIAL_SHARES / 2n, min, version], { account: alice.account }),
+        await vault.write.redeem([INITIAL_SHARES / 2n, alice.account.address, min, version], { account: alice.account }),
       );
       await vault.write.activateLiquidation({ account: governance.account });
       await vault.write.convertToClaims([INITIAL_SHARES], { account: alice.account });

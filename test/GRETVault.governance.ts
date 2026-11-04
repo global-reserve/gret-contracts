@@ -23,8 +23,8 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
   async function holdersFixture() {
     const basket = await basketFixture();
     const { vault, alice, bob } = basket;
-    await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
-    await vault.write.mint([INITIAL_SHARES / 3n, NO_MAX, 0n, 0n], { account: bob.account });
+    await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
+    await vault.write.mint([INITIAL_SHARES / 3n, bob.account.address, NO_MAX, 0n, 0n], { account: bob.account });
     return basket;
   }
 
@@ -110,7 +110,7 @@ describe("GRETVault: governance, rescue and governance transfer", async () => {
       assert.equal((await vault.read.reserves())[0], 123n);
 
       await vault.write.rescue([tokens[0].address, carol.account.address, 123n], { account: governance.account });
-      await vault.write.mint([INITIAL_SHARES, INITIAL_AMOUNTS, 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, alice.account.address, INITIAL_AMOUNTS, 0n, 0n], { account: alice.account });
 
       assert.deepEqual(await balancesOf(basket, vault.address), INITIAL_AMOUNTS);
     });
