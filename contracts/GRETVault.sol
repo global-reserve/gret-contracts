@@ -105,13 +105,20 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// @dev Component index plus one; zero for tokens outside the basket.
     mapping(address token => uint256) private _componentSlot;
     uint256[] private _initialAmounts;
-    /// @dev Established nominal liquidation basis. Zero throughout normal operation; initialized
-    /// separately for each component on its first successful claim and raised by later income.
-    uint256[] private _liquidationBasis;
-    /// @dev Liquidation rights consumed per component, before any loss haircut.
-    uint256[] private _rightsClaimed;
-    /// @dev Component amounts actually paid out by claims.
-    uint256[] private _totalClaimed;
+
+    /// @dev Claim totals of one component. Only claims write them, during liquidation, when the
+    /// basket can no longer change, so they are keyed by index and never move.
+    struct LiquidationTotals {
+        /// @dev Established nominal basis: set on the component's first successful claim and
+        /// raised by later income.
+        uint256 basis;
+        /// @dev Rights consumed, before any loss haircut.
+        uint256 consumedRights;
+        /// @dev Amounts actually paid out.
+        uint256 paid;
+    }
+
+    mapping(uint256 index => LiquidationTotals) private _liquidationTotals;
 
     /// @notice Wallets that completed a mint and may use normal redemption. Not transferable.
     mapping(address account => bool) public hasMinted;
@@ -255,7 +262,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// `version` is the `basketVersion` that `maxAmountsIn` was prepared for.
     /// @dev Contributions round up. GRET is issued for what actually arrived, rounded down, so a
     /// component that delivers a few units less costs the minter, never the existing holders;
-    /// `minShares` bounds that cost. Snapshot every active balance before pulling any input.
+    /// `minShares` bounds that cost. Every limit is checked before any input is pulled.
     function mint(uint256 shares, uint256[] calldata maxAmountsIn, uint256 minShares, uint256 version)
         external
         nonReentrant
@@ -266,39 +273,36 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         if (shares == 0) revert ZeroShares();
         _requireBasket(version, maxAmountsIn.length);
 
-        uint256 count = _components.length;
         uint256 supply = totalSupply();
-        if (supply == 0 && shares != INITIAL_SHARES) revert InvalidInitialMint(shares);
-        uint256[] memory balancesBefore = new uint256[](count);
-        uint256[] memory amounts = new uint256[](count);
+        (uint256[] memory amounts, uint256[] memory balancesBefore) = _mintAmounts(shares, supply);
+        uint256 count = amounts.length;
+        bool contributes;
         for (uint256 i; i < count; ++i) {
-            if (excluded[address(_components[i])]) continue;
-            if (supply == 0 && _initialAmounts[i] == 0) continue;
-            balancesBefore[i] = _components[i].balanceOf(address(this));
-            amounts[i] = supply == 0 ? _initialAmounts[i]
-                : Math.mulDiv(shares, balancesBefore[i], supply, Math.Rounding.Ceil);
-        }
-
-        received = new uint256[](count);
-        minted = supply == 0 ? INITIAL_SHARES : shares;
-        bool contributed;
-        for (uint256 i; i < count; ++i) {
-            if (amounts[i] == 0) continue;
-            received[i] = _pull(i, amounts[i], maxAmountsIn[i], balancesBefore[i]);
-            contributed = true;
-            if (supply != 0) minted = Math.min(minted, Math.mulDiv(received[i], supply, balancesBefore[i]));
+            if (amounts[i] > maxAmountsIn[i]) revert AmountInAboveMax(i, amounts[i], maxAmountsIn[i]);
+            if (amounts[i] != 0) contributes = true;
         }
         // Without this, GRET backed by nothing could be minted after every reserve was lost.
-        if (!contributed) revert EmptyBasket();
+        if (!contributes) revert EmptyBasket();
+
+        received = new uint256[](count);
+        uint256 issued = shares;
+        for (uint256 i; i < count; ++i) {
+            if (amounts[i] == 0) continue;
+            received[i] = _pull(i, amounts[i], balancesBefore[i]);
+            if (supply != 0) issued = Math.min(issued, Math.mulDiv(received[i], supply, balancesBefore[i]));
+        }
         // The minter paid for every share, so the fee dilutes nobody.
-        uint256 fee = _fee(minted, mintFee);
-        minted -= fee;
+        uint256 fee = _fee(issued, mintFee);
+        minted = issued - fee;
         // Also refuses a mint whose fee, rounded up, takes every share.
         if (minted == 0) revert ZeroShares();
         if (minted < minShares) revert SharesBelowMin(minted, minShares);
 
         _mint(msg.sender, minted);
-        if (fee != 0) _chargeFee(fee, true);
+        if (fee != 0) {
+            _mint(feeRecipient, fee);
+            emit FeeCharged(msg.sender, feeRecipient, fee);
+        }
         hasMinted[msg.sender] = true;
         emit Minted(msg.sender, minted, received);
     }
@@ -334,11 +338,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         uint256 version
     ) external nonReentrant returns (uint256[] memory amounts) {
         _requireBasket(version, minAmountsOut.length);
-        bool[] memory skip = new bool[](_components.length);
-        for (uint256 i; i < skipped.length; ++i) {
-            skip[_indexOf(skipped[i])] = true;
-        }
-        amounts = _redeem(shares, minAmountsOut, skip);
+        amounts = _redeem(shares, minAmountsOut, _skipMask(skipped));
         if (skipped.length != 0 && totalSupply() == 0) _pauseMint();
     }
 
@@ -357,30 +357,22 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     function deactivateEmptyComponent(address token) external onlyGovernance nonReentrant {
         _requireNotLiquidating();
         _indexOf(token);
-        uint256 balance = IERC20(token).balanceOf(address(this));
-        _requireEmpty(token, balance);
+        _requireEmpty(token);
         excluded[token] = true;
         emit ComponentActivationChanged(token, false);
     }
 
     /// @notice Live mint amounts. Excluded components are not called. Initial mint still uses
     /// the configured basket; preexisting active balances belong to the new first share.
-    function previewMint(uint256 shares) public view nonReentrantView returns (uint256[] memory amounts) {
+    function previewMint(uint256 shares) external view nonReentrantView returns (uint256[] memory amounts) {
         _requireNotLiquidating();
-        uint256 supply = totalSupply();
-        if (supply == 0 && shares != INITIAL_SHARES) revert InvalidInitialMint(shares);
-        amounts = new uint256[](_components.length);
-        for (uint256 i; i < amounts.length; ++i) {
-            if (excluded[address(_components[i])]) continue;
-            amounts[i] = supply == 0 ? _initialAmounts[i]
-                : Math.mulDiv(shares, _components[i].balanceOf(address(this)), supply, Math.Rounding.Ceil);
-        }
+        (amounts,) = _mintAmounts(shares, totalSupply());
     }
 
     /// @notice Live redemption amounts, after fees. Use previewRedeemSkipping for a broken token.
-    function previewRedeem(uint256 shares) public view nonReentrantView returns (uint256[] memory amounts) {
+    function previewRedeem(uint256 shares) external view nonReentrantView returns (uint256[] memory amounts) {
         _requireNotLiquidating();
-        return _redemptionAmounts(shares, new bool[](_components.length));
+        (amounts,) = _redemptionAmounts(shares, new bool[](_components.length));
     }
 
     /// @notice Quotes an exit without calling any skipped or excluded component.
@@ -391,11 +383,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         returns (uint256[] memory amounts)
     {
         _requireNotLiquidating();
-        bool[] memory skip = new bool[](_components.length);
-        for (uint256 i; i < skipped.length; ++i) {
-            skip[_indexOf(skipped[i])] = true;
-        }
-        return _redemptionAmounts(shares, skip);
+        (amounts,) = _redemptionAmounts(shares, _skipMask(skipped));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -438,34 +426,37 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         if (to == address(0)) revert ZeroAddress();
         if (to == address(this)) revert InvalidRecipient();
 
-        (uint256 basis, uint256 rights, uint256 payout) = _claimQuote(msg.sender, index);
-        amount = payout;
+        uint256 basis;
+        uint256 rights;
+        (basis, rights, amount) = _claimQuote(msg.sender, index);
         if (amount == 0) revert NothingToClaim(msg.sender, index);
         if (amount < minAmount) revert AmountOutBelowMin(index, amount, minAmount);
 
-        _liquidationBasis[index] = basis;
+        LiquidationTotals storage totals = _liquidationTotals[index];
+        totals.basis = basis;
+        totals.consumedRights += rights;
+        totals.paid += amount;
         claimed[msg.sender][index] += rights;
-        _rightsClaimed[index] += rights;
-        _totalClaimed[index] += amount;
         _components[index].safeTransfer(to, amount);
         emit Claimed(msg.sender, index, to, amount, rights);
     }
 
     /// @notice Current payout including automatically allocated income. Only this token is read.
-    function claimable(address account, uint256 index) public view nonReentrantView returns (uint256 amount) {
+    function claimable(address account, uint256 index) external view nonReentrantView returns (uint256 amount) {
         _requireIndex(index);
         (,, amount) = _claimQuote(account, index);
     }
 
     /// @notice Nominal pending rights, including income since the last claim of this component.
-    function pendingRights(address account, uint256 index) public view nonReentrantView returns (uint256 rights) {
+    function pendingRights(address account, uint256 index) external view nonReentrantView returns (uint256 rights) {
         _requireIndex(index);
         (, rights,) = _claimQuote(account, index);
     }
 
     /// @notice The basis established by successful claims, without querying any external token.
-    function liquidationBasis() external view returns (uint256[] memory) {
-        return _liquidationBasis;
+    function liquidationBasis() external view returns (uint256[] memory amounts) {
+        amounts = new uint256[](_components.length);
+        for (uint256 i; i < amounts.length; ++i) amounts[i] = _liquidationTotals[i].basis;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -487,21 +478,21 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     {
         if (msg.sender != rebalancer) revert NotRebalancer(msg.sender);
         _requireNotLiquidating();
-        uint256 sellIndex = _indexOf(sell);
+        _indexOf(sell);
         uint256 buyIndex = _indexOf(buy);
-        if (sellIndex == buyIndex) revert SameComponent(sell);
+        if (sell == buy) revert SameComponent(sell);
         if (sellAmount == 0) revert ZeroAmount();
+        if (buyAmount == 0) revert ZeroComponentAmount(buyIndex);
         IPriceGuard guard = priceGuard;
         if (address(guard) == address(0)) revert NoPriceGuard();
 
         if (totalSupply() == 0) revert NoSupply();
         if (excluded[sell]) revert ComponentExcluded(sell);
         if (excluded[buy]) revert ComponentExcluded(buy);
-        uint256 reserve = IERC20(sell).balanceOf(address(this));
-        uint256 buyBalance = IERC20(buy).balanceOf(address(this));
-        if (sellAmount > reserve) revert SwapExceedsReserve(sell, sellAmount, reserve);
+        uint256 sellBalance = IERC20(sell).balanceOf(address(this));
+        if (sellAmount > sellBalance) revert SwapExceedsReserve(sell, sellAmount, sellBalance);
 
-        received = _pull(buyIndex, buyAmount, buyAmount, buyBalance);
+        received = _pull(buyIndex, buyAmount, IERC20(buy).balanceOf(address(this)));
         // The guard excludes this measured receipt when reconstructing pre-swap backing.
         guard.checkSwap(sell, sellAmount, buy, received);
         IERC20(sell).safeTransfer(msg.sender, sellAmount);
@@ -520,16 +511,16 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         if (to == address(this)) revert InvalidRecipient();
         if (amount == 0) revert ZeroAmount();
         if (writtenOff[token]) revert TokenWrittenOff(token);
-        uint256 slot = _componentSlot[token];
-        if (slot != 0 && (liquidationActive || totalSupply() != 0)) revert BackingToken(token);
+        if (_componentSlot[token] != 0 && (liquidationActive || totalSupply() != 0)) revert BackingToken(token);
         uint256 count = _components.length;
         uint256[] memory balances = new uint256[](count);
         for (uint256 i; i < count; ++i) balances[i] = _readableBalance(_components[i]);
         IERC20(token).safeTransfer(to, amount);
         // A second address over a component's ledger could move its balance; none may drop.
         for (uint256 i; i < count; ++i) {
-            if (i + 1 == slot || balances[i] == 0) continue;
-            if (_readableBalance(_components[i]) < balances[i]) revert ComponentBalanceReduced(address(_components[i]));
+            IERC20 component = _components[i];
+            if (address(component) == token || balances[i] == 0) continue;
+            if (_readableBalance(component) < balances[i]) revert ComponentBalanceReduced(address(component));
         }
         emit Rescued(token, to, amount);
     }
@@ -544,7 +535,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         emit RebalancerProposed(next, readyAt);
     }
 
-    function cancelRebalancerProposal() external onlyGovernance {
+    function cancelRebalancerProposal() public onlyGovernance {
         address pending = pendingRebalancer;
         if (pending == address(0)) revert NoPendingRebalancer();
         delete pendingRebalancer;
@@ -570,12 +561,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// @notice Leaves the vault without a rebalancer at once, and discards a pending one: taking the
     /// power away needs no wait.
     function revokeRebalancer() external onlyGovernance {
-        address pending = pendingRebalancer;
-        if (pending != address(0)) {
-            delete pendingRebalancer;
-            delete pendingRebalancerReadyAt;
-            emit RebalancerProposalCancelled(pending);
-        }
+        if (pendingRebalancer != address(0)) cancelRebalancerProposal();
         address previous = rebalancer;
         delete rebalancer;
         emit RebalancerChanged(previous, address(0));
@@ -665,8 +651,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         _requireNotLiquidating();
         uint256 index = _indexOf(token);
         if (writtenOff[token]) revert TokenWrittenOff(token);
-        uint256 balance = IERC20(token).balanceOf(address(this));
-        _requireEmpty(token, balance);
+        _requireEmpty(token);
         uint256 last = _components.length - 1;
         if (last == 0) revert InvalidComponentCount(0);
 
@@ -676,12 +661,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
             _componentSlot[address(next)] = i + 1;
             _initialAmounts[i] = _initialAmounts[i + 1];
         }
-        // Claim totals are zero outside liquidation, which never ends, so they need no shifting.
         _components.pop();
         _initialAmounts.pop();
-        _liquidationBasis.pop();
-        _rightsClaimed.pop();
-        _totalClaimed.pop();
         delete _componentSlot[token];
         delete excluded[token];
         delete writeOffReadyAt[token];
@@ -865,12 +846,14 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         }
     }
 
-    function totalClaimed() external view returns (uint256[] memory) {
-        return _totalClaimed;
+    function totalClaimed() external view returns (uint256[] memory amounts) {
+        amounts = new uint256[](_components.length);
+        for (uint256 i; i < amounts.length; ++i) amounts[i] = _liquidationTotals[i].paid;
     }
 
-    function rightsClaimed() external view returns (uint256[] memory) {
-        return _rightsClaimed;
+    function rightsClaimed() external view returns (uint256[] memory amounts) {
+        amounts = new uint256[](_components.length);
+        for (uint256 i; i < amounts.length; ++i) amounts[i] = _liquidationTotals[i].consumedRights;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -892,17 +875,20 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         if (!hasMinted[msg.sender]) revert RedemptionNotEnabled(msg.sender);
         if (shares == 0) revert ZeroShares();
 
-        amounts = _redemptionAmounts(shares, skip);
-        uint256 fee = _redeemFeeOn(shares, totalSupply());
+        uint256 fee;
+        (amounts, fee) = _redemptionAmounts(shares, skip);
         uint256 burned = shares - fee;
         uint256 remaining = totalSupply() - burned;
         if (remaining != 0 && remaining < MIN_SUPPLY) revert SupplyBelowMinimum(remaining);
-        uint256 count = _components.length;
+        uint256 count = amounts.length;
         for (uint256 i; i < count; ++i) {
             if (amounts[i] < minAmountsOut[i]) revert AmountOutBelowMin(i, amounts[i], minAmountsOut[i]);
         }
 
-        if (fee != 0) _chargeFee(fee, false);
+        if (fee != 0) {
+            _transfer(msg.sender, feeRecipient, fee);
+            emit FeeCharged(msg.sender, feeRecipient, fee);
+        }
         _burn(msg.sender, burned);
         for (uint256 i; i < count; ++i) {
             if (amounts[i] != 0) _components[i].safeTransfer(msg.sender, amounts[i]);
@@ -910,15 +896,9 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         emit Redeemed(msg.sender, burned, amounts);
     }
 
-    /// @dev Pulls one component for a mint or a swap and returns what actually arrived.
-    function _pull(uint256 index, uint256 amount, uint256 maxAmount, uint256 balanceBefore)
-        private
-        returns (uint256 received)
-    {
-        // Mint skips components it does not ask for; a swap offering nothing stops here.
-        if (amount == 0) revert ZeroComponentAmount(index);
-        if (amount > maxAmount) revert AmountInAboveMax(index, amount, maxAmount);
-
+    /// @dev Pulls a positive `amount` of one component for a mint or a swap and returns what
+    /// actually arrived, measured against `balanceBefore`.
+    function _pull(uint256 index, uint256 amount, uint256 balanceBefore) private returns (uint256 received) {
         IERC20 token = _components[index];
         token.safeTransferFrom(msg.sender, address(this), amount);
         uint256 balanceAfter = token.balanceOf(address(this));
@@ -928,21 +908,56 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         }
     }
 
-    function _redemptionAmounts(uint256 shares, bool[] memory skip) private view returns (uint256[] memory amounts) {
+    /// @dev What a mint of `shares` asks for, and the balances it is measured against. The first
+    /// mint asks for the initial basket; later ones for a share of every balance, rounded up.
+    /// Excluded components, and on the first mint those without an initial amount, are not called.
+    function _mintAmounts(uint256 shares, uint256 supply)
+        private
+        view
+        returns (uint256[] memory amounts, uint256[] memory balances)
+    {
+        if (supply == 0 && shares != INITIAL_SHARES) revert InvalidInitialMint(shares);
+        uint256 count = _components.length;
+        amounts = new uint256[](count);
+        balances = new uint256[](count);
+        for (uint256 i; i < count; ++i) {
+            if (excluded[address(_components[i])] || (supply == 0 && _initialAmounts[i] == 0)) continue;
+            balances[i] = _components[i].balanceOf(address(this));
+            amounts[i] = supply == 0 ? _initialAmounts[i]
+                : Math.mulDiv(shares, balances[i], supply, Math.Rounding.Ceil);
+        }
+    }
+
+    /// @dev Redeeming the whole supply pays no fee: fee GRET would otherwise stay in the supply and
+    /// keep the holder of every GRET from leaving in full.
+    function _redemptionAmounts(uint256 shares, bool[] memory skip)
+        private
+        view
+        returns (uint256[] memory amounts, uint256 fee)
+    {
         uint256 supply = totalSupply();
         if (shares > supply) revert SharesExceedSupply(shares, supply);
         amounts = new uint256[](_components.length);
-        uint256 burned = shares - _redeemFeeOn(shares, supply);
-        if (burned == 0) return amounts;
+        fee = shares == supply ? 0 : _fee(shares, redeemFee);
+        uint256 burned = shares - fee;
+        if (burned == 0) return (amounts, fee);
         for (uint256 i; i < amounts.length; ++i) {
             if (skip[i] || excluded[address(_components[i])]) continue;
             amounts[i] = Math.mulDiv(burned, _components[i].balanceOf(address(this)), supply);
         }
     }
 
+    function _skipMask(address[] calldata skipped) private view returns (bool[] memory skip) {
+        skip = new bool[](_components.length);
+        for (uint256 i; i < skipped.length; ++i) {
+            skip[_indexOf(skipped[i])] = true;
+        }
+    }
+
     /// @dev Only high-precision tokens may leave up to ten base units. Low-decimal assets must
     /// be exactly empty, so ten whole indivisible assets cannot be discarded as rounding dust.
-    function _requireEmpty(address token, uint256 balance) private view {
+    function _requireEmpty(address token) private view {
+        uint256 balance = IERC20(token).balanceOf(address(this));
         if (balance == 0) return;
         if (balance > MAX_REMOVAL_DUST || IERC20Metadata(token).decimals() < 18) {
             revert ComponentHasReserve(token, balance);
@@ -950,7 +965,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     }
 
     function _effectiveBasis(uint256 index, uint256 balance) private view returns (uint256) {
-        return Math.max(_liquidationBasis[index], balance + _rightsClaimed[index]);
+        LiquidationTotals storage totals = _liquidationTotals[index];
+        return Math.max(totals.basis, balance + totals.consumedRights);
     }
 
     /// @dev No cached-balance fallback: an unreadable token cannot consume claims or overpay.
@@ -964,7 +980,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         basis = _effectiveBasis(index, balance);
         rights = Math.mulDiv(shares, basis, liquidationSupply) - claimed[account][index];
         if (rights == 0) return (basis, 0, 0);
-        uint256 owed = basis - _rightsClaimed[index];
+        uint256 owed = basis - _liquidationTotals[index].consumedRights;
         amount = balance >= owed ? rights : Math.mulDiv(rights, balance, owed);
     }
 
@@ -972,28 +988,11 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         _components.push(IERC20(token));
         _componentSlot[token] = _components.length;
         _initialAmounts.push(initialAmount);
-        _liquidationBasis.push(0);
-        _rightsClaimed.push(0);
-        _totalClaimed.push(0);
     }
 
     /// @dev Rounded up, so that no operation with a positive fee rate pays nothing.
     function _fee(uint256 shares, uint256 rate) private pure returns (uint256) {
         return Math.mulDiv(shares, rate, FEE_DENOMINATOR, Math.Rounding.Ceil);
-    }
-
-    /// @dev Redeeming the whole supply pays no fee: fee GRET would otherwise stay in the supply and
-    /// keep the holder of every GRET from leaving in full.
-    function _redeemFeeOn(uint256 shares, uint256 supply) private view returns (uint256) {
-        return shares == supply ? 0 : _fee(shares, redeemFee);
-    }
-
-    /// @dev On mint the fee is issued to the recipient; on redemption it is moved from the caller.
-    function _chargeFee(uint256 fee, bool issue) private {
-        address recipient = feeRecipient;
-        if (issue) _mint(recipient, fee);
-        else _transfer(msg.sender, recipient, fee);
-        emit FeeCharged(msg.sender, recipient, fee);
     }
 
     function _setFees(uint256 mintFee_, uint256 redeemFee_) private {
