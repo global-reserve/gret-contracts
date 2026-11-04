@@ -27,11 +27,14 @@ A new vault and compatible guard require a separate deployment and migration dec
   and a redemption pays them out. Active balances include income and losses immediately,
   without `sync`. No oracle takes part in either.
 - **Immutable.** No upgrades and no owner. Governance acts within limits the code enforces:
-  new components, rebalancers, price guards, write-offs, fee raises and governance handovers
-  wait 7 days in public; fees are capped at 5%; redemption can never be paused.
+  new components, rebalancers, price guards, eligibility contracts, write-offs, fee raises and
+  governance handovers wait 7 days in public; fees are capped at 5%; redemption can never be
+  paused.
 - **Bounded rebalancing.** A rebalancer exchanges one component for another, and every swap
   must pass a price guard. `ChainlinkPriceGuard` refuses a swap that loses more than 2%, or
   one that would take more than 2% of the vault's value in a week.
+- **Open by default.** Anyone may mint and redeem. Governance may appoint an eligibility
+  contract, after the same 7-day notice, that decides who may; it can remove it at once.
 - **An exit for everyone.** Governance can start an irreversible liquidation in which every
   holder withdraws each component on its own, even if others fail.
 
@@ -46,10 +49,12 @@ flowchart TB
     Guard["<b>ChainlinkPriceGuard</b><br/>implements IPriceGuard"]
     Feeds["Chainlink price feeds"]
     Tokens["11 component tokens"]
-    Gov -->|"basket, activation, fees, pause, rescue, liquidation"| Vault
+    Eligibility["Eligibility contract<br/>optional, none at deployment"]
+    Gov -->|"basket, activation, fees, pause, rescue, eligibility, liquidation"| Vault
     Holders <-->|"mint, redeem, claim"| Vault
     Rebalancer -->|swap| Vault
     Vault -->|checkSwap| Guard
+    Vault -.->|"canMint, canRedeem"| Eligibility
     Guard -->|latestRoundData| Feeds
     Guard -.->|"reads components and exclusions"| Vault
     Guard -->|"balanceOf; subtract incoming swap receipt"| Tokens

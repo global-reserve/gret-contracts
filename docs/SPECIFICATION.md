@@ -1,6 +1,6 @@
 # GRET specification
 
-Updated on November 3, 2026. This document states what the contracts in `contracts/` must do.
+Updated on November 4, 2026. This document states what the contracts in `contracts/` must do.
 The current source has not been deployed. The pilot vault deployed on Ethereum mainnet on
 October 27, 2026 runs an earlier, immutable version, which kept a recognized-reserve ledger
 updated by governance `sync`; [PILOT.md](PILOT.md) records that deployment.
@@ -8,9 +8,10 @@ updated by governance `sync`; [PILOT.md](PILOT.md) records that deployment.
 ## Overview
 
 `contracts/GRETVault.sol` is both the GRET ERC-20 and its basket vault. It supports proportional
-in-kind mint/redemption, per-component emergency claims, basket changes, fees and guarded
-rebalancing. There are no upgrades. `ChainlinkPriceGuard.sol` limits swaps using Chainlink
-prices. Mint, redemption and liquidation use token quantities, not prices.
+in-kind mint/redemption, per-component emergency claims, basket changes, fees, guarded
+rebalancing and an optional eligibility contract. There are no upgrades.
+`ChainlinkPriceGuard.sol` limits swaps using Chainlink prices. Mint, redemption and liquidation
+use token quantities, not prices.
 
 The scope is a mainnet pilot with the project's own funds, not an offering to third parties.
 The current basket has 11 components; configuration and verified addresses are in
@@ -40,7 +41,8 @@ compatibility; fork results are specific to their block and code versions.
   `s`, supply `S` and each pre-input balance `B[i]`, ask for `ceil(s * B[i] / S)`. A zero balance
   asks for nothing; an excluded component is not called. Measure receipts and issue at most
   the minimum `floor(received[i] * S / B[i])` over contributing components. Fee shares come out
-  of this issuance. `maxAmountsIn` and `minShares` bound user cost and net issuance.
+  of this issuance. `maxAmountsIn` and `minShares` bound user cost and net issuance; every
+  `maxAmountsIn` is checked before any input is pulled.
 - **Receipt tolerance:** each requested component must deliver a positive amount no larger
   than requested and no more than ten base units short (`MAX_RECEIPT_SHORTFALL`). The minter
   absorbs rounding, not existing holders. Larger transfer fees revert. Receipts are measured
@@ -81,11 +83,11 @@ outside the basket or income requiring an issuer-specific claim are not automati
 
 Between 1 and 128 unique deployed token contracts can be registered. The vault itself and
 EIP-7702 accounts, whose code is a delegation designator their key holder can replace without
-notice, are refused with `InvalidContract`, as components and as price guards. Constructor
-components are active and have positive initial amounts. Governance announces additions;
-anyone may add one after seven days and before the following seven-day execution window
-expires. A new component enters **excluded**, with zero initial amount. Even donations cannot
-make it active.
+notice, are refused with `InvalidContract`, as components, price guards and eligibility
+contracts. Constructor components are active and have positive initial amounts. Governance
+announces additions; anyone may add one after seven days and before the following seven-day
+execution window expires. A new component enters **excluded**, with zero initial amount. Even
+donations cannot make it active.
 
 `activateComponent(token)`, only governance in normal mode, makes the entire balance active
 without making a token call. It is explicit, immediate and idempotent. Calling it for an
@@ -99,8 +101,9 @@ is allowed only if it is at most `MAX_REMOVAL_DUST = 10` base units and the toke
 least 18 decimals. Tokens with fewer decimals must be exactly empty: a few whole indivisible
 assets must not be discarded as dust. This prevents incidental receipts from reactivating a
 sold-out token. Deactivation keeps the initial amount, which bootstrap ignores while the
-component is excluded. An active zero-balance token otherwise becomes required again when it
-receives anything; that may block a minter unable to transfer it.
+component is excluded. Deactivating an already excluded component changes nothing and emits
+nothing. An active zero-balance token otherwise becomes required again when it receives
+anything; that may block a minter unable to transfer it.
 
 For a materially funded or unreadable component, governance proposes a **write-off**. After
 seven days anyone may execute within the execution window. Execution makes no token calls:
@@ -185,7 +188,7 @@ Guard limits and price assumptions:
 Rebalancer and guard appointments wait seven days and expire seven days later. The proposed
 rebalancer accepts its own appointment; anyone may apply a ready guard. Governance may revoke
 the rebalancer immediately. The guard cannot be removed, only replaced by another contract
-after the same notice. The notice gives eligible holders an exit using skipping if
+after the same notice. The notice gives holders time to redeem, skipping a component if
 necessary. A captured governance can appoint a malicious guard after the notice. The notice
 binds an address: a guard or component behind an upgradeable proxy can change its behavior
 later without one.
@@ -216,6 +219,18 @@ own waits hold whoever governs, and they let some powers stay immediate (pausing
 revoking the rebalancer, removing the eligibility contract, liquidation) while others wait. A
 timelock can still sit on top as the governance address.
 
+`rescue(token,to,amount)` may transfer foreign tokens at any time, including during
+liquidation. For a registered ordinary component, active or excluded, it works only while
+normal supply is zero. It never rescues a component in liquidation or a historically
+written-off token. While supply is positive, active income and excluded balances cannot be
+redirected by calling them surplus; in liquidation, neither can late claim distributions.
+Removing a component under the dust rule explicitly changes it to foreign status.
+A rescue reads every component balance before and after its transfer and reverts with
+`ComponentBalanceReduced` if any other component's balance fell, so a second address over a
+component's ledger, which an issuer upgrade could create, cannot move registered backing. A
+component whose read reverts or answers with less than one word counts as zero before the
+transfer, so it is not compared and does not block rescues of other tokens.
+
 ### Eligibility contract
 
 Without an eligibility contract, anyone may mint and redeem. Governance may appoint one with
@@ -227,31 +242,21 @@ Once appointed, `mint` asks `canMint(caller, to)` and both redemptions ask `canR
 to)`, where the caller pays or burns and `to` receives. The vault asks with a read-only call
 and only an explicit `true` passes: a revert, a malformed answer or one that runs out of gas
 refuses, whatever gas the caller sends. GRET transfers, liquidation, swaps and `rescue` never
-ask it.
+ask it. It is asked in the middle of a mint or a redemption, so the vault's guarded views
+(`reserves`, the previews, `pendingRights`, `claimable`) revert inside it and its answer
+refuses; storage views such as `components`, `excluded` and GRET balances remain readable.
 
 It follows how tokenized-asset issuers restrict their primary market: only approved parties
 create and redeem with the issuer, while the tokens trade freely elsewhere. Starting open
 keeps that choice for later without a new vault, and the notice gives holders that a new
 contract would refuse time to redeem first.
 
-`rescue(token,to,amount)` may transfer foreign tokens at any time, including during
-liquidation. For a registered ordinary component, active or excluded, it works only while
-normal supply is zero. It never rescues a component in liquidation or a historically
-written-off token. While supply is positive, active income and excluded balances cannot be
-redirected by calling them surplus; in liquidation, neither can late claim distributions.
-Removing an eligible dust component explicitly changes that component to foreign status.
-A rescue reads every component balance before and after its transfer and reverts with
-`ComponentBalanceReduced` if any other component's balance fell, so a second address over a
-component's ledger, which an issuer upgrade could create, cannot move registered backing. A
-component whose read reverts or answers with less than one word counts as zero before the
-transfer, so it is not compared and does not block rescues of other tokens.
-
 ### How governance grows without changing the vault
 
 The vault fixes what governance can do: activate liquidation, manage activation/exclusion,
-rescue permitted tokens, change the basket, write off components, set bounded fees, and
-appoint the rebalancer, guard and successor. How governance decides can change independently.
-The following progression is a **proposal**, not a deployed governance system:
+rescue permitted tokens, change the basket, write off components, set bounded fees, and appoint
+the rebalancer, guard, eligibility contract and successor. How governance decides can change
+independently. The following progression is a **proposal**, not a deployed governance system:
 
 1. The pilot wallet initially governs. A Safe multisig is the proposed next step, with
    threshold/signers and key recovery to be chosen; it can act immediately in emergencies.
@@ -266,8 +271,8 @@ The following progression is a **proposal**, not a deployed governance system:
 `test/GRETVault.timelock.ts` exercises this handover with the actual `TimelockController`
 contract; its "multisig" actor is a stand-in signer, not a particular Safe configuration or an
 implemented Governor/VORA system. A timelock alone also delays emergency activation. The
-rebalancer and guard remain independently replaceable after their notice. A new vault is
-needed for new vault powers, not for changing who decides under existing powers.
+rebalancer, guard and eligibility contract remain independently replaceable after their notice.
+A new vault is needed for new vault powers, not for changing who decides under existing powers.
 
 ## Emergency liquidation
 
@@ -279,7 +284,7 @@ claims: liquidation has no fees and none of those changes can execute. It requir
 supply and freezes that denominator in `liquidationSupply`; it performs no token calls.
 Governance cannot reverse liquidation.
 
-Any holder, including one who never minted, may burn GRET with `convertToClaims(shares)`.
+Any holder may burn GRET with `convertToClaims(shares)`; the eligibility contract is not asked.
 `convertedShares[account]` is cumulative and nontransferable. Unconverted GRET remains transferable.
 Each component can be claimed independently to a nonzero recipient other than the vault.
 Exclusion in normal mode does not waive liquidation rights over that component.
@@ -331,6 +336,9 @@ and no call to them. In liquidation it returns effective nominal bases, includin
 rights; it is **not** a remaining-token-balance view then.
 `liquidationBasis()` exposes only bases established by successful claims without token calls.
 `pendingRights`/`claimable` compute effective current rights/payouts for one component.
+`governanceProposal`, `rebalancerProposal`, `priceGuardProposal` and `eligibilityProposal`
+return each pending successor and the earliest time it can take over; zero when none is
+pending.
 
 `reserves`, both normal previews, the skipping preview, `pendingRights` and `claimable` use
 `nonReentrantView`: callback consumers cannot read an intermediate accounting state. Mutations
@@ -363,7 +371,8 @@ balances and supply.
   swaps, rescue, liquidation activation, conversion and claims, component list/state
   mutations, initial amounts and `applyFees`. Sensitive accounting views reject callbacks.
   Proposals and cancellations (including an immediate fee reduction through `proposeFees`),
-  appointments, the fee recipient, the mint pause and rebalancer revocation are not guarded:
+  appointments of the rebalancer, guard and eligibility contract, the fee recipient, the mint
+  pause, rebalancer revocation and eligibility removal are not guarded:
   they transfer no tokens and retain their authorization checks. A reduction made by
   governance from a callback can only lower the fee of a mint in progress. GRET transfers
   cannot change already converted rights and cannot send GRET to the vault.
@@ -396,7 +405,9 @@ boolean alone is not a recovery guarantee.
   written-off tokens are always protected. A swap requires incoming value and guard approval.
 - Exercise issuer freezes, bad reads/return data, transfer failures, callbacks, loss/recovery
   timing, different claim orders, minters/secondary holders, last exits, rounding and donations.
-  Healthy exits must remain possible without cooperation from other holders or the admin.
+  Without an eligibility contract, healthy exits must remain possible without cooperation
+  from other holders or the admin; with one, they also depend on its rules, which take effect
+  only after a notice that lets holders leave first.
 - Tests, randomized sequences and reviews reduce risk; they do not prove the absence of bugs.
   An independent audit is pending before third-party funds. Mocks and fork observations
   cannot promise compatibility with future issuer upgrades.
@@ -440,17 +451,17 @@ them, and an assessment of the vault should take them as part of its trust model
 These are accepted consequences of the design, not defects. A change to any of them is a
 design decision and must be made here first.
 
-- **Governance holds broad powers.** At once it can activate the irreversible liquidation,
-  pause minting, reactivate components, rescue foreign tokens, change the fee recipient, lower
-  fees and revoke the rebalancer. After seven days' notice it can appoint a rebalancer with a
-  guard that accepts every swap and exchange the reserves for anything, add or write off
-  components, raise fees up to 5%, appoint an eligibility contract that refuses mint and
-  redemption, and hand over governance. Removing empty components and adding
-  announced ones change `basketVersion`, so a hostile governance can make redemptions prepared
-  for a fixed version revert with `BasketChanged`. If the governance key is lost, nobody can
-  activate liquidation, reactivate components, change the basket or replace governance;
-  redemption keeps working, and so does minting until a write-off proposed earlier is
-  executed or the last holder leaves by skipping, which pauses it for good.
+- **Governance holds broad powers.** At once it can activate the irreversible liquidation, pause
+  minting, reactivate components, rescue foreign tokens, change the fee recipient, lower fees,
+  revoke the rebalancer and remove the eligibility contract. After seven days' notice it can
+  appoint a rebalancer with a guard that accepts every swap and exchange the reserves for
+  anything, add or write off components, raise fees up to 5%, appoint an eligibility contract
+  that refuses mint and redemption, and hand over governance. Removing empty components and
+  adding announced ones change `basketVersion`, so a hostile governance can make redemptions
+  prepared for a fixed version revert with `BasketChanged`. If the governance key is lost, nobody
+  can activate liquidation, reactivate components, change the basket or replace governance;
+  redemption keeps working, and so does minting until a write-off proposed earlier is executed or
+  the last holder leaves by skipping, which pauses it for good.
 - **The rebalancer chooses the price within the guard's view.** The guard bounds only the
   losses its feeds can see. Feeds may lag within their deviation thresholds, price an
   underlying while the token trades below it, or go stale. Weeks are fixed epochs, so losses
