@@ -201,6 +201,11 @@ normal supply is zero. It never rescues a component in liquidation or a historic
 written-off token. While supply is positive, active income and excluded balances cannot be
 redirected by calling them surplus; in liquidation, neither can late claim distributions.
 Removing an eligible dust component explicitly changes that component to foreign status.
+A rescue reads every component balance before and after its transfer and reverts with
+`ComponentBalanceReduced` if any other component's balance fell, so a second address over a
+component's ledger, which an issuer upgrade could create, cannot move registered backing. A
+component whose read reverts or answers with less than one word counts as zero before the
+transfer, so it is not compared and does not block rescues of other tokens.
 
 ### How governance grows without changing the vault
 

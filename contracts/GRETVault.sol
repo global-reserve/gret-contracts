@@ -212,6 +212,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     error WriteOffNotReady(address token, uint256 readyAt);
     error ComponentExcluded(address token);
     error BackingToken(address token);
+    error ComponentBalanceReduced(address token);
     error TokenWrittenOff(address token);
     error FeeAboveMax(uint256 fee);
     error NoPendingFees();
@@ -510,13 +511,23 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
     /// @notice Rescues foreign tokens, or ordinary components only while normal supply is zero.
     /// Exclusion does not make a component rescuable; written-off tokens are permanently protected.
+    /// Reverts if the transfer lowers the balance of any other component.
     function rescue(address token, address to, uint256 amount) external onlyGovernance nonReentrant {
         if (to == address(0)) revert ZeroAddress();
         if (to == address(this)) revert InvalidRecipient();
         if (amount == 0) revert ZeroAmount();
         if (writtenOff[token]) revert TokenWrittenOff(token);
-        if (_componentSlot[token] != 0 && (liquidationActive || totalSupply() != 0)) revert BackingToken(token);
+        uint256 slot = _componentSlot[token];
+        if (slot != 0 && (liquidationActive || totalSupply() != 0)) revert BackingToken(token);
+        uint256 count = _components.length;
+        uint256[] memory balances = new uint256[](count);
+        for (uint256 i; i < count; ++i) balances[i] = _readableBalance(_components[i]);
         IERC20(token).safeTransfer(to, amount);
+        // A second address over a component's ledger could move its balance; none may drop.
+        for (uint256 i; i < count; ++i) {
+            if (i + 1 == slot || balances[i] == 0) continue;
+            if (_readableBalance(_components[i]) < balances[i]) revert ComponentBalanceReduced(address(_components[i]));
+        }
         emit Rescued(token, to, amount);
     }
 
@@ -983,6 +994,13 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         delete pendingMintFee;
         delete pendingRedeemFee;
         delete pendingFeesReadyAt;
+    }
+
+    /// @dev The vault's balance of `token`, or zero if the read reverts or answers with less than a
+    /// word, so an unreadable component does not block rescues of other tokens.
+    function _readableBalance(IERC20 token) private view returns (uint256) {
+        (bool ok, bytes memory data) = address(token).staticcall(abi.encodeCall(IERC20.balanceOf, (address(this))));
+        return ok && data.length >= 32 ? abi.decode(data, (uint256)) : 0;
     }
 
     /// @dev Emits only on a change, so an existing pause is kept without a second event.

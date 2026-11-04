@@ -10,7 +10,42 @@ import {MockFaultyERC20} from "../contracts/mocks/MockFaultyERC20.sol";
 import {MockPriceGuard} from "../contracts/mocks/MockPriceGuard.sol";
 import {ChainlinkPriceGuard, IChainlinkFeed} from "../contracts/ChainlinkPriceGuard.sol";
 import {MockAggregator} from "../contracts/mocks/MockAggregator.sol";
-import {GRETVaultCase, SenderSurchargeToken, GasBurnerToken} from "./helpers/GRETVaultCase.sol";
+import {GRETVaultCase, CaseToken, SenderSurchargeToken, GasBurnerToken} from "./helpers/GRETVaultCase.sol";
+
+/// @dev A component whose ledger can also be moved through a second address, as an issuer upgrade
+/// could create.
+contract TwinLedgerToken is CaseToken {
+    address public twin;
+
+    constructor() CaseToken("Twin ledger") {}
+
+    function setTwin(address twin_) external {
+        twin = twin_;
+    }
+
+    function moveFrom(address from, address to, uint256 amount) external {
+        require(msg.sender == twin, "only the twin");
+        _transfer(from, to, amount);
+    }
+}
+
+/// @dev The second address: its transfers and balances act on `TwinLedgerToken`'s ledger.
+contract TwinAddress {
+    TwinLedgerToken public immutable ledger;
+
+    constructor(TwinLedgerToken ledger_) {
+        ledger = ledger_;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        ledger.moveFrom(msg.sender, to, amount);
+        return true;
+    }
+
+    function balanceOf(address account) external view returns (uint256) {
+        return ledger.balanceOf(account);
+    }
+}
 
 /// @notice Protections: each test plays an attack or a failure and shows what the vault refuses
 /// or lets holders do about it.
@@ -233,6 +268,30 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         single.rescue(address(token), CAROL, 1e18);
         assertEq(token.balanceOf(address(single)), 201e18);
         assertEq(token.balanceOf(CAROL), 0);
+    }
+
+    /// A second address over a component's ledger is a foreign token to the vault, but moving it
+    /// would move the component's balance: the rescue reverts.
+    function test_rescueCannotMoveComponentThroughSecondAddress() public {
+        TwinLedgerToken token = new TwinLedgerToken();
+        GRETVault single = _single(token, 100e18);
+        TwinAddress twin = new TwinAddress(token);
+        token.setTwin(address(twin));
+        assertEq(twin.balanceOf(address(single)), 200e18);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentBalanceReduced.selector, address(token)));
+        vm.prank(GOVERNANCE);
+        single.rescue(address(twin), CAROL, 200e18);
+        assertEq(token.balanceOf(address(single)), 200e18);
+    }
+
+    /// A component whose balance cannot be read does not block the rescue of a foreign token.
+    function test_rescueOfForeignTokenSkipsUnreadableComponent() public {
+        MockERC20 stray = new MockERC20("Stray", "STR", 18);
+        stray.mint(address(vault), 1e18);
+        faulty.setFault(MockFaultyERC20.Fault.RevertOnBalanceOf);
+        vm.prank(GOVERNANCE);
+        vault.rescue(address(stray), CAROL, 1e18);
+        assertEq(stray.balanceOf(CAROL), 1e18);
     }
 
     /// Syncing a component the vault cannot send blocks `redeem`, but `redeemSkipping` lets holders

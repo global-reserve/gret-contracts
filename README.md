@@ -162,7 +162,7 @@ Functions of `GRETVault`, besides the standard ERC-20 ones:
 | `activateLiquidation()` | Governance | With positive supply, freezes the share denominator and closes mint/normal redemption without token calls |
 | `activateComponent(token)` | Governance | Includes a newly added or excluded component in normal backing; retains write-off history |
 | `deactivateEmptyComponent(token)` | Governance | Excludes an empty component so later dust cannot reactivate it; at most ten base units allowed only for tokens with at least 18 decimals |
-| `rescue(token, to, amount)` | Governance | Withdraws foreign tokens, or ordinary components only with zero normal supply; never historically written-off tokens |
+| `rescue(token, to, amount)` | Governance | Withdraws foreign tokens, or ordinary components only with zero normal supply; never historically written-off tokens; reverts if another component's balance drops |
 | `proposeGovernance(next)` / `cancelGovernanceProposal()` | Governance | Proposes or discards the next governance |
 | `acceptGovernance()` | Proposed governance | Takes over the role, 7 to 14 days after the proposal |
 | `swap(sell, sellAmount, buy, buyAmount)` | Rebalancer | Delivers `buyAmount` of one component and takes `sellAmount` of another's reserve; the price guard must accept it |
