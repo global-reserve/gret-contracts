@@ -20,8 +20,9 @@ fixed. There is no bug bounty program at this time.
 
 In scope:
 
-- `contracts/GRETVault.sol`, `contracts/ChainlinkPriceGuard.sol` and their deployments listed
-  in the [README](README.md#deployments).
+- `contracts/GRETVault.sol`, `contracts/ChainlinkPriceGuard.sol`, the interfaces they use
+  (`contracts/IPriceGuard.sol` and `contracts/IEligibility.sol`) and the deployments listed in
+  the [README](README.md#deployments).
 - The pilot scripts in `scripts/pilot/`, insofar as they could make a signer send a
   transaction other than the one shown.
 

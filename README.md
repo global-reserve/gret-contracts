@@ -10,8 +10,8 @@ assets on Ethereum, minted and redeemed in kind.
 **[Website](https://grt.finance)** · [Specification](docs/SPECIFICATION.md)
 
 > [!WARNING]
-> **Not independently audited.** The vault is deployed on Ethereum mainnet as a pilot with the
-> project's own funds, not meant for third parties. Nothing in this repository is an offer to
+> **Not independently audited.** An earlier version of the vault is deployed on Ethereum mainnet
+> as a pilot with the project's own funds, not meant for third parties. Nothing in this repository is an offer to
 > buy or sell any asset, nor investment advice. Use it at your own risk.
 
 The current source implements automatic live-balance accounting and has **not been deployed**.
@@ -24,12 +24,12 @@ A new vault and compatible guard require a separate deployment and migration dec
   the basket: 11 tokenized assets, from equity, Treasury, credit, real-estate and commodity
   funds to gold and bitcoin.
 - **In kind, without prices.** A mint deposits every component in proportion to the reserves
-  and a redemption pays them out. Active balances include income and losses immediately,
-  without `sync`. No oracle takes part in either.
+  and a redemption pays them out. Active balances include income and losses immediately. No
+  oracle takes part in either.
 - **Immutable.** No upgrades and no owner. Governance acts within limits the code enforces:
   new components, rebalancers, price guards, eligibility contracts, write-offs, fee raises and
   governance handovers wait 7 days in public; fees are capped at 5%; redemption can never be
-  paused.
+  paused, though an appointed eligibility contract decides who may redeem.
 - **Bounded rebalancing.** A rebalancer exchanges one component for another, and every swap
   must pass a price guard. `ChainlinkPriceGuard` refuses a swap that loses more than 2%, or
   one that would take more than 2% of the vault's value in a week.
@@ -50,7 +50,7 @@ flowchart TB
     Feeds["Chainlink price feeds"]
     Tokens["11 component tokens"]
     Eligibility["Eligibility contract<br/>optional, none at deployment"]
-    Gov -->|"basket, activation, fees, pause, rescue, eligibility, liquidation"| Vault
+    Gov -->|"basket, activation, fees, pause, rescue, appointments, liquidation"| Vault
     Holders <-->|"mint, redeem, claim"| Vault
     Rebalancer -->|swap| Vault
     Vault -->|checkSwap| Guard
@@ -67,7 +67,7 @@ touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the
 
 | Contract | Description |
 | --- | --- |
-| [`GRETVault`](contracts/GRETVault.sol) | The GRET token and the vault: mint, redemption, basket changes, rebalancing, fees and liquidation |
+| [`GRETVault`](contracts/GRETVault.sol) | The GRET token and the vault: mint, redemption, basket changes, rebalancing, fees, the optional eligibility contract and liquidation |
 | [`ChainlinkPriceGuard`](contracts/ChainlinkPriceGuard.sol) | The first price guard: values both sides of a swap with Chainlink feeds and enforces the loss limits; no owner, nothing to change |
 | [`IPriceGuard`](contracts/IPriceGuard.sol) | The one question the vault asks before every swap |
 | [`IEligibility`](contracts/IEligibility.sol) | The questions the vault asks before a mint or a redemption, once governance appoints an eligibility contract |
@@ -76,7 +76,7 @@ touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the
 
 | Document | Contents |
 | --- | --- |
-| [Specification](docs/SPECIFICATION.md) | Design, rules, implementation details and known limitations |
+| [Specification](docs/SPECIFICATION.md) | Design, rules, implementation details, operating assumptions and known limitations |
 | [Mainnet pilot](docs/PILOT.md) | Steps to deploy the vault and make the first mint, and the record of the October 27 deployment |
 | [Security policy](SECURITY.md) | How to report a vulnerability |
 | [Contributing](CONTRIBUTING.md) | Setup, what to run for each change and conventions |
@@ -131,7 +131,7 @@ stands in for governance.
 | `npm run typecheck` | Compile and type-check TypeScript |
 | `npm run check` | Type-check and run the tests |
 | `npm run test:coverage` | Run the tests with coverage |
-| `npm run test:deep` | Long fuzz and invariant runs (about 5 minutes) |
+| `npm run test:deep` | Long fuzz and invariant runs (about 7 minutes) |
 | `npm run test:fork` | Test the vault with the 11 real components on a mainnet fork |
 | `npm run pilot:rehearse` | Rehearse the pilot on a mainnet fork with the pilot wallet |
 | `npm run pilot:fork-node` | Local mainnet fork at `127.0.0.1:8545`, to rehearse with MetaMask |
@@ -160,7 +160,7 @@ Functions of `GRETVault`, besides the standard ERC-20 ones and EIP-2612 `permit`
 
 | Function | Who | What it does |
 | --- | --- | --- |
-| `mint(shares, to, maxAmountsIn, minShares, version)` | Anyone, or whom the eligibility contract approves | Contributes every component with a reserve in proportion; `to` receives the GRET, minus the mint fee; the first mint issues exactly 1 GRET |
+| `mint(shares, to, maxAmountsIn, minShares, version)` | Anyone, or whom the eligibility contract approves | The caller contributes every component with a reserve in proportion; `to` receives the GRET, minus the mint fee; the first mint issues exactly 1 GRET |
 | `redeem(shares, to, minAmountsOut, version)` | Any holder, or whom the eligibility contract approves | Pays the redemption fee in GRET and burns the rest; `to` receives every component; redeeming the whole supply pays no fee; all or nothing; leaves the supply at 0 or at least 1 GRET |
 | `redeemSkipping(shares, to, minAmountsOut, skipped, version)` | Any holder, or whom the eligibility contract approves | Same redemption without the listed components, which are not called; the caller gives up its share of them; leaving zero supply pauses minting |
 | `convertToClaims(shares)` | Any holder | During liquidation, burns GRET in exchange for per-component rights |
@@ -190,13 +190,18 @@ Functions of `GRETVault`, besides the standard ERC-20 ones and EIP-2612 `permit`
 | `setFeeRecipient(recipient)` | Governance | Chooses who receives the fees, in GRET |
 
 Governance is currently the pilot wallet. The proposed progression is Safe, then a timelock,
-then a Governor with a separate VORA voting token; it is not implemented. GRET does not vote. A proposal that waited 7 days expires if
-nobody executes or accepts it in the following 7 days (`EXECUTION_WINDOW`). Amounts per GRET are not stored: they
-follow the reserves, so rebalancing means swapping what the vault holds. The vault rejects
-GRET sent to its own address. The views `previewMint`, `previewRedeem`, `previewRedeemSkipping`,
-`reserves`, `pendingRights` and `claimable` compute current amounts outside mutations.
-In liquidation `reserves` returns effective nominal bases, not remaining token balances;
-`liquidationBasis` returns only the stored bases established by successful claims.
+then a Governor with a separate VORA voting token; it is not implemented. GRET does not vote. A
+proposal that waited 7 days expires if nobody executes or accepts it in the following 7 days
+(`EXECUTION_WINDOW`). Amounts per GRET are not stored: they follow the reserves, so rebalancing
+means swapping what the vault holds. The vault rejects GRET sent to its own address.
+
+The views `previewMint`, `previewRedeem`, `previewRedeemSkipping`, `reserves`, `pendingRights`
+and `claimable` compute current amounts outside mutations. In liquidation `reserves` returns
+effective nominal bases, not remaining token balances; `liquidationBasis` returns only the
+stored bases established by successful claims, and `totalConsumedRights` and `totalPaid` the
+rights consumed and the amounts paid per component. `governanceProposal`, `rebalancerProposal`,
+`priceGuardProposal` and `eligibilityProposal` return each pending successor and when it can take
+over.
 
 `ChainlinkPriceGuard` is the first price guard. It values both sides of each swap with one
 Chainlink feed per token and refuses a token without a fresh price, a swap that loses more
@@ -204,7 +209,8 @@ than 2% of what the vault sells, and swaps that would take more than 2% of the v
 a week, each loss measured against the vault's value at that moment. It has
 no owner: its feeds and limits are fixed at deployment, and changing them means appointing
 another guard with the 7-day wait; the new guard continues the week's loss count of the one it
-replaces. Mint, redemption and liquidation never call it. The
+replaces. It ignores the `guardData` the vault forwards from the rebalancer. Mint, redemption and
+liquidation never call it. The
 proposed feeds are `PRICE_FEEDS` in `scripts/pilot/config.ts`; six of the 11 components have
 no Ethereum feed and cannot be swapped.
 
@@ -257,6 +263,7 @@ scripts/pilot/plan.ts                Pilot transactions and checks
 scripts/pilot/server.ts, index.html  Local page to sign the pilot with MetaMask
 assets/gret-logo.svg, -256.png       GRET logo (SVG, and 256 px PNG for wallets and explorers)
 hardhat.config.ts                    Compiler, plugins and local networks
+foundry.toml                         Formatting only, for `forge fmt contracts`; Hardhat builds and tests the project
 docs/SPECIFICATION.md                Specification: design, rules, implementation details and known limitations
 docs/PILOT.md                        Mainnet pilot guide and record of the October 27 deployment
 .github/workflows/ci.yml             Continuous integration: compile, type-check and test
