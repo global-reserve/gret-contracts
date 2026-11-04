@@ -177,7 +177,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         vm.stopPrank();
 
         // Without zero-reserve components there is no immediate bump (all 11 pilot components have reserves).
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentHasReserve.selector, address(healthy), 4e18));
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentNotEmpty.selector, address(healthy), 4e18));
         vm.prank(GOVERNANCE);
         vault.removeComponent(address(healthy));
 

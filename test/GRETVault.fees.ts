@@ -252,7 +252,7 @@ describe("GRETVault: mint and redemption fees", async () => {
       await vault.write.activateLiquidation({ account: governance.account });
 
       await vault.write.convertToClaims([INITIAL_SHARES], { account: alice.account });
-      assert.equal(await vault.read.claimShares([alice.account.address]), INITIAL_SHARES);
+      assert.equal(await vault.read.convertedShares([alice.account.address]), INITIAL_SHARES);
       assert.equal(await vault.read.balanceOf([carol.account.address]), 0n);
 
       const owed = mulDivDown(INITIAL_SHARES, (await vault.read.reserves())[0], await vault.read.liquidationSupply());

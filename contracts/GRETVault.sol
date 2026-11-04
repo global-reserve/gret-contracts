@@ -135,10 +135,10 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// @notice GRET supply when liquidation started; denominator of every claim.
     uint256 public liquidationSupply;
     /// @notice GRET burned by each account in exchange for liquidation rights.
-    mapping(address account => uint256) public claimShares;
+    mapping(address account => uint256) public convertedShares;
     /// @notice Liquidation rights each account already consumed, per component. Equals the amount
     /// paid unless a loss reduced the payout.
-    mapping(address account => mapping(uint256 index => uint256)) public claimed;
+    mapping(address account => mapping(uint256 index => uint256)) public consumedRights;
 
     event Minted(address indexed account, uint256 shares, uint256[] amounts);
     event Redeemed(address indexed account, uint256 shares, uint256[] amounts);
@@ -174,7 +174,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
     error InvalidComponentCount(uint256 count);
     error LengthMismatch(uint256 expected, uint256 actual);
-    error NotAContract(address token);
+    error NotAContract(address account);
     error InvalidContract(address account);
     error DuplicateComponent(address token);
     error ZeroInitialAmount(uint256 index);
@@ -209,7 +209,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     error SameComponent(address token);
     error SwapExceedsReserve(address token, uint256 amount, uint256 reserve);
     error NoPendingComponent(address token);
-    error ComponentHasReserve(address token, uint256 reserve);
+    error ComponentNotEmpty(address token, uint256 balance);
     error EmptyBasket();
     error NoPendingWriteOff(address token);
     error ComponentExcluded(address token);
@@ -401,7 +401,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         if (shares == 0) revert ZeroShares();
 
         _burn(msg.sender, shares);
-        claimShares[msg.sender] += shares;
+        convertedShares[msg.sender] += shares;
         emit ConvertedToClaims(msg.sender, shares);
     }
 
@@ -427,7 +427,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         totals.basis = basis;
         totals.consumedRights += rights;
         totals.paid += amount;
-        claimed[msg.sender][index] += rights;
+        consumedRights[msg.sender][index] += rights;
         _components[index].safeTransfer(to, amount);
         emit Claimed(msg.sender, index, to, amount, rights);
     }
@@ -830,12 +830,14 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         }
     }
 
-    function totalClaimed() external view returns (uint256[] memory amounts) {
+    /// @notice Amounts paid out by claims, per component.
+    function totalPaid() external view returns (uint256[] memory amounts) {
         amounts = new uint256[](_components.length);
         for (uint256 i; i < amounts.length; ++i) amounts[i] = _liquidationTotals[i].paid;
     }
 
-    function rightsClaimed() external view returns (uint256[] memory amounts) {
+    /// @notice Liquidation rights consumed by claims, per component, before any loss haircut.
+    function totalConsumedRights() external view returns (uint256[] memory amounts) {
         amounts = new uint256[](_components.length);
         for (uint256 i; i < amounts.length; ++i) amounts[i] = _liquidationTotals[i].consumedRights;
     }
@@ -944,7 +946,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         uint256 balance = IERC20(token).balanceOf(address(this));
         if (balance == 0) return;
         if (balance > MAX_REMOVAL_DUST || IERC20Metadata(token).decimals() < 18) {
-            revert ComponentHasReserve(token, balance);
+            revert ComponentNotEmpty(token, balance);
         }
     }
 
@@ -958,11 +960,11 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     function _claimQuote(address account, uint256 index)
         private view returns (uint256 basis, uint256 rights, uint256 amount)
     {
-        uint256 shares = claimShares[account];
+        uint256 shares = convertedShares[account];
         if (shares == 0) return (0, 0, 0);
         uint256 balance = _components[index].balanceOf(address(this));
         basis = _effectiveBasis(index, balance);
-        rights = Math.mulDiv(shares, basis, liquidationSupply) - claimed[account][index];
+        rights = Math.mulDiv(shares, basis, liquidationSupply) - consumedRights[account][index];
         if (rights == 0) return (basis, 0, 0);
         uint256 owed = basis - _liquidationTotals[index].consumedRights;
         amount = balance >= owed ? rights : Math.mulDiv(rights, balance, owed);

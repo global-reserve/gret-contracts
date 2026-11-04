@@ -291,7 +291,7 @@ describe("GRETVault: adversarial components and callers", async () => {
       await faulty.write.setBlocked([vault.address, false]);
       await vault.write.claim([2n, alice.account.address, 0n], { account: alice.account });
       await vault.write.claim([2n, bob.account.address, 0n], { account: bob.account });
-      assert.ok((await vault.read.totalClaimed())[2] > 0n);
+      assert.ok((await vault.read.totalPaid())[2] > 0n);
     });
 
     it("if the issuer freezes a holder, the holder claims that component to another address", async () => {

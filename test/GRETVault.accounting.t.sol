@@ -220,7 +220,7 @@ contract GRETVaultLiveBalanceTest is Test {
 
     function test_liveBalance_dustRetirementIsBoundedAndCannotBypassWriteOff() public {
         faulty.slash(address(vault), 100e18 - 11);
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentHasReserve.selector, address(faulty), 11));
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentNotEmpty.selector, address(faulty), 11));
         vault.removeComponent(address(faulty));
         faulty.slash(address(vault), 1);
         vault.deactivateEmptyComponent(address(faulty));
@@ -237,9 +237,9 @@ contract GRETVaultLiveBalanceTest is Test {
         vm.warp(block.timestamp + 7 days);
         vault.addComponent(address(indivisible));
         indivisible.mint(address(vault), 1);
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentHasReserve.selector, address(indivisible), 1));
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentNotEmpty.selector, address(indivisible), 1));
         vault.removeComponent(address(indivisible));
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentHasReserve.selector, address(indivisible), 1));
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentNotEmpty.selector, address(indivisible), 1));
         vault.deactivateEmptyComponent(address(indivisible));
     }
 
@@ -282,7 +282,7 @@ contract GRETVaultLiveBalanceTest is Test {
         vm.expectRevert(MockFaultyERC20.BalanceOfBlocked.selector);
         vault.claim(1, ALICE, 0);
         vm.stopPrank();
-        assertEq(vault.claimed(ALICE, 1), 0);
+        assertEq(vault.consumedRights(ALICE, 1), 0);
         faulty.setFault(MockFaultyERC20.Fault.None);
         vm.prank(ALICE);
         assertEq(vault.claim(1, ALICE, 0), 100e18);

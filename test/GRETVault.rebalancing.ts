@@ -560,7 +560,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.removeComponent([a], { account: governance.account }),
         vault,
-        "ComponentHasReserve",
+        "ComponentNotEmpty",
         [getAddress(a), doubled[0]],
       );
 

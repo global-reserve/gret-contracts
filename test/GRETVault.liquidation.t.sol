@@ -108,13 +108,13 @@ contract GRETVaultLiquidationConservationTest is Test {
         uint256 payableNow;
         for (uint256 i; i < HOLDERS; ++i) {
             address actor = _holder(i);
-            converted += vault.claimShares(actor);
+            converted += vault.convertedShares(actor);
             pending += vault.pendingRights(actor, 0);
             payableNow += vault.claimable(actor, 0);
         }
-        uint256 consumed = vault.rightsClaimed()[0];
+        uint256 consumed = vault.totalConsumedRights()[0];
         assertEq(converted + vault.totalSupply(), SHARES, "share conservation");
-        assertEq(vault.totalClaimed()[0], ledger.paid, "payout ledger");
+        assertEq(vault.totalPaid()[0], ledger.paid, "payout ledger");
         assertLe(ledger.paid, consumed, "payout exceeds consumed rights");
         assertLe(consumed + pending, vault.reserves()[0], "rights exceed reserve");
         assertLe(payableNow, held, "claims exceed balance");
@@ -234,7 +234,7 @@ contract GRETVaultLiquidationShortfallTest is Test {
         for (uint256 k = 1; k < 3; ++k) _claim(holders[k]);
         _claim(holders[0]);
         uint256[] memory r = vault.reserves();
-        assertLe(vault.rightsClaimed()[1], r[1], "rights above reserve");
+        assertLe(vault.totalConsumedRights()[1], r[1], "rights above reserve");
     }
 
     function _claim(address who) internal returns (uint256 amount) {

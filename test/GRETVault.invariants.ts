@@ -166,7 +166,7 @@ describe("GRETVault: randomized sequences", async () => {
       // Income during liquidation raises the effective basis and every entitlement.
       const incomeInLiquidation = tokens.map(() => 0n);
       const entitlement = async (account: `0x${string}`, index: number) => {
-        const shares = await vault.read.claimShares([account]);
+        const shares = await vault.read.convertedShares([account]);
         const reserve = (await vault.read.reserves())[index];
         return shares === 0n ? 0n : mulDivDown(shares, reserve, liquidationSupply);
       };
@@ -176,7 +176,7 @@ describe("GRETVault: randomized sequences", async () => {
         const pending = await vault.read.claimable([account, BigInt(index)]);
         assert.equal(
           pending,
-          (await entitlement(account, index)) - (await vault.read.claimed([account, BigInt(index)])),
+          (await entitlement(account, index)) - (await vault.read.consumedRights([account, BigInt(index)])),
         );
 
         if (pending === 0n) {
@@ -238,31 +238,31 @@ describe("GRETVault: randomized sequences", async () => {
         }
       }
 
-      const claimedTotals = await vault.read.totalClaimed();
+      const paid = await vault.read.totalPaid();
       const vaultBalances = await balancesOf(basket, vault.address);
       const claimants = users.length;
-      let convertedShares = 0n;
+      let converted = 0n;
       for (const user of users) {
-        convertedShares += await vault.read.claimShares([user.account.address]);
+        converted += await vault.read.convertedShares([user.account.address]);
         for (let index = 0; index < tokens.length; index++) {
           assert.equal(
-            await vault.read.claimed([user.account.address, BigInt(index)]),
+            await vault.read.consumedRights([user.account.address, BigInt(index)]),
             await entitlement(user.account.address, index),
           );
         }
       }
-      assert.equal(convertedShares, liquidationSupply);
+      assert.equal(converted, liquidationSupply);
       assert.equal(await vault.read.totalSupply(), 0n);
       assert.equal(await vault.read.hasMinted([dave.account.address]), false);
 
       const finalReserves = await vault.read.reserves();
       for (const [index, reserve] of finalReserves.entries()) {
         assert.equal(reserve, frozenReserves[index] + incomeInLiquidation[index]);
-        const dust = reserve - claimedTotals[index];
+        const dust = reserve - paid[index];
         assert.ok(dust >= 0n && dust < BigInt(claimants), `component ${index} dust ${dust}`);
         assert.equal(
           vaultBalances[index],
-          balancesAtActivation[index] + incomeInLiquidation[index] - claimedTotals[index],
+          balancesAtActivation[index] + incomeInLiquidation[index] - paid[index],
         );
       }
     });

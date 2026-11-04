@@ -160,7 +160,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         vm.expectRevert(abi.encodeWithSelector(GRETVault.AmountOutBelowMin.selector, 1, 5e17, 49e17));
         vm.prank(ALICE);
         vault.claim(1, ALICE, 49e17);
-        assertEq(vault.claimed(ALICE, 1), 0);
+        assertEq(vault.consumedRights(ALICE, 1), 0);
 
         // Once the balance recovers, the same protected claim pays the whole right.
         faulty.mint(address(vault), 9e18);

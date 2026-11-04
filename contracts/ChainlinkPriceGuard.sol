@@ -18,7 +18,7 @@ interface IChainlinkFeed {
 }
 
 /// @dev The vault views the guard reads to value the vault and to continue the week's count.
-interface IGRETVaultReserves {
+interface IGRETVaultView {
     function components() external view returns (address[] memory);
 
     function excluded(address token) external view returns (bool);
@@ -152,7 +152,7 @@ contract ChainlinkPriceGuard is IPriceGuard {
     /// at most one replacement take effect per week, so one predecessor is enough. A predecessor
     /// that does not report a matching week, or answers with malformed data, counts as zero.
     function _inheritedLoss(uint256 week) private view returns (uint256) {
-        address previous = IGRETVaultReserves(vault).previousPriceGuard();
+        address previous = IGRETVaultView(vault).previousPriceGuard();
         if (previous == address(0)) return 0;
         (bool ok, bytes memory data) = previous.staticcall(abi.encodeCall(this.currentWeek, ()));
         if (!ok || data.length != 32 || abi.decode(data, (uint256)) != week) return 0;
@@ -165,10 +165,10 @@ contract ChainlinkPriceGuard is IPriceGuard {
     /// removed in token units before valuation. Each unreadable or unpriced component counts as
     /// zero, whether its balance read reverts or answers with less than one word.
     function _vaultValue(address buy, uint256 received) private view returns (uint256 total) {
-        address[] memory tokens = IGRETVaultReserves(vault).components();
+        address[] memory tokens = IGRETVaultView(vault).components();
         for (uint256 i; i < tokens.length; ++i) {
             address token = tokens[i];
-            if (address(_feeds[token].feed) == address(0) || IGRETVaultReserves(vault).excluded(token)) continue;
+            if (address(_feeds[token].feed) == address(0) || IGRETVaultView(vault).excluded(token)) continue;
             (bool ok, bytes memory data) = token.staticcall(abi.encodeCall(IERC20.balanceOf, (vault)));
             if (!ok || data.length < 32) continue;
             uint256 balance = abi.decode(data, (uint256));

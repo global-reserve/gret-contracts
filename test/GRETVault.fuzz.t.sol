@@ -89,7 +89,7 @@ contract GRETVaultFuzzTest is Test {
         vm.stopPrank();
 
         for (uint256 i; i < 3; ++i) {
-            assertEq(vault.claimed(ALICE, i), Math.mulDiv(first + second, reserves[i], supply), "split conversion");
+            assertEq(vault.consumedRights(ALICE, i), Math.mulDiv(first + second, reserves[i], supply), "split conversion");
         }
     }
 

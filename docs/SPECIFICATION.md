@@ -250,7 +250,7 @@ supply and freezes that denominator in `liquidationSupply`; it performs no token
 Governance cannot reverse liquidation.
 
 Any holder, including one who never minted, may burn GRET with `convertToClaims(shares)`.
-`claimShares[account]` is cumulative and nontransferable. Unconverted GRET remains transferable.
+`convertedShares[account]` is cumulative and nontransferable. Unconverted GRET remains transferable.
 Each component can be claimed independently to a nonzero recipient other than the vault.
 Exclusion in normal mode does not waive liquidation rights over that component.
 
@@ -270,8 +270,9 @@ payout = rights                     when B >= owed
          floor(rights * B / owed)   otherwise
 ```
 
-A successful nonzero claim stores `nextBasis`, consumes `rights` in both ledgers, records the
-actual requested payout in `totalClaimed`, then transfers it. Failed reads, transfers or
+A successful nonzero claim stores `nextBasis`, consumes `rights` in both ledgers
+(`consumedRights[account][i]` and `totalConsumedRights`), records the actual payout in
+`totalPaid`, then transfers it. Failed reads, transfers or
 minimum-output checks revert all these changes. Zero converted shares return a zero quote
 without reading the token. A zero payout leaves the right unconsumed. `minAmount` lets a
 holder refuse a cut; a successful haircut consumes its full nominal right.

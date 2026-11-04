@@ -272,7 +272,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
         vm.prank(ALICE);
         (ok,) = address(v).call(abi.encodeCall(GRETVault.claim, (1, ALICE, 0)));
         assertFalse(ok);
-        assertEq(v.claimed(ALICE, 1), 0);
+        assertEq(v.consumedRights(ALICE, 1), 0);
         vm.revertToState(snap);
 
         m.setMode(OddBalanceToken.Mode.Empty);
@@ -284,7 +284,7 @@ contract GRETVaultExitsTest is GRETVaultCase {
         (ok, ret) = address(v).call(abi.encodeCall(GRETVault.claim, (1, ALICE, 0)));
         assertFalse(ok, "claim reverts on empty return");
         assertEq(ret.length, 0);
-        assertEq(v.claimed(ALICE, 1), 0, "no right consumed");
+        assertEq(v.consumedRights(ALICE, 1), 0, "no right consumed");
         vm.prank(BOB);
         assertTrue(m.transfer(CAROL, 1), "M transfers still work");
         vm.prank(ALICE);

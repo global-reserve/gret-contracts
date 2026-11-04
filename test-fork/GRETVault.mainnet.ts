@@ -197,7 +197,7 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
       /** The vault never records more than it holds, and the difference is rounding dust only. */
       const assertAccounting = async () => {
         const [reserve] = await vault.read.reserves();
-        const [rights] = await vault.read.rightsClaimed();
+        const [rights] = await vault.read.totalConsumedRights();
         const held = await balanceOf(token, vault.address);
         assert.ok(held >= reserve - rights, `holds ${held}, owes ${reserve - rights}`);
         assert.ok(held - (reserve - rights) <= 5n * ROUNDING, `unexpected surplus ${held - (reserve - rights)}`);

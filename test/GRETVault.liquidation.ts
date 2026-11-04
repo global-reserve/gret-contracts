@@ -170,7 +170,7 @@ describe("GRETVault: emergency liquidation", async () => {
         [getAddress(dave.account.address), shares],
       );
       assert.equal(await vault.read.balanceOf([dave.account.address]), 0n);
-      assert.equal(await vault.read.claimShares([dave.account.address]), shares);
+      assert.equal(await vault.read.convertedShares([dave.account.address]), shares);
 
       for (const [i, amount] of expected.entries()) {
         assert.equal(await vault.read.claimable([dave.account.address, BigInt(i)]), amount);
@@ -184,7 +184,7 @@ describe("GRETVault: emergency liquidation", async () => {
 
       const after = await balancesOf(basket, dave.account.address);
       assert.deepEqual(after.map((balance, i) => balance - before[i]), expected);
-      assert.deepEqual(await vault.read.totalClaimed(), expected);
+      assert.deepEqual(await vault.read.totalPaid(), expected);
     });
 
     it("sends a claim to another recipient, never to the zero address", async () => {
@@ -208,7 +208,7 @@ describe("GRETVault: emergency liquidation", async () => {
 
       const [carolAfter] = await balancesOf(basket, carol.account.address);
       assert.equal(carolAfter - carolBefore, expected);
-      assert.equal(await vault.read.claimed([dave.account.address, 0n]), expected);
+      assert.equal(await vault.read.consumedRights([dave.account.address, 0n]), expected);
     });
 
     it("keeps the right over a blocked component while the others are withdrawn", async () => {
@@ -235,13 +235,13 @@ describe("GRETVault: emergency liquidation", async () => {
         [getAddress(faulty.address)],
       );
       assert.equal(await vault.read.claimable([bob.account.address, 2n]), expected[2]);
-      assert.equal(await vault.read.claimed([bob.account.address, 2n]), 0n);
+      assert.equal(await vault.read.consumedRights([bob.account.address, 2n]), 0n);
 
       // The block is lifted later: the pending right is still there, and only once.
       await faulty.write.setFault([Fault.None]);
       await vault.write.claim([2n, bob.account.address, 0n], { account: bob.account });
       assert.deepEqual(
-        await Promise.all([0n, 1n, 2n].map((i) => vault.read.claimed([bob.account.address, i]))),
+        await Promise.all([0n, 1n, 2n].map((i) => vault.read.consumedRights([bob.account.address, i]))),
         expected,
       );
       await viem.assertions.revertWithCustomErrorWithArgs(
@@ -278,8 +278,8 @@ describe("GRETVault: emergency liquidation", async () => {
       await vault.write.convertToClaims([half], { account: carol.account });
       await vault.write.claim([0n, carol.account.address, 0n], { account: carol.account });
 
-      assert.equal(await vault.read.claimed([alice.account.address, 0n]), aliceExpected);
-      assert.equal(await vault.read.claimed([carol.account.address, 0n]), carolExpected);
+      assert.equal(await vault.read.consumedRights([alice.account.address, 0n]), aliceExpected);
+      assert.equal(await vault.read.consumedRights([carol.account.address, 0n]), carolExpected);
       assert.equal(await vault.read.claimable([alice.account.address, 0n]), 0n);
     });
 
@@ -301,7 +301,7 @@ describe("GRETVault: emergency liquidation", async () => {
       await vault.write.convertToClaims([piece], { account: bob.account });
       assert.equal(await vault.read.claimable([bob.account.address, 1n]), 1n);
       await vault.write.claim([1n, bob.account.address, 0n], { account: bob.account });
-      assert.equal(await vault.read.claimed([bob.account.address, 1n]), 1n);
+      assert.equal(await vault.read.consumedRights([bob.account.address, 1n]), 1n);
     });
 
     it("gives the same results regardless of claim order", async () => {
@@ -346,11 +346,11 @@ describe("GRETVault: emergency liquidation", async () => {
       }
 
       const reserves = await vault.read.reserves();
-      const claimedTotals = await vault.read.totalClaimed();
+      const paid = await vault.read.totalPaid();
       const vaultBalances = await balancesOf(basket, vault.address);
       assert.equal(await vault.read.totalSupply(), 0n);
       for (const [i, reserve] of reserves.entries()) {
-        const dust = reserve - claimedTotals[i];
+        const dust = reserve - paid[i];
         assert.ok(dust >= 0n && dust < BigInt(holders.length), `component ${i} dust ${dust}`);
         assert.equal(vaultBalances[i], dust);
       }
@@ -380,8 +380,8 @@ describe("GRETVault: emergency liquidation", async () => {
         [getAddress(alice.account.address), 2n, getAddress(alice.account.address), aliceGot, aliceGot],
       );
       const supply = await vault.read.liquidationSupply();
-      const aliceShares = await vault.read.claimShares([alice.account.address]);
-      const bobShares = await vault.read.claimShares([bob.account.address]);
+      const aliceShares = await vault.read.convertedShares([alice.account.address]);
+      const bobShares = await vault.read.convertedShares([bob.account.address]);
       const reducedBasis = balance - (balance * 2n) / 5n;
       const bobGot = await vault.read.claimable([bob.account.address, 2n]);
       assert.equal(bobGot, mulDivDown(bobShares, reducedBasis, supply));
@@ -429,16 +429,16 @@ describe("GRETVault: emergency liquidation", async () => {
 
       const supply = await vault.read.liquidationSupply();
       for (const holder of [alice, bob]) {
-        const shares = await vault.read.claimShares([holder.account.address]);
+        const shares = await vault.read.convertedShares([holder.account.address]);
         assert.equal(
           (await vault.read.pendingRights([holder.account.address, 0n])) +
-            (await vault.read.claimed([holder.account.address, 0n])),
+            (await vault.read.consumedRights([holder.account.address, 0n])),
           mulDivDown(shares, reserve + gain, supply),
         );
       }
       const before = await tokens[0].read.balanceOf([alice.account.address]);
       await vault.write.claim([0n, alice.account.address, 0n], { account: alice.account });
-      const aliceShares = await vault.read.claimShares([alice.account.address]);
+      const aliceShares = await vault.read.convertedShares([alice.account.address]);
       assert.equal(
         (await tokens[0].read.balanceOf([alice.account.address])) - before,
         mulDivDown(aliceShares, reserve + gain, supply) - mulDivDown(aliceShares, reserve, supply),

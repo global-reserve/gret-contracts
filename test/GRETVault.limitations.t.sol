@@ -21,9 +21,9 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vault.swap(address(healthy), 2e18, address(faulty), 1);
         healthy.mint(address(vault), 11);
         vm.startPrank(GOVERNANCE);
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentHasReserve.selector, address(healthy), 11));
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentNotEmpty.selector, address(healthy), 11));
         vault.removeComponent(address(healthy));
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentHasReserve.selector, address(healthy), 11));
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.ComponentNotEmpty.selector, address(healthy), 11));
         vault.deactivateEmptyComponent(address(healthy));
         vm.stopPrank();
         vm.prank(REBALANCER);
@@ -217,7 +217,7 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vm.prank(ALICE);
         assertEq(single.claim(0, ALICE, 100e18), 100e18);
         assertEq(token.balanceOf(ALICE), 0);
-        assertEq(single.claimed(ALICE, 0), 100e18);
+        assertEq(single.consumedRights(ALICE, 0), 100e18);
         assertEq(single.pendingRights(ALICE, 0), 50e18); // Undelivered tokens are automatically reallocated.
     }
 
@@ -271,7 +271,7 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vault.swap(address(healthy), whole, address(faulty), 1);
         assertGt(vault.reserves()[0], 0);
         vm.expectRevert(
-            abi.encodeWithSelector(GRETVault.ComponentHasReserve.selector, address(healthy), vault.reserves()[0])
+            abi.encodeWithSelector(GRETVault.ComponentNotEmpty.selector, address(healthy), vault.reserves()[0])
         );
         vm.prank(GOVERNANCE);
         vault.removeComponent(address(healthy));

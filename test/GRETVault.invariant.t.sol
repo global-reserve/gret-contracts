@@ -324,7 +324,7 @@ contract GRETVaultInvariantTest is Test {
     function invariant_claimsNeverExceedAssets() public view {
         if (!vault.liquidationActive()) return;
         uint256 converted;
-        for (uint256 k; k < 5; ++k) converted += vault.claimShares(handler.actors(k));
+        for (uint256 k; k < 5; ++k) converted += vault.convertedShares(handler.actors(k));
         assertEq(converted + vault.totalSupply(), vault.liquidationSupply());
         for (uint256 i; i < vault.componentCount(); ++i) {
             if (i == 2 && handler.tokens(i).fault() == MockFaultyERC20.Fault.RevertOnBalanceOf) continue;
@@ -342,9 +342,9 @@ contract GRETVaultInvariantTest is Test {
             uint256 receivedTotal;
             for (uint256 k; k < 5; ++k) {
                 address actor = handler.actors(k);
-                uint256 shares = vault.claimShares(actor);
+                uint256 shares = vault.convertedShares(actor);
                 // Nominal consumed rights cannot exceed this holder's established entitlement.
-                assertLe(vault.claimed(actor, i), shares * basis[i] / supply);
+                assertLe(vault.consumedRights(actor, i), shares * basis[i] / supply);
                 // Independent cash ceiling: activation balance plus subsequent external inflows.
                 // At most one base unit per successful claim accounts for sequential rounding.
                 uint256 received = handler.receivedInClaims(actor, i);
@@ -352,17 +352,17 @@ contract GRETVaultInvariantTest is Test {
                     handler.successfulClaims(actor, i));
                 receivedTotal += received;
             }
-            assertEq(receivedTotal, vault.totalClaimed()[i]);
+            assertEq(receivedTotal, vault.totalPaid()[i]);
         }
     }
 
     function invariant_claimLedgersMatchIndividualRights() public view {
-        uint256[] memory consumed = vault.rightsClaimed();
-        uint256[] memory paid = vault.totalClaimed();
+        uint256[] memory consumed = vault.totalConsumedRights();
+        uint256[] memory paid = vault.totalPaid();
         uint256[] memory basis = vault.liquidationBasis();
         for (uint256 i; i < vault.componentCount(); ++i) {
             uint256 individual;
-            for (uint256 k; k < 5; ++k) individual += vault.claimed(handler.actors(k), i);
+            for (uint256 k; k < 5; ++k) individual += vault.consumedRights(handler.actors(k), i);
             assertEq(individual, consumed[i]);
             assertLe(paid[i], consumed[i]);
             assertLe(consumed[i], basis[i]);

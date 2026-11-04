@@ -648,7 +648,7 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
       const { vault, tokens, governance } = await networkHelpers.loadFixture(bootstrappedFixture);
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.deactivateEmptyComponent([tokens[0].address], { account: governance.account }),
-        vault, "ComponentHasReserve", [getAddress(tokens[0].address), INITIAL_AMOUNTS[0]],
+        vault, "ComponentNotEmpty", [getAddress(tokens[0].address), INITIAL_AMOUNTS[0]],
       );
     });
 
