@@ -95,6 +95,7 @@ describe("GRETVault: emergency liquidation", async () => {
         "convertToClaims",
         "deactivateEmptyComponent",
         "mint",
+        "permit",
         "proposeFees",
         "proposeGovernance",
         "proposePriceGuard",

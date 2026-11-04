@@ -23,7 +23,12 @@ import { PILOT } from "./config.js";
 
 const artifact = JSON.parse(
   readFileSync(new URL("../../artifacts/contracts/GRETVault.sol/GRETVault.json", import.meta.url), "utf8"),
-) as { abi: Abi; bytecode: Hex; deployedBytecode: Hex };
+) as {
+  abi: Abi;
+  bytecode: Hex;
+  deployedBytecode: Hex;
+  immutableReferences: Record<string, { start: number; length: number }[]>;
+};
 
 export const vaultAbi = artifact.abi;
 export const INITIAL_SHARES = 10n ** 18n;
@@ -61,6 +66,20 @@ const readVault = <T>(client: Reader, vault: Address, functionName: string, args
   client.readContract({ address: vault, abi: vaultAbi, functionName, args }) as Promise<T>;
 
 /** Each parameter the deployed vault reports, compared with the pilot configuration. */
+/**
+ * Runtime code with every immutable zeroed, as the compiler leaves it in the artifact. The
+ * constructor fills them, for instance with the EIP-712 domain that `permit` uses.
+ */
+function withoutImmutables(code: Hex): Hex {
+  let hex = code.toLowerCase().slice(2);
+  for (const ranges of Object.values(artifact.immutableReferences)) {
+    for (const { start, length } of ranges) {
+      hex = hex.slice(0, start * 2) + "00".repeat(length) + hex.slice((start + length) * 2);
+    }
+  }
+  return `0x${hex}`;
+}
+
 export async function verifyVault(client: Reader, vault: Address) {
   const [code, onChainComponents, amounts, onChainGovernance, rebalancer, mintFee, redeemFee, mintPaused, name, symbol] =
     await Promise.all([
@@ -77,8 +96,8 @@ export async function verifyVault(client: Reader, vault: Address) {
     ]);
   return [
     {
-      label: "Code identical to this repository's build",
-      ok: code?.toLowerCase() === artifact.deployedBytecode.toLowerCase(),
+      label: "Code identical to this repository's build, apart from its immutables",
+      ok: code !== undefined && withoutImmutables(code) === artifact.deployedBytecode.toLowerCase(),
     },
     {
       label: "The 11 components, in order",

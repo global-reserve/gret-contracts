@@ -2,6 +2,7 @@
 pragma solidity 0.8.38;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -22,10 +23,14 @@ import {IPriceGuard} from "./IPriceGuard.sol";
 /// new rebalancer, price guard and component waits seven days. A component that stops working can
 /// be written off after the same wait. Governance can charge mint and redemption fees in GRET, at
 /// most 5% each; raising them waits too. It can pause minting at once, but never redemption.
+/// GRET supports EIP-2612 `permit`.
 /// @dev Not independently audited. The specification, including the known limitations, is in
 /// docs/SPECIFICATION.md.
-contract GRETVault is ERC20, ReentrancyGuardTransient {
+contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
+
+    /// @dev Also the EIP-712 domain name that `permit` signatures commit to.
+    string private constant NAME = "Global Reserve Token";
 
     /// @notice GRET issued by the first mint, and again whenever the supply returns to zero.
     uint256 public constant INITIAL_SHARES = 1e18;
@@ -232,7 +237,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     }
 
     constructor(IERC20[] memory components_, uint256[] memory initialAmounts_, address governance_)
-        ERC20("Global Reserve Token", "GRET")
+        ERC20(NAME, "GRET")
+        ERC20Permit(NAME)
     {
         uint256 count = components_.length;
         if (count == 0 || count > MAX_COMPONENTS) revert InvalidComponentCount(count);

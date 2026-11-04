@@ -312,7 +312,8 @@ balances and supply.
 ## Implementation details
 
 - Solidity 0.8.38, Hardhat 3, TypeScript ESM, viem and `node:test`; Solidity cases/fuzzing use
-  forge-std. GRET is an immutable 18-decimal ERC-20, "Global Reserve Token" / "GRET".
+  forge-std. GRET is an immutable 18-decimal ERC-20, "Global Reserve Token" / "GRET", with
+  EIP-2612 `permit` (EIP-712 domain name "Global Reserve Token", version "1").
 - Constructor amounts are positive and configurable later. Local demo amounts of one whole
   unit per component are placeholders, not portfolio recommendations. Prefer initial amounts
   of at least about 10,000 base units so one unit of rounding is a small relative change.

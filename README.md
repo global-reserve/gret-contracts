@@ -150,7 +150,7 @@ to be configured. The state lasts while the node is running.
 
 ## Interface
 
-Functions of `GRETVault`, besides the standard ERC-20 ones:
+Functions of `GRETVault`, besides the standard ERC-20 ones and EIP-2612 `permit`:
 
 | Function | Who | What it does |
 | --- | --- | --- |

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { encodeFunctionData, getAddress, zeroAddress } from "viem";
+import { encodeFunctionData, getAddress, parseSignature, zeroAddress } from "viem";
 
 import {
   balancesOf,
@@ -76,6 +76,43 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
       assert.equal(await vault.read.rebalancer(), zeroAddress);
       assert.equal(await vault.read.pendingRebalancer(), zeroAddress);
       assert.equal(await vault.read.liquidationActive(), false);
+    });
+
+    it("accepts an EIP-2612 permit once", async () => {
+      const { vault, alice, bob } = await networkHelpers.loadFixture(bootstrappedFixture);
+      const publicClient = await viem.getPublicClient();
+      const deadline = (await networkHelpers.time.latest()) + 3600;
+      const nonce = await vault.read.nonces([alice.account.address]);
+      const signature = await alice.signTypedData({
+        domain: {
+          name: "Global Reserve Token",
+          version: "1",
+          chainId: await publicClient.getChainId(),
+          verifyingContract: vault.address,
+        },
+        types: {
+          Permit: [
+            { name: "owner", type: "address" },
+            { name: "spender", type: "address" },
+            { name: "value", type: "uint256" },
+            { name: "nonce", type: "uint256" },
+            { name: "deadline", type: "uint256" },
+          ],
+        },
+        primaryType: "Permit",
+        message: { owner: alice.account.address, spender: bob.account.address, value: 5n, nonce, deadline: BigInt(deadline) },
+      });
+      const { r, s, yParity } = parseSignature(signature);
+      const permit = () =>
+        vault.write.permit(
+          [alice.account.address, bob.account.address, 5n, BigInt(deadline), yParity + 27, r, s],
+          { account: bob.account },
+        );
+
+      await permit();
+      assert.equal(await vault.read.allowance([alice.account.address, bob.account.address]), 5n);
+      assert.equal(await vault.read.nonces([alice.account.address]), nonce + 1n);
+      await viem.assertions.revertWithCustomError(permit(), vault, "ERC2612InvalidSigner");
     });
 
     it("rejects invalid basket configurations", async () => {
