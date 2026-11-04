@@ -78,10 +78,13 @@ outside the basket or income requiring an issuer-specific claim are not automati
 
 ## Component lifecycle
 
-Between 1 and 128 unique deployed token contracts can be registered. Constructor components
-are active and have positive initial amounts. Governance announces additions; anyone may add
-one after seven days and before the following seven-day execution window expires. A new
-component enters **excluded**, with zero initial amount. Even donations cannot make it active.
+Between 1 and 128 unique deployed token contracts can be registered. The vault itself and
+EIP-7702 accounts, whose code is a delegation designator their key holder can replace without
+notice, are refused with `InvalidContract`, as components and as price guards. Constructor
+components are active and have positive initial amounts. Governance announces additions;
+anyone may add one after seven days and before the following seven-day execution window
+expires. A new component enters **excluded**, with zero initial amount. Even donations cannot
+make it active.
 
 `activateComponent(token)`, only governance in normal mode, makes the entire balance active
 without making a token call. It is explicit, immediate and idempotent. Calling it for an
@@ -179,7 +182,9 @@ Rebalancer and guard appointments wait seven days and expire seven days later. T
 rebalancer accepts its own appointment; anyone may apply a ready guard. Governance may revoke
 the rebalancer immediately. The guard cannot be removed, only replaced by another contract
 after the same notice. The notice gives eligible holders an exit using skipping if
-necessary. A captured governance can appoint a malicious guard after the notice.
+necessary. A captured governance can appoint a malicious guard after the notice. The notice
+binds an address: a guard or component behind an upgradeable proxy can change its behavior
+later without one.
 
 ## Fees and governance
 
@@ -381,7 +386,8 @@ design decision and must be made here first.
 - **The rebalancer chooses the price within the guard's view.** The guard bounds only the
   losses its feeds can see. Feeds may lag within their deviation thresholds, price an
   underlying while the token trades below it, or go stale. Weeks are fixed epochs, so losses
-  on both sides of a boundary can reach about 4% within seven days.
+  on both sides of a boundary can reach about 4% within seven days. A guard behind an
+  upgradeable proxy can change its rules after its notice.
 - **Allocation follows timing.** Whoever holds GRET when value arrives shares it: future
   income, a favorable swap, a reactivated component or an asset another holder skipped. A
   holder can redeem before a losing swap and return afterwards. A last skipping exit pauses

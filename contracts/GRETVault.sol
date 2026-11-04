@@ -168,6 +168,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     error InvalidComponentCount(uint256 count);
     error LengthMismatch(uint256 expected, uint256 actual);
     error NotAContract(address token);
+    error InvalidContract(address account);
     error DuplicateComponent(address token);
     error ZeroInitialAmount(uint256 index);
     error ZeroAddress();
@@ -581,9 +582,10 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
     /// @notice Proposes the contract that must accept every swap. It takes effect only after
     /// `BASKET_CHANGE_DELAY`, like a new rebalancer: a guard that misprices lets the rebalancer
-    /// take value. Replaces any pending proposal and restarts the wait.
+    /// take value. Replaces any pending proposal and restarts the wait. The vault itself and
+    /// EIP-7702 accounts are refused; the notice binds an address, not the code behind a proxy.
     function proposePriceGuard(address next) external onlyGovernance {
-        if (next.code.length == 0) revert NotAContract(next);
+        _requireContract(next);
         uint256 readyAt = block.timestamp + BASKET_CHANGE_DELAY;
         pendingPriceGuard = next;
         pendingPriceGuardReadyAt = readyAt;
@@ -617,7 +619,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
     /// @notice Announces a token for the basket. It can join only after `BASKET_CHANGE_DELAY`, so
     /// holders see it coming before the rebalancer can buy it with the reserves. Announcing it
-    /// again restarts the wait. Named apart from a voting governance's `propose`.
+    /// again restarts the wait. The vault itself and EIP-7702 accounts are refused. Named apart
+    /// from a voting governance's `propose`.
     function announceComponent(address token) external onlyGovernance {
         _requireNewComponent(token);
         uint256 readyAt = block.timestamp + BASKET_CHANGE_DELAY;
@@ -1018,8 +1021,19 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     }
 
     function _requireNewComponent(address token) private view {
-        if (token.code.length == 0) revert NotAContract(token);
+        _requireContract(token);
         if (_componentSlot[token] != 0) revert DuplicateComponent(token);
+    }
+
+    /// @dev Components and guards must be contracts other than the vault. An EIP-7702 account,
+    /// whose code is a delegation designator, is refused: its key holder can replace that code
+    /// without notice.
+    function _requireContract(address account) private view {
+        uint256 size = account.code.length;
+        if (size == 0) revert NotAContract(account);
+        if (account == address(this) || (size == 23 && bytes3(account.code) == 0xef0100)) {
+            revert InvalidContract(account);
+        }
     }
 
     function _indexOf(address token) private view returns (uint256) {

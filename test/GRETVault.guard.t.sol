@@ -532,7 +532,7 @@ contract GRETVaultGuardTest is GRETVaultCase {
     }
 
     // ------------------------------------------------------------------------------------------
-    // The notice binds an address, not behavior
+    // The notice binds an address, not behavior; the vault and EIP-7702 accounts are refused
     // ------------------------------------------------------------------------------------------
 
     function test_switchableGuardLoosensAfterNotice() public {
@@ -554,52 +554,39 @@ contract GRETVaultGuardTest is GRETVaultCase {
         assertEq(vault.reserves()[0], 0);
     }
 
-    function test_delegationDesignatorPassesCodeCheck() public {
+    /// An EIP-7702 account can replace its code without notice: it is refused as a guard and as a
+    /// component.
+    function test_delegatedAccountIsRefused() public {
         address eoa = address(0x7702);
-        vm.etch(eoa, abi.encodePacked(hex"ef0100", address(0xBEEF)));
-        assertEq(eoa.code.length, 23);
-        vm.prank(GOVERNANCE);
-        vault.proposePriceGuard(eoa);
-        assertEq(vault.pendingPriceGuard(), eoa);
-    }
-
-    function test_eip7702DelegatedGuardRuns() public {
-        _feeds();
-        address eoa = makeAddr("guard-eoa");
-        SwitchableGuardImpl impl = new SwitchableGuardImpl();
         // Hardhat does not support signAndAttachDelegation: write the EIP-7702 designator directly.
-        vm.etch(eoa, abi.encodePacked(hex"ef0100", address(impl)));
-        // The designator is attached; the vault accepts the account as a guard.
-        vm.prank(GOVERNANCE);
+        vm.etch(eoa, abi.encodePacked(hex"ef0100", address(new MockPriceGuard())));
+        assertEq(eoa.code.length, 23);
+        vm.startPrank(GOVERNANCE);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.InvalidContract.selector, eoa));
         vault.proposePriceGuard(eoa);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.InvalidContract.selector, eoa));
+        vault.announceComponent(eoa);
+        vm.stopPrank();
+        assertEq(vault.pendingPriceGuard(), address(0));
+        assertEq(vault.componentReadyAt(eoa), 0);
+    }
+
+    /// The vault is refused as its own guard and as its own component.
+    function test_vaultItselfIsRefused() public {
+        vm.startPrank(GOVERNANCE);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.InvalidContract.selector, address(vault)));
+        vault.proposePriceGuard(address(vault));
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.InvalidContract.selector, address(vault)));
+        vault.announceComponent(address(vault));
+        vm.stopPrank();
+    }
+
+    /// Another 23-byte contract that is not a delegation designator is accepted.
+    function test_shortContractThatIsNotADesignatorIsAccepted() public {
+        address other = address(0x2323);
+        vm.etch(other, abi.encodePacked(hex"ef0200", address(0xBEEF)));
         vm.prank(GOVERNANCE);
-        vault.proposeRebalancer(REBALANCER);
-        vm.warp(block.timestamp + 7 days);
-        vm.prank(REBALANCER);
-        vault.acceptRebalancer();
-        vault.applyPriceGuard();
-        // The delegated code refuses every swap until the key holder flips it.
-        vm.prank(REBALANCER);
-        vm.expectRevert();
-        vault.swap(address(healthy), 2e18, address(faulty), 1);
-        vm.prank(eoa);
-        SwitchableGuardImpl(eoa).open();
-        vm.prank(REBALANCER);
-        vault.swap(address(healthy), 2e18, address(faulty), 1);
-        assertEq(vault.reserves()[0], 0);
-    }
-}
-
-/// @dev Code an EIP-7702 account delegates to: refuses swaps until the account itself opens it.
-contract SwitchableGuardImpl is IPriceGuard {
-    bool public opened;
-
-    function open() external {
-        require(msg.sender == address(this));
-        opened = true;
-    }
-
-    function checkSwap(address, uint256, address, uint256) external view {
-        require(opened, "closed");
+        vault.proposePriceGuard(other);
+        assertEq(vault.pendingPriceGuard(), other);
     }
 }
