@@ -136,58 +136,53 @@ contract GRETVaultExitsTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // A positive redemption fee keeps the supply from ever returning to zero
+    // Redeeming the whole supply pays no redemption fee
     // ---------------------------------------------------------------------------------------------
 
-    function test_soleHolderAndRecipientKeepsOneGret() public {
+    /// A sole holder who is also the fee recipient pays the fee on a partial redemption, but leaves
+    /// in full by redeeming the whole supply.
+    function test_soleHolderLeavesInFullDespiteFee() public {
         vm.prank(ALICE);
         vault.mint(19e18, _pair(MAX, MAX), 0, 0);
         _setRedeemFee(vault, ALICE, 500);
 
         vm.prank(ALICE);
-        vault.redeem(20e18, _pair(0, 0), 0);
-        assertEq(vault.totalSupply(), 1e18, "supply after redeeming all");
-        assertEq(vault.balanceOf(ALICE), 1e18, "Alice holds the whole supply");
+        vault.redeem(10e18, _pair(0, 0), 0);
+        assertEq(vault.totalSupply(), 10.5e18, "the fee stays in the supply");
+        assertEq(vault.balanceOf(ALICE), 10.5e18);
 
-        uint256[6] memory sizes = [uint256(1), 19, 20, 1e9, 0.5e18, 1e18];
-        for (uint256 k; k < sizes.length; ++k) {
-            uint256 x = sizes[k];
-            uint256 remaining = 1e18 - (x - x * 500 / 10_000);
-            vm.expectRevert(abi.encodeWithSelector(GRETVault.SupplyBelowMinimum.selector, remaining));
-            vm.prank(ALICE);
-            vault.redeem(x, _pair(0, 0), 0);
-        }
-        uint256[] memory held = vault.reserves();
-        assertEq(held[0], 2e18);
-        assertEq(held[1], 5e18);
-
-        // A cut to zero applies at once and frees the last GRET.
-        vm.prank(GOVERNANCE);
-        vault.proposeFees(0, 0);
         vm.prank(ALICE);
-        vault.redeem(1e18, _pair(0, 0), 0);
-        assertEq(vault.totalSupply(), 0, "supply empties only after the fee cut");
+        vault.redeem(10.5e18, _pair(0, 0), 0);
+        assertEq(vault.totalSupply(), 0);
+        assertEq(healthy.balanceOf(address(vault)), 0);
+        assertEq(faulty.balanceOf(address(vault)), 0);
     }
 
-    function test_handOverDoesNotFreeLastHolder() public {
-        vm.prank(ALICE);
-        vault.mint(19e18, _pair(MAX, MAX), 0, 0);
+    /// Fee GRET held by another wallet keeps the last holder from leaving in full; once it is handed
+    /// over, the holder of every GRET leaves without a fee, though the fee is still positive.
+    function test_handOverOfFeeGretFreesLastHolder() public {
+        vm.prank(BOB);
+        vault.mint(SHARE, _pair(MAX, MAX), 0, 0);
         _setRedeemFee(vault, CAROL, 500);
+        vm.prank(ALICE);
+        vault.redeem(SHARE, _pair(0, 0), 0);
+        assertEq(vault.balanceOf(CAROL), 0.05e18);
 
-        // Round 1: Alice holds 20 GRET = the whole supply; the fee goes to Carol.
-        vm.prank(ALICE);
-        vault.redeem(20e18, _pair(0, 0), 0);
-        assertEq(vault.balanceOf(CAROL), 1e18);
-        // Carol hands everything back; Alice again holds the whole supply.
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.SupplyBelowMinimum.selector, 0.1e18));
+        vm.prank(BOB);
+        vault.redeem(SHARE, _pair(0, 0), 0);
+
         vm.prank(CAROL);
-        vault.transfer(ALICE, 1e18);
-        assertEq(vault.balanceOf(ALICE), vault.totalSupply());
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.SupplyBelowMinimum.selector, 0.05e18));
-        vm.prank(ALICE);
-        vault.redeem(1e18, _pair(0, 0), 0);
+        vault.transfer(BOB, 0.05e18);
+        vm.prank(BOB);
+        vault.redeem(1.05e18, _pair(0, 0), 0);
+        assertEq(vault.totalSupply(), 0);
+        assertEq(vault.balanceOf(CAROL), 0);
     }
 
-    function testFuzz_positiveRedeemFeeNeverEmptiesSupply(uint256 fee, uint256 extra, uint256 x) public {
+    /// With any positive fee, a partial redemption leaves at least 1 GRET or reverts, and redeeming
+    /// the whole supply empties it.
+    function testFuzz_wholeSupplyRedemptionEmptiesItDespiteFee(uint256 fee, uint256 extra, uint256 x) public {
         fee = bound(fee, 1, 500);
         extra = bound(extra, 0, 1000e18);
         if (extra != 0) {
@@ -195,19 +190,18 @@ contract GRETVaultExitsTest is GRETVaultCase {
             vault.mint(extra, _pair(MAX, MAX), 0, 0);
         }
         _setRedeemFee(vault, ALICE, fee);
-        uint256 s = vault.totalSupply();
-        x = bound(x, 1, s);
+        x = bound(x, 1, vault.totalSupply() - 1);
         vm.prank(ALICE);
         try vault.redeem(x, _pair(0, 0), 0) {
-            assertGt(vault.totalSupply(), 0);
             assertGe(vault.totalSupply(), 1e18);
         } catch {}
-        s = vault.totalSupply();
+        uint256 s = vault.totalSupply();
+        assertEq(vault.balanceOf(ALICE), s);
         vm.prank(ALICE);
-        try vault.redeem(s, _pair(0, 0), 0) {
-            assertGt(vault.totalSupply(), 0);
-        } catch {}
-        assertGe(vault.totalSupply(), 1e18);
+        vault.redeem(s, _pair(0, 0), 0);
+        assertEq(vault.totalSupply(), 0);
+        assertEq(healthy.balanceOf(address(vault)), 0);
+        assertEq(faulty.balanceOf(address(vault)), 0);
     }
 
     // ---------------------------------------------------------------------------------------------

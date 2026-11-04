@@ -51,7 +51,8 @@ compatibility; fork results are specific to their block and code versions.
   empty backing basket are rejected.
 - **Normal redemption:** calculate outputs from all required live balances before sending any
   token. The fee is transferred in GRET; the remainder is burned for
-  `floor(burnedShares * B[i] / S)` per component. Every transfer must succeed atomically.
+  `floor(burnedShares * B[i] / S)` per component. Redeeming the whole supply pays no fee.
+  Every transfer must succeed atomically.
   Minimum outputs bound requested transfers, not the recipient's actual balance increase.
 - **Skipping:** `redeemSkipping` never calls listed tokens or excluded components, even for
   `balanceOf`. Their outputs and minima must be zero. Skipped assets remain for other holders,
@@ -59,7 +60,8 @@ compatibility; fork results are specific to their block and code versions.
   holder retains no separate right.
   `previewRedeemSkipping` quotes this exit without calling skipped tokens.
 - **Supply floor:** normal redemption leaves either zero or at least `MIN_SUPPLY = 1e18`.
-  Fee shares remain outstanding, so a positive redemption fee prevents a full normal exit.
+  Fee shares remain outstanding, but a redemption of the whole supply pays no fee, so a holder
+  of every GRET can always leave in full.
   Liquidation permits conversion below that floor and eventually zero unconverted supply.
 - **Mint pause only:** governance can pause/resume minting immediately; executing a write-off
   and a skipping redemption that leaves zero supply also pause it. Normal redemption is never
@@ -185,7 +187,8 @@ Both fees start at zero and are capped at 500 basis points. A `proposeFees` call
 neither fee rises applies immediately and discards any pending raise. One that raises either
 fee delays both values: anyone may apply it after seven days and within the following seven.
 Positive fees require a nonzero recipient distinct from the vault. Mint fees split the paid
-issuance; redemption fees transfer GRET to that recipient and only the remainder is burned.
+issuance; redemption fees transfer GRET to that recipient and only the remainder is burned,
+except that redeeming the whole supply pays no fee.
 Liquidation has no fees. Fee rounding and the minimum supply can affect very small positions.
 
 Governance may pause minting, activate liquidation, manage component lifecycle and initial
@@ -391,9 +394,9 @@ design decision and must be made here first.
   while an active component with a positive balance cannot be transferred in; selling,
   transferring to a wallet that minted or liquidation remain.
 - **The supply floor can hold back the last holders.** A fraction of GRET held elsewhere, from
-  a tiny mint or as fee GRET, keeps the others from redeeming the last GRET normally. While the
-  redemption fee is positive, normal redemption never empties the supply. Liquidation lets
-  every holder exit.
+  a tiny mint or as fee GRET, keeps the others from redeeming the last GRET normally until it
+  is handed over; whoever then holds every GRET leaves without a fee. Liquidation lets every
+  holder exit.
 - **Minimums bound what the vault sends, not what arrives.** A token that charges the
   recipient delivers less than `minAmountsOut` or `minAmount`, and a token that reports a
   transfer without moving anything still consumes the claimed right.

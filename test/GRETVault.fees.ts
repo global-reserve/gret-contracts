@@ -243,23 +243,38 @@ describe("GRETVault: mint and redemption fees", async () => {
       assert.equal(after - before, owed);
     });
 
-    it("the recipient's GRET stays in the supply, so the last holder cannot leave it below 1 GRET", async () => {
+    it("redeeming the whole supply pays no fee, so a sole holder can always leave", async () => {
       const basket = await networkHelpers.loadFixture(basketFixture);
       const { vault, governance, alice, carol } = basket;
       await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
       await vault.write.setFeeRecipient([carol.account.address], { account: governance.account });
       await raiseFees(basket, 0n, 500n);
 
+      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account });
+      assert.equal(await vault.read.totalSupply(), 0n);
+      assert.equal(await vault.read.balanceOf([carol.account.address]), 0n);
+    });
+
+    it("the recipient's GRET stays in the supply, so another last holder cannot leave it below 1 GRET", async () => {
+      const basket = await networkHelpers.loadFixture(basketFixture);
+      const { vault, governance, alice, bob, carol } = basket;
+      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: alice.account });
+      await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: bob.account });
+      await vault.write.setFeeRecipient([carol.account.address], { account: governance.account });
+      await raiseFees(basket, 0n, 500n);
+
       const fee = (INITIAL_SHARES * 500n) / BPS;
+      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account });
+      assert.equal(await vault.read.balanceOf([carol.account.address]), fee);
       await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account }),
+        vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: bob.account }),
         vault,
         "SupplyBelowMinimum",
-        [fee],
+        [2n * fee],
       );
-      // Cutting the fee to zero lets the last holder leave at once.
-      await vault.write.proposeFees([0n, 0n], { account: governance.account });
-      await vault.write.redeem([INITIAL_SHARES, NO_MIN, 0n], { account: alice.account });
+      // Once the recipient hands its GRET over, bob holds the whole supply and leaves without a fee.
+      await vault.write.transfer([bob.account.address, fee], { account: carol.account });
+      await vault.write.redeem([INITIAL_SHARES + fee, NO_MIN, 0n], { account: bob.account });
       assert.equal(await vault.read.totalSupply(), 0n);
     });
   });

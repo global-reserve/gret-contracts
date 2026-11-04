@@ -155,7 +155,7 @@ Functions of `GRETVault`, besides the standard ERC-20 ones:
 | Function | Who | What it does |
 | --- | --- | --- |
 | `mint(shares, maxAmountsIn, minShares, version)` | Anyone | Contributes every component with a reserve in proportion and receives GRET, minus the mint fee; the first mint issues exactly 1 GRET |
-| `redeem(shares, minAmountsOut, version)` | Wallets that minted | Pays the redemption fee in GRET, burns the rest and receives every component; all or nothing; leaves the supply at 0 or at least 1 GRET |
+| `redeem(shares, minAmountsOut, version)` | Wallets that minted | Pays the redemption fee in GRET, burns the rest and receives every component; redeeming the whole supply pays no fee; all or nothing; leaves the supply at 0 or at least 1 GRET |
 | `redeemSkipping(shares, minAmountsOut, skipped, version)` | Wallets that minted | Same redemption without the listed components, which are not called; the caller gives up its share of them; leaving zero supply pauses minting |
 | `convertToClaims(shares)` | Any holder | During liquidation, burns GRET in exchange for per-component rights |
 | `claim(i, to, minAmount)` | Whoever converted | Withdraws the pending right over component `i` |

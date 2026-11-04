@@ -103,7 +103,8 @@ contract GRETVaultHandler is Test {
         uint256[] memory limits = new uint256[](vault.componentCount());
         uint256 version = vault.basketVersion();
         Flow memory before_ = _flow(actor);
-        uint256 fee = shares * vault.redeemFee() / 10_000;
+        // Redeeming the whole supply pays no fee.
+        uint256 fee = shares == before_.supply ? 0 : shares * vault.redeemFee() / 10_000;
         uint256 burned = shares - fee;
         uint256[] memory expected = new uint256[](limits.length);
         for (uint256 i; i < expected.length; ++i) {

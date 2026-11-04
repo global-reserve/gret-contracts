@@ -302,7 +302,8 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     }
 
     /// @notice Takes `shares` GRET from the caller: the redemption fee goes to `feeRecipient` and the
-    /// rest is burned for the proportional amount of every component. All or nothing: if any
+    /// rest is burned for the proportional amount of every component; redeeming the whole supply
+    /// pays no fee. All or nothing: if any
     /// transfer fails the whole redemption reverts. The supply left must be zero or at least
     /// `MIN_SUPPLY`. `version` is the `basketVersion` that `minAmountsOut` was prepared for.
     /// @dev Only for wallets that completed a mint. Amounts round down, in favor of the vault.
@@ -888,7 +889,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         if (shares == 0) revert ZeroShares();
 
         amounts = _redemptionAmounts(shares, skip);
-        uint256 fee = _fee(shares, redeemFee);
+        uint256 fee = _redeemFeeOn(shares, totalSupply());
         uint256 burned = shares - fee;
         uint256 remaining = totalSupply() - burned;
         if (remaining != 0 && remaining < MIN_SUPPLY) revert SupplyBelowMinimum(remaining);
@@ -927,7 +928,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         uint256 supply = totalSupply();
         if (shares > supply) revert SharesExceedSupply(shares, supply);
         amounts = new uint256[](_components.length);
-        uint256 burned = shares - _fee(shares, redeemFee);
+        uint256 burned = shares - _redeemFeeOn(shares, supply);
         if (burned == 0) return amounts;
         for (uint256 i; i < amounts.length; ++i) {
             if (skip[i] || excluded[address(_components[i])]) continue;
@@ -974,6 +975,12 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
 
     function _fee(uint256 shares, uint256 rate) private pure returns (uint256) {
         return Math.mulDiv(shares, rate, FEE_DENOMINATOR);
+    }
+
+    /// @dev Redeeming the whole supply pays no fee: fee GRET would otherwise stay in the supply and
+    /// keep the holder of every GRET from leaving in full.
+    function _redeemFeeOn(uint256 shares, uint256 supply) private view returns (uint256) {
+        return shares == supply ? 0 : _fee(shares, redeemFee);
     }
 
     /// @dev On mint the fee is issued to the recipient; on redemption it is moved from the caller.
