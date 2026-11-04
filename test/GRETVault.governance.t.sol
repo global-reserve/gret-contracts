@@ -25,12 +25,6 @@ contract WriteOffBundler {
         }
         (minted,) = vault.mint(shares, maxIn, 0, vault.basketVersion());
     }
-
-    function redeemAll(GRETVault vault) external returns (uint256[] memory) {
-        return vault.redeem(
-            vault.balanceOf(address(this)), new uint256[](vault.componentCount()), vault.basketVersion()
-        );
-    }
 }
 
 /// A holder wallet that reads the basket version when its redemption executes.
@@ -57,7 +51,7 @@ contract Junk {
 
 contract GRETVaultGovernanceTest is GRETVaultCase {
     // ---------------------------------------------------------------------------------------------
-    // A ready write-off executed atomically with a mint
+    // A write-off pauses minting in the same transaction
     // ---------------------------------------------------------------------------------------------
 
     function _freezeAndProposeWriteOff() internal returns (uint256 readyAt) {
@@ -71,101 +65,77 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         readyAt = vault.writeOffReadyAt(address(faulty));
     }
 
-    function test_atomicWriteOffAndMintBeatsReactivePause() public {
+    /// A contract cannot execute a ready write-off and mint without F in the same transaction, so
+    /// nobody enters without paying for F and then shares its recovery.
+    function test_writeOffPausesMintInSameTransaction() public {
         uint256 readyAt = _freezeAndProposeWriteOff();
-        vm.warp(readyAt);
-        WriteOffBundler entrant = new WriteOffBundler();
-        healthy.mint(address(entrant), 18e18);
-        assertEq(entrant.bundle(vault, address(faulty), 9 * SHARE), 9 * SHARE);
-        assertEq(healthy.balanceOf(address(entrant)), 0, "entrant paid 18 H");
-        assertEq(faulty.balanceOf(address(entrant)), 0, "entrant paid no F");
-
-        // Governance reacts in the next block, as P-5 at 219b6a4 reads: too late.
-        vm.roll(block.number + 1);
-        vm.startPrank(GOVERNANCE);
-        vault.setMintPaused(true);
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.NoPendingWriteOff.selector, address(faulty)));
-        vault.cancelWriteOff(address(faulty));
-        vm.stopPrank();
-
-        // F recovers and governance reactivates it at once (P-5).
-        faulty.setBlocked(address(vault), false);
-        vm.prank(GOVERNANCE);
-        vault.activateComponent(address(faulty));
-        uint256[] memory got = entrant.redeemAll(vault);
-        vm.prank(ALICE);
-        uint256[] memory alice = vault.redeem(SHARE, _pair(0, 0), 0);
-        assertEq(got[0], 18e18);
-        assertEq(got[1], 45e17);
-        assertEq(alice[0], 2e18);
-        assertEq(alice[1], 5e17);
-    }
-
-    /// The entry is a free option: if F never recovers, the entrant leaves with exactly what it paid.
-    function test_entrantLosesNothingIfNoRecovery() public {
-        uint256 readyAt = _freezeAndProposeWriteOff();
-        vm.warp(readyAt);
-        WriteOffBundler entrant = new WriteOffBundler();
-        healthy.mint(address(entrant), 18e18);
-        entrant.bundle(vault, address(faulty), 9 * SHARE);
-        uint256[] memory got = entrant.redeemAll(vault); // F still frozen; its reserve is zero, so it is not called
-        assertEq(got[0], 18e18);
-        assertEq(got[1], 0);
-    }
-
-    /// An entrant who mints k times the supply takes k/(k+1) of the recovered component.
-    function testFuzz_captureIsKOverKPlusOne(uint256 k) public {
-        k = bound(k, 1, 1000);
-        uint256 readyAt = _freezeAndProposeWriteOff();
-        vm.warp(readyAt);
-        WriteOffBundler entrant = new WriteOffBundler();
-        healthy.mint(address(entrant), 2e18 * k);
-        entrant.bundle(vault, address(faulty), k * SHARE);
-        faulty.setBlocked(address(vault), false);
-        vm.prank(GOVERNANCE);
-        vault.activateComponent(address(faulty));
-        uint256[] memory got = entrant.redeemAll(vault);
-        assertEq(got[0], 2e18 * k);
-        assertEq(got[1], Math.mulDiv(5e18, k, k + 1));
-    }
-
-    /// Control: a pause before readyAt stops the bundle; the write-off can still be executed alone,
-    /// and reactivation returns all of F to Alice.
-    function test_pauseBeforeReadyAtStopsBundle() public {
-        uint256 readyAt = _freezeAndProposeWriteOff();
-        vm.warp(readyAt - 1);
-        vm.prank(GOVERNANCE);
-        vault.setMintPaused(true);
         vm.warp(readyAt);
         WriteOffBundler entrant = new WriteOffBundler();
         healthy.mint(address(entrant), 18e18);
         vm.expectRevert(GRETVault.MintIsPaused.selector);
         entrant.bundle(vault, address(faulty), 9 * SHARE);
-        vault.writeOffComponent(address(faulty)); // anyone, alone, while paused
+
+        vm.expectEmit(address(vault));
+        emit GRETVault.MintPauseChanged(true);
+        vault.writeOffComponent(address(faulty)); // anyone, alone
+        assertTrue(vault.mintPaused());
+
+        // F recovers; governance reactivates it before resuming minting.
         faulty.setBlocked(address(vault), false);
-        vm.prank(GOVERNANCE);
+        vm.startPrank(GOVERNANCE);
         vault.activateComponent(address(faulty));
+        vault.setMintPaused(false);
+        vm.stopPrank();
         vm.prank(ALICE);
         uint256[] memory alice = vault.redeem(SHARE, _pair(0, 0), 0);
         assertEq(alice[0], 2e18);
         assertEq(alice[1], 5e18);
     }
 
-    /// Variant: F recovers after readyAt and governance's public cancelWriteOff is front-run.
-    function test_frontRunsCancelAfterRecovery() public {
+    /// A pause governance already set stays, without a second event.
+    function test_writeOffKeepsAnExistingPauseWithoutEvent() public {
+        uint256 readyAt = _freezeAndProposeWriteOff();
+        vm.prank(GOVERNANCE);
+        vault.setMintPaused(true);
+        vm.warp(readyAt);
+        vm.recordLogs();
+        vault.writeOffComponent(address(faulty));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            assertTrue(logs[i].topics[0] != GRETVault.MintPauseChanged.selector, "second pause event");
+        }
+        assertTrue(vault.mintPaused());
+    }
+
+    /// F recovers after readyAt, before governance cancels. A bundle of the ready write-off and a
+    /// mint reverts as a whole, so the cancel still lands; executing the write-off alone only pauses
+    /// minting until governance reactivates F, and later entrants pay for F.
+    function test_recoveredComponentCannotBeCapturedBeforeCancel() public {
         uint256 readyAt = _freezeAndProposeWriteOff();
         vm.warp(readyAt + 1 days);
         faulty.setBlocked(address(vault), false); // recovered; the write-off is still pending and ready
         WriteOffBundler entrant = new WriteOffBundler();
         healthy.mint(address(entrant), 18e18);
-        entrant.bundle(vault, address(faulty), 9 * SHARE); // lands before the cancel
-        vm.expectRevert(abi.encodeWithSelector(GRETVault.NoPendingWriteOff.selector, address(faulty)));
+        uint256 snapshot = vm.snapshotState();
+        vm.expectRevert(GRETVault.MintIsPaused.selector);
+        entrant.bundle(vault, address(faulty), 9 * SHARE);
         vm.prank(GOVERNANCE);
         vault.cancelWriteOff(address(faulty));
-        vm.prank(GOVERNANCE);
+        assertFalse(vault.writtenOff(address(faulty)));
+        assertFalse(vault.mintPaused());
+
+        vm.revertToState(snapshot);
+        vault.writeOffComponent(address(faulty));
+        vm.startPrank(GOVERNANCE);
         vault.activateComponent(address(faulty));
-        uint256[] memory got = entrant.redeemAll(vault);
-        assertEq(got[1], 45e17);
+        vault.setMintPaused(false);
+        vm.stopPrank();
+        vm.prank(BOB);
+        (, uint256[] memory paid) = vault.mint(9 * SHARE, _pair(type(uint256).max, type(uint256).max), 0, 0);
+        assertEq(paid[1], 45e18);
+        vm.prank(ALICE);
+        uint256[] memory alice = vault.redeem(SHARE, _pair(0, 0), 0);
+        assertEq(alice[1], 5e18);
     }
 
     // ---------------------------------------------------------------------------------------------

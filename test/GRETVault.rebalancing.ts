@@ -723,6 +723,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await vault.write.proposeWriteOff([c], { account: governance.account });
       await networkHelpers.time.increase(SEVEN_DAYS);
       await vault.write.writeOffComponent([c], { account: governance.account });
+      assert.equal(await vault.read.mintPaused(), true);
 
       // The issuer lifts the block: the balance is back, but it is not governance's.
       await faulty.write.setFault([Fault.None]);
@@ -737,6 +738,7 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       // It stays in the basket, so activation restores its whole balance to normal backing.
       await vault.write.activateComponent([c], { account: governance.account });
       assert.deepEqual(await vault.read.reserves(), doubled);
+      await vault.write.setMintPaused([false], { account: governance.account });
       await vault.write.mint([INITIAL_SHARES, NO_MAX, 0n, 0n], { account: carol.account });
       assert.equal(await faulty.read.balanceOf([vault.address]), doubled[2] + INITIAL_AMOUNTS[2]);
     });

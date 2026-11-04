@@ -113,7 +113,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     /// @notice Wallets that completed a mint and may use normal redemption. Not transferable.
     mapping(address account => bool) public hasMinted;
 
-    /// @notice While true, `mint` reverts. Redemption is never paused.
+    /// @notice While true, `mint` reverts. Executing a write-off sets it. Redemption is never paused.
     bool public mintPaused;
     /// @notice Grows by one whenever a component is added or removed. Calls that pass amounts by
     /// position (`mint`, both redemptions, `setInitialAmounts`) state the version they were prepared
@@ -698,11 +698,12 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         emit WriteOffCancelled(token);
     }
 
-    /// @notice Excludes the component and clears its initial amount after the notice. Makes no
-    /// token calls. It stays in the basket permanently, protected from rescue and removal;
-    /// governance may reactivate it, and liquidation includes its recoveries automatically.
+    /// @notice Excludes the component, clears its initial amount and pauses minting after the
+    /// notice. Makes no token calls. It stays in the basket permanently, protected from rescue and
+    /// removal; governance may reactivate it, and liquidation includes its recoveries automatically.
     /// @dev Anyone may execute it, as with `addComponent`. Governance should cancel the proposal if
-    /// the token recovers during the wait.
+    /// the token recovers during the wait. The pause stops a mint in the same transaction from
+    /// entering without the component and sharing its recovery; governance resumes minting.
     function writeOffComponent(address token) external nonReentrant {
         _requireNotLiquidating();
         uint256 index = _indexOf(token);
@@ -718,6 +719,7 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         _initialAmounts[index] = 0;
         emit ComponentWrittenOff(token);
         emit ComponentActivationChanged(token, false);
+        _pauseMint();
     }
 
     /// @notice Sets the mint and redemption fees, in basis points, each at most `MAX_FEE` (5%).
@@ -772,8 +774,9 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
     }
 
     /// @notice Pauses or resumes minting, at once. Wallets that minted can still redeem; a holder
-    /// that never minted cannot qualify until minting resumes (an accepted risk). Useful during an
-    /// incident or throughout an exclusion/recovery period to prevent new entrants sharing it.
+    /// that never minted cannot qualify until minting resumes (a known limitation). Useful during an
+    /// incident; a write-off pauses minting by itself, and resuming before the component is
+    /// reactivated lets new entrants share its recovery.
     function setMintPaused(bool paused) external onlyGovernance {
         mintPaused = paused;
         emit MintPauseChanged(paused);
@@ -973,6 +976,13 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         delete pendingMintFee;
         delete pendingRedeemFee;
         delete pendingFeesReadyAt;
+    }
+
+    /// @dev Emits only on a change, so an existing pause is kept without a second event.
+    function _pauseMint() private {
+        if (mintPaused) return;
+        mintPaused = true;
+        emit MintPauseChanged(true);
     }
 
     function _requireNewComponent(address token) private view {

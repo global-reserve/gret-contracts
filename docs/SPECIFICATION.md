@@ -58,8 +58,9 @@ compatibility; fork results are specific to their block and code versions.
 - **Supply floor:** normal redemption leaves either zero or at least `MIN_SUPPLY = 1e18`.
   Fee shares remain outstanding, so a positive redemption fee prevents a full normal exit.
   Liquidation permits conversion below that floor and eventually zero unconverted supply.
-- **Mint pause only:** governance can pause/resume minting immediately. Normal redemption is
-  never paused. A secondary-market holder who never minted cannot qualify while paused.
+- **Mint pause only:** governance can pause/resume minting immediately, and executing a
+  write-off also pauses it. Normal redemption is never paused. A secondary-market holder who
+  never minted cannot qualify while paused.
 - GRET transfers to the vault itself revert; otherwise shares are ordinary transferable ERC-20
   tokens, including unconverted GRET during liquidation.
 
@@ -81,9 +82,8 @@ component enters **excluded**, with zero initial amount. Even donations cannot m
 without making a token call. It is explicit, immediate and idempotent. Calling it for an
 already active token returns without emitting a change event. The original addition or
 write-off already had its notice, and an empty deactivation needs none; reactivation does not
-require another wait. Keep minting closed throughout a relevant exclusion/recovery period if
-new entrants must not share recovery. Pausing only when reactivation is announced does not
-undo prior entry.
+require another wait. If governance resumes minting while a funded component is excluded,
+entrants in between do not pay for it but share it once it is reactivated.
 
 `deactivateEmptyComponent(token)` excludes an empty component immediately. A nonzero residue
 is allowed only if it is at most `MAX_REMOVAL_DUST = 10` base units and the token reports at
@@ -95,7 +95,10 @@ receives anything; that may block a minter unable to transfer it.
 
 For a materially funded or unreadable component, governance proposes a **write-off**. After
 seven days anyone may execute within the execution window. Execution makes no token calls:
-it excludes the component, clears its initial amount and permanently sets `writtenOff`.
+it excludes the component, clears its initial amount, permanently sets `writtenOff` and
+pauses minting. The pause applies in the same transaction, so no mint can enter without the
+component and later share its recovery; `MintPauseChanged` is emitted only if minting was not
+already paused. Governance decides when to resume minting.
 A proposal may name any registered component, but execution requires an active one: a newly
 added, deactivated or already written-off component must be reactivated first. Governance
 judges whether a write-off is warranted; the contract does not prove the issuer is broken.
@@ -356,8 +359,9 @@ design decision and must be made here first.
   components, raise fees up to 5% and hand over governance. Removing empty components and adding
   announced ones change `basketVersion`, so a hostile governance can make redemptions prepared
   for a fixed version revert with `BasketChanged`. If the governance key is lost, nobody can
-  activate liquidation, reactivate components, change the basket or replace governance; mint
-  and redemption keep working.
+  activate liquidation, reactivate components, change the basket or replace governance;
+  redemption keeps working, and so does minting until a write-off proposed earlier is
+  executed, which pauses it for good.
 - **The rebalancer chooses the price within the guard's view.** The guard bounds only the
   losses its feeds can see. Feeds may lag within their deviation thresholds, price an
   underlying while the token trades below it, or go stale. Each guard counts its own week in
@@ -367,11 +371,13 @@ design decision and must be made here first.
 - **Allocation follows timing.** Whoever holds GRET when value arrives shares it: future
   income, a favorable swap, a reactivated component or an asset another holder skipped. A
   holder can redeem before a losing swap and return afterwards. After the last normal exit,
-  the next bootstrap owns all remaining active balances. Pausing minting before reactivation
-  does not remove shares minted earlier.
+  the next bootstrap owns all remaining active balances. A write-off pauses minting, but if
+  governance resumes it before reactivating the component, the entrants in between share its
+  recovery.
 - **Qualifying for normal redemption requires a mint.** A holder who never minted cannot
-  qualify while minting is paused, or while an active component with a positive balance cannot
-  be transferred in; selling, transferring to a wallet that minted or liquidation remain.
+  qualify while minting is paused, including after a write-off until governance resumes it, or
+  while an active component with a positive balance cannot be transferred in; selling,
+  transferring to a wallet that minted or liquidation remain.
 - **The supply floor can hold back the last holders.** A fraction of GRET held elsewhere, from
   a tiny mint or as fee GRET, keeps the others from redeeming the last GRET normally. While the
   redemption fee is positive, normal redemption never empties the supply. Liquidation lets

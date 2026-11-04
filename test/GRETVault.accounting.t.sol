@@ -180,6 +180,7 @@ contract GRETVaultLiveBalanceTest is Test {
     function test_liveBalance_exclusionDoesNotReadBrokenToken() public {
         faulty.setFault(MockFaultyERC20.Fault.RevertOnBalanceOf);
         _writeOff();
+        vault.setMintPaused(false);
         vm.startPrank(BOB);
         vault.mint(SHARE, _pair(100e18, 0), SHARE, 0);
         vault.redeem(SHARE, _pair(0, 0), 0);

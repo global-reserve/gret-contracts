@@ -117,14 +117,17 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         assertEq(healthy.balanceOf(BOB) - before, 99e18);
     }
 
-    /// Whoever mints between a write-off and reactivation of the recovered balance takes most of
-    /// it from the holders who bore the write-off.
-    function test_lateMinterCapturesWriteOffRecovery() public {
+    /// The write-off pauses minting; if governance resumes it before reactivating the recovered
+    /// balance, whoever mints in between takes most of it from the holders who bore the write-off.
+    function test_mintResumedBeforeReactivationSharesRecovery() public {
         faulty.setFault(MockFaultyERC20.Fault.RevertOnTransfer);
         vm.prank(GOVERNANCE);
         vault.proposeWriteOff(address(faulty));
         vm.warp(block.timestamp + 7 days);
         vault.writeOffComponent(address(faulty));
+        assertTrue(vault.mintPaused());
+        vm.prank(GOVERNANCE);
+        vault.setMintPaused(false);
 
         healthy.mint(CAROL, 1e24);
         vm.startPrank(CAROL);

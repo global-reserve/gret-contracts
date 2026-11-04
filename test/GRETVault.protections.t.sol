@@ -40,6 +40,7 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         uint256[] memory quote = vault.previewMint(SHARE);
         uint256 version = vault.basketVersion();
         vault.activateComponent(address(healthy));
+        vault.setMintPaused(false);
         vm.stopPrank();
         assertEq(vault.basketVersion(), version);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.AmountInAboveMax.selector, 0, 2e18, 0));

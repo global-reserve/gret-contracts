@@ -173,10 +173,10 @@ Functions of `GRETVault`, besides the standard ERC-20 ones:
 | `announceComponent(token)` / `cancelComponentAnnouncement(token)` | Governance | Announces or discards a new component |
 | `addComponent(token)` | Anyone | Adds an announced component, 7 to 14 days later, initially excluded |
 | `removeComponent(token)` | Governance | Removes an empty ordinary component under the bounded dust rule, never a written-off one; later indices shift |
-| `setMintPaused(paused)` | Governance | Pauses or resumes minting at once; redemption is never paused |
+| `setMintPaused(paused)` | Governance | Pauses or resumes minting at once; a write-off also pauses it; redemption is never paused |
 | `setInitialAmounts(amounts, version)` | Governance | Sets the basket of the first mint, used only while the supply is zero |
 | `proposeWriteOff(token)` / `cancelWriteOff(token)` | Governance | Proposes or discards writing off a component that stopped working; governance judges it |
-| `writeOffComponent(token)` | Anyone | 7 to 14 days later, excludes the component without reading it; the token stays registered and permanently non-rescuable |
+| `writeOffComponent(token)` | Anyone | 7 to 14 days later, excludes the component without reading it and pauses minting; the token stays registered and permanently non-rescuable |
 | `proposeFees(mintFee, redeemFee)` / `cancelFeesProposal()` | Governance | Sets the fees in basis points, at most 5% each: a cut applies at once, a raise waits 7 days |
 | `applyFees()` | Anyone | Applies a proposed raise, 7 to 14 days after it |
 | `setFeeRecipient(recipient)` | Governance | Chooses who receives the fees, in GRET |
