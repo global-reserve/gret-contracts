@@ -67,7 +67,7 @@ contract GRETVaultHandler is Test {
         uint256 version = vault.basketVersion();
         Flow memory before_ = _flow(actor);
         uint256[] memory expected = vault.initialAmounts();
-        uint256 fee = shares * vault.mintFee() / 10_000;
+        uint256 fee = (shares * vault.mintFee() + 9_999) / 10_000; // rounded up
         for (uint256 i; i < expected.length; ++i) {
             if (vault.excluded(address(tokens[i]))) expected[i] = 0;
             else if (before_.supply != 0) {
@@ -104,7 +104,7 @@ contract GRETVaultHandler is Test {
         uint256 version = vault.basketVersion();
         Flow memory before_ = _flow(actor);
         // Redeeming the whole supply pays no fee.
-        uint256 fee = shares == before_.supply ? 0 : shares * vault.redeemFee() / 10_000;
+        uint256 fee = shares == before_.supply ? 0 : (shares * vault.redeemFee() + 9_999) / 10_000;
         uint256 burned = shares - fee;
         uint256[] memory expected = new uint256[](limits.length);
         for (uint256 i; i < expected.length; ++i) {

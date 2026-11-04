@@ -290,10 +290,11 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         }
         // Without this, GRET backed by nothing could be minted after every reserve was lost.
         if (!contributed) revert EmptyBasket();
-        if (minted == 0) revert ZeroShares();
         // The minter paid for every share, so the fee dilutes nobody.
         uint256 fee = _fee(minted, mintFee);
         minted -= fee;
+        // Also refuses a mint whose fee, rounded up, takes every share.
+        if (minted == 0) revert ZeroShares();
         if (minted < minShares) revert SharesBelowMin(minted, minShares);
 
         _mint(msg.sender, minted);
@@ -976,8 +977,9 @@ contract GRETVault is ERC20, ReentrancyGuardTransient {
         _totalClaimed.push(0);
     }
 
+    /// @dev Rounded up, so that no operation with a positive fee rate pays nothing.
     function _fee(uint256 shares, uint256 rate) private pure returns (uint256) {
-        return Math.mulDiv(shares, rate, FEE_DENOMINATOR);
+        return Math.mulDiv(shares, rate, FEE_DENOMINATOR, Math.Rounding.Ceil);
     }
 
     /// @dev Redeeming the whole supply pays no fee: fee GRET would otherwise stay in the supply and

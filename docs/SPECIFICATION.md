@@ -193,7 +193,8 @@ neither fee rises applies immediately and discards any pending raise. One that r
 fee delays both values: anyone may apply it after seven days and within the following seven.
 Positive fees require a nonzero recipient distinct from the vault. Mint fees split the paid
 issuance; redemption fees transfer GRET to that recipient and only the remainder is burned,
-except that redeeming the whole supply pays no fee.
+except that redeeming the whole supply pays no fee. Fees round up, so a positive rate never
+charges nothing; a mint whose fee would take every share reverts with `ZeroShares`.
 Liquidation has no fees. Fee rounding and the minimum supply can affect very small positions.
 
 Governance may pause minting, activate liquidation, manage component lifecycle and initial
@@ -321,7 +322,7 @@ balances and supply.
 - There is no normal reserve ledger. Every active required balance is read before input or
   output transfers. Unreadable/reverting/malformed balances fail closed. Explicitly excluded
   or skipped tokens are not called. Initial amounts of zero are omitted during bootstrap.
-- Contributions round up; withdrawals and fee shares round down. A component payout that
+- Contributions and fee shares round up; withdrawals round down. A component payout that
   rounds to zero is not transferred. An empty contributing basket cannot issue shares.
 - No transaction deadline is enforced. Input/output/share limits bound economics despite
   live income/losses, activation, fees or swaps changing a previously observed ratio. Tight

@@ -226,6 +226,25 @@ describe("GRETVault: mint and redemption fees", async () => {
       assert.equal(await vault.read.totalSupply(), supply - (shares - fee));
     });
 
+    it("rounds fees up, so a positive rate never charges nothing", async () => {
+      const basket = await networkHelpers.loadFixture(holdersFixture);
+      const { vault, alice, carol } = basket;
+      await raiseFees(basket, 100n, 100n);
+
+      // 1% of 150 base units is 1.5, charged as 2.
+      await vault.write.mint([150n, NO_MAX, 0n, 0n], { account: alice.account });
+      assert.equal(await vault.read.balanceOf([carol.account.address]), 2n);
+      // A mint whose fee would take every share is refused.
+      await viem.assertions.revertWithCustomError(
+        vault.write.mint([1n, NO_MAX, 0n, 0n], { account: alice.account }),
+        vault,
+        "ZeroShares",
+      );
+      // 1% of 50 base units is 0.5, charged as 1.
+      await vault.write.redeem([50n, NO_MIN, 0n], { account: alice.account });
+      assert.equal(await vault.read.balanceOf([carol.account.address]), 3n);
+    });
+
     it("never on liquidation exits", async () => {
       const basket = await networkHelpers.loadFixture(holdersFixture);
       const { vault, governance, alice, carol } = basket;
