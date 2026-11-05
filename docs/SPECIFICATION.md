@@ -99,14 +99,15 @@ write-off already had its notice, and an empty deactivation needs none; reactiva
 require another wait. If governance resumes minting while a funded component is excluded,
 entrants in between do not pay for it but share it once it is reactivated.
 
-`deactivateEmptyComponent(token)` excludes an empty component immediately. A nonzero residue
-is allowed only if it is at most `MAX_REMOVAL_DUST = 10` base units and the token reports at
-least 18 decimals. Tokens with fewer decimals must be exactly empty: a few whole indivisible
-assets must not be discarded as dust. This prevents incidental receipts from reactivating a
-sold-out token. Deactivation keeps the initial amount, which bootstrap ignores while the
-component is excluded. Deactivating an already excluded component changes nothing and emits
-nothing. An active zero-balance token otherwise becomes required again when it receives
-anything; that may block a minter unable to transfer it.
+`deactivateEmptyComponent(token)` excludes an empty component immediately. A nonzero residue is
+allowed only if it is at most `MAX_REMOVAL_DUST = 10` base units and the token reports at least
+18 decimals. Tokens with fewer decimals must be exactly empty: a few whole indivisible assets
+must not be discarded as dust. This prevents incidental receipts from reactivating a sold-out
+token. Deactivation keeps the initial amount, which bootstrap ignores while the component is
+excluded. Deactivating an already excluded component that meets the same rule changes nothing
+and emits nothing; one funded beyond it, or whose balance cannot be read, makes the call
+revert, as an active one does. An active zero-balance token otherwise becomes required again
+when it receives anything; that may block a minter unable to transfer it.
 
 For a materially funded or unreadable component, governance proposes a **write-off**. After
 seven days anyone may execute within the execution window. Execution makes no token calls:
