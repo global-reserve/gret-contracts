@@ -224,7 +224,9 @@ rebalancer, eligibility contract or its own successor. Governance succession is 
 proposed address must accept after seven days and within the execution window. There is no
 governance-contract assumption beyond being able to call the vault. No arbitrary external-call
 or upgrade function exists. Proposals can be cancelled; revocation removes the pending
-rebalancer too.
+rebalancer too. A governance handover keeps every pending proposal: the new governance cancels
+what it does not want, and proposals that anyone or the proposed rebalancer can execute stay
+executable through their windows.
 
 The seven-day waits are enforced by the vault itself, not left to an external timelock such
 as OpenZeppelin's `TimelockController` or `AccessManager`. An external contract's delays are
@@ -494,9 +496,11 @@ design decision and must be made here first.
   they execute. An announced token can join and be activated at once; if its calls fail, every
   exit that does not skip it reverts; an exit prepared in advance avoids this by listing every
   announced token. If the governance key is lost, nobody can activate liquidation, reactivate
-  components, change the basket or replace governance; redemption keeps working, and so does
-  minting until a write-off proposed earlier is executed or the last holder leaves by skipping,
-  which pauses it for good.
+  components, change the basket, revoke the rebalancer, propose a new guard or replace
+  governance, while proposals made before the loss stay executable through their windows.
+  Redemption keeps working unless an eligibility contract was appointed or proposed before the
+  loss, and minting keeps working until a write-off proposed earlier is executed or the last
+  holder leaves by skipping, which pauses it for good.
 - **The rebalancer chooses the price within the guard's view.** The guard bounds only the
   losses its feeds can see. Feeds may lag within their deviation thresholds, price an
   underlying while the token trades below it, or go stale. A split or multiplier change makes
