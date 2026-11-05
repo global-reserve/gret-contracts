@@ -546,10 +546,12 @@ design decision and must be made here first.
   only a few units, a small mint asks it for one or two, which a token that converts amounts to
   shares can deliver as nothing; the mint reverts until the remainder is sold or the component
   excluded.
-- **A token that debits the vault more than it sends** takes the difference from the
-  remaining holders' backing, and the last exit of that component can fail even in
-  liquidation. Checking the vault's balance after every outgoing transfer was rejected: it
-  would add a read to every exit and cover one behavior among the many an issuer controls.
+- **A token that debits the vault more than it sends** takes the difference from the remaining
+  holders' backing, and the last exit of that component can fail even in liquidation. Swaps are
+  included: the vault sends the requested sell amount and the guard values that amount, so a
+  sell token that debits the vault more takes the difference without the guard seeing it.
+  Checking the vault's balance after every outgoing transfer was rejected: it would add a read
+  to every exit and cover one behavior among the many an issuer controls.
 - **Issuers control their tokens.** A freeze, an upgrade, an expensive call or an unreadable
   balance can block normal mint and redemption until holders skip the component or governance
   writes it off; its liquidation claim waits until reads and transfers recover. The
