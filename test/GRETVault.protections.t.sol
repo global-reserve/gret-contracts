@@ -79,6 +79,19 @@ contract OversizedBalanceToken is CaseToken, OversizedAnswer {
     }
 }
 
+/// @dev Once enabled, `balanceOf` burns about 90% of the gas it receives and then answers.
+contract BurnThenAnswerToken is CaseToken {
+    constructor() CaseToken("Burn then answer") {}
+
+    function balanceOf(address account) public view override returns (uint256) {
+        if (enabled) {
+            uint256 stop = gasleft() / 10;
+            while (gasleft() > stop) {}
+        }
+        return super.balanceOf(account);
+    }
+}
+
 /// @dev A guard that is later replaced and whose `currentWeek` answers an oversized payload.
 contract OversizedPredecessor is OversizedAnswer {
     function checkSwap(address, uint256, address, uint256, bytes calldata) external {}
@@ -791,20 +804,29 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         new GRETVault(basket, _one(1), GOVERNANCE);
     }
 
-    /// A component whose `balanceOf` answers an oversized payload, or burns all the gas it gets,
-    /// cannot block `rescue` of other tokens: each read gets limited gas and only its first word is
-    /// copied.
-    function test_oversizedOrCostlyBalanceReadDoesNotBlockRescue() public {
-        OversizedBalanceToken oversized = new OversizedBalanceToken();
-        GasBurnerToken burner = new GasBurnerToken();
+    /// Components whose `balanceOf` answers an oversized payload cannot block `rescue` of other
+    /// tokens: only the first word of each answer is copied.
+    function test_oversizedBalanceReadDoesNotBlockRescue() public {
+        _rescueDespite(new OversizedBalanceToken(), new OversizedBalanceToken());
+    }
+
+    /// Components whose `balanceOf` burns most of the gas it receives and then answers cannot block
+    /// `rescue` of other tokens: each read gets limited gas, in both passes.
+    function test_balanceReadsThatBurnTheirGasDoNotBlockRescue() public {
+        _rescueDespite(new BurnThenAnswerToken(), new BurnThenAnswerToken());
+    }
+
+    /// @dev A vault of `a`, `b` and H in which Alice minted 1 GRET, holding 1 FX sent by mistake.
+    /// `a` and `b` turn on their behavior, and governance rescues the FX with 16,777,216 gas.
+    function _rescueDespite(CaseToken a, CaseToken b) internal {
         IERC20[] memory basket = new IERC20[](3);
-        basket[0] = oversized;
-        basket[1] = burner;
+        basket[0] = a;
+        basket[1] = b;
         basket[2] = healthy;
         uint256[] memory initial = _three(1e18, 1e18, 1e18);
         GRETVault target = new GRETVault(basket, initial, GOVERNANCE);
-        oversized.mint(ALICE, 1e18);
-        burner.mint(ALICE, 1e18);
+        a.mint(ALICE, 1e18);
+        b.mint(ALICE, 1e18);
         vm.startPrank(ALICE);
         for (uint256 i; i < 3; ++i) {
             basket[i].approve(address(target), type(uint256).max);
@@ -812,10 +834,10 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         target.mint(SHARE, ALICE, initial, SHARE, 0);
         vm.stopPrank();
         MockERC20 foreign = new MockERC20("Foreign", "FX", 18);
-        foreign.mint(address(target), 1e18); // sent to the vault by mistake
+        foreign.mint(address(target), 1e18);
 
-        oversized.enable();
-        burner.enable();
+        a.enable();
+        b.enable();
         vm.prank(GOVERNANCE);
         target.rescue{gas: 16_777_216}(address(foreign), CAROL, 1e18);
         assertEq(foreign.balanceOf(CAROL), 1e18);
