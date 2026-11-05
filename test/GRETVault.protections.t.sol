@@ -748,6 +748,16 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(guard.weeklyLoss(), Math.mulDiv(1.9e18, 1e18, 398.1e18, Math.Rounding.Ceil));
     }
 
+    /// The vault refuses its own address as a component with `InvalidContract`, also in the
+    /// constructor, while that address has no code yet.
+    function test_constructorRefusesTheVaultItselfAsComponent() public {
+        address next = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+        IERC20[] memory basket = new IERC20[](1);
+        basket[0] = IERC20(next);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.InvalidContract.selector, next));
+        new GRETVault(basket, _one(1), GOVERNANCE);
+    }
+
     /// @dev Sells whole reserves back and forth, each swap losing 1.9% of what it sells, until the
     /// guard refuses one for the week's limit; returns how many passed.
     function _lossySwapsUntilRefused(ChainlinkPriceGuard guard) internal returns (uint256 passed) {

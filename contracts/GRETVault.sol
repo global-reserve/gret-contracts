@@ -1080,13 +1080,13 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
 
     /// @dev Components and guards must be contracts other than the vault. An EIP-7702 account,
     /// whose code is a delegation designator, is refused: its key holder can replace that code
-    /// without notice.
+    /// without notice. The vault is checked before the code size, which is still zero while the
+    /// constructor runs.
     function _requireContract(address account) private view {
+        if (account == address(this)) revert InvalidContract(account);
         uint256 size = account.code.length;
         if (size == 0) revert NotAContract(account);
-        if (account == address(this) || (size == 23 && bytes3(account.code) == 0xef0100)) {
-            revert InvalidContract(account);
-        }
+        if (size == 23 && bytes3(account.code) == 0xef0100) revert InvalidContract(account);
     }
 
     /// @dev Only high-precision tokens may leave up to ten base units. Low-decimal assets must be
