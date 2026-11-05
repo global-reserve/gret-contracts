@@ -238,14 +238,14 @@ liquidation. For a registered ordinary component, active or excluded, it works o
 normal supply is zero. It never rescues a component in liquidation or a historically
 written-off token. While supply is positive, active income and excluded balances cannot be
 redirected by calling them surplus; in liquidation, neither can late claim distributions.
-Removing a component under the dust rule explicitly changes it to foreign status.
-A rescue reads every component balance before and after its transfer and reverts with
-`ComponentBalanceReduced` if any other component's balance fell, so a second address over a
-component's ledger, which an issuer upgrade could create, cannot move registered backing.
-Each read gets 200,000 gas and copies only the first word of the answer. A component whose
-read reverts, answers with less than one word or needs more gas counts as zero before the
-transfer, so it is not compared; neither it nor an oversized answer blocks rescues of other
-tokens.
+Removing a component under the dust rule explicitly changes it to foreign status. A rescue
+reads every component balance before its transfer and, after it, reads again every other
+component whose first read was positive, reverting with `ComponentBalanceReduced` if any of
+them fell, so a second address over a component's ledger, which an issuer upgrade could create,
+cannot move registered backing. Each read gets 200,000 gas and copies only the first word of
+the answer. A component whose read reverts, answers with less than one word or needs more gas
+counts as zero before the transfer, so it is not compared; neither it nor an oversized answer
+blocks rescues of other tokens.
 
 ### Eligibility contract
 
@@ -322,11 +322,11 @@ payout = rights                     when B >= owed
 ```
 
 A successful nonzero claim stores `nextBasis`, consumes `rights` in both ledgers
-(`consumedRights[account][i]` and `totalConsumedRights`), records the actual payout in
-`totalPaid`, then transfers it. Failed reads, transfers or
-minimum-output checks revert all these changes. Zero converted shares return a zero quote
-without reading the token. A zero payout leaves the right unconsumed. `minAmount` lets a
-holder refuse a cut; a successful haircut consumes its full nominal right.
+(`consumedRights[account][i]` and `totalConsumedRights`), records the requested payout, after
+any cut, in `totalPaid`, then transfers it. Failed reads, transfers or minimum-output checks
+revert all these changes. Zero converted shares return a zero quote without reading the token.
+A zero payout leaves the right unconsumed. `minAmount` lets a holder refuse a cut; a successful
+haircut consumes its full nominal right.
 
 This automatically incorporates later income for all frozen shares, including unconverted
 shares and accounts that already claimed. After everyone settles, a later receipt can open
@@ -386,12 +386,12 @@ balances and supply.
   live income/losses, activation, fees or swaps changing a previously observed ratio. Tight
   limits may revert; a quote is not a reservation of a balance or basket state.
 - `ReentrancyGuardTransient` relies on Cancun/EIP-1153. It guards mint, both redemptions,
-  swaps, rescue, liquidation activation, conversion and claims, component list/state
-  mutations, initial amounts and `applyFees`. Sensitive accounting views reject callbacks.
-  Proposals and cancellations (including an immediate fee reduction through `proposeFees`),
-  appointments of the rebalancer, guard and eligibility contract, the fee recipient, the mint
-  pause, rebalancer revocation and eligibility removal are not guarded:
-  they transfer no tokens and retain their authorization checks. A reduction made by
+  swaps, rescue, liquidation activation, conversion and claims, component list/state mutations,
+  initial amounts and `applyFees`. Sensitive accounting views reject callbacks. Proposals and
+  cancellations (including an immediate fee reduction through `proposeFees`), appointments of
+  the rebalancer, guard and eligibility contract, the governance handover (`acceptGovernance`),
+  the fee recipient, the mint pause, rebalancer revocation and eligibility removal are not
+  guarded: they transfer no tokens and retain their authorization checks. A reduction made by
   governance from a callback can only lower the fee of a mint in progress. GRET transfers
   cannot change already converted rights and cannot send GRET to the vault.
 - The liquidation denominator is frozen once, but bases are established separately at the
@@ -554,10 +554,11 @@ design decision and must be made here first.
   every rotation through it would then need governance to reactivate it, while
   `deactivateEmptyComponent` already excludes it at once. In liquidation, a balance where every
   pending payout rounds to zero stays until more arrives.
-- **Initial amounts are upkeep.** Adding, removing or writing off components does not update
-  them, and they matter only when the supply returns to zero: a restart then contributes the
-  old weights, and if no active component has a positive initial amount the first mint reverts
-  with `EmptyBasket` until governance sets them.
+- **Initial amounts are upkeep.** Adding, removing or writing off a component changes only that
+  component's entry (a new one starts at zero, a removed one leaves, a written-off one is
+  cleared) and does not rebalance the others. Initial amounts matter only when the supply
+  returns to zero: a restart then contributes the old weights, and if no active component has a
+  positive initial amount the first mint reverts with `EmptyBasket` until governance sets them.
 - **Some liquidation rights may never be paid.** Rights over a component that never transfers
   again stay pending, and GRET held by contracts that cannot call `convertToClaims` stays
   unconverted. Late recoveries are shared pro rata, not targeted to whoever took a cut.
