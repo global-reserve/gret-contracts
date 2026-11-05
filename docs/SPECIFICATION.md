@@ -1,6 +1,6 @@
 # GRET specification
 
-Updated on November 4, 2026. This document states what the contracts in `contracts/` must do.
+Updated on November 5, 2026. This document states what the contracts in `contracts/` must do.
 The current source has not been deployed. The pilot vault deployed on Ethereum mainnet on
 October 27, 2026 runs an earlier, immutable version, which kept a recognized-reserve ledger
 updated by governance `sync`; [PILOT.md](PILOT.md) records that deployment.
@@ -20,8 +20,8 @@ pilot governance is a wallet. The proposed progression is Safe, then a timelock,
 Governor with a separate VORA voting token; those contracts and voting parameters are not
 implemented or decided. GRET carries no votes.
 
-The contracts have not been independently audited. Mocks are not proof of issuer
-compatibility; fork results are specific to their block and code versions.
+Mocks are not proof of issuer compatibility; fork results are specific to their block and code
+versions.
 
 ## Core rules
 

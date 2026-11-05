@@ -35,7 +35,9 @@ Out of scope:
 
 ## Status
 
-The contracts have had internal reviews, not an independent audit. Issues that were fixed
-are not listed; the limitations accepted by design are described in
+An AI model audited this source at tag `audit-2026-11` at the project's request. Its report,
+[`docs/audits/2026-11-05-ai-audit.md`](docs/audits/2026-11-05-ai-audit.md), lists every finding,
+including those fixed since, with its status. No audit firm has reviewed the contracts. The
+limitations accepted by design are described in
 [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md#known-limitations). Nothing so far clears the
 vault for material third-party capital.
