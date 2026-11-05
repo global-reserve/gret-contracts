@@ -468,6 +468,38 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vault.redeem(dust, ALICE, _pair(0, 0), 0);
     }
 
+    /// Anyone can mint 1 wei of GRET for a few base units and send it where it can never move.
+    /// Nobody can then hold every GRET, so Bob, the last holder, cannot redeem his last GRET
+    /// normally, at any time; only liquidation, which only governance can activate, releases it.
+    function test_unmovableDustHoldsBackTheLastGretUntilLiquidation() public {
+        vm.prank(BOB);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
+        healthy.mint(CAROL, 10);
+        faulty.mint(CAROL, 10);
+        vm.startPrank(CAROL);
+        healthy.approve(address(vault), type(uint256).max);
+        faulty.approve(address(vault), type(uint256).max);
+        vault.mint(1, CAROL, _pair(10, 10), 1, 0);
+        vault.transfer(address(0xdEaD), 1);
+        vm.stopPrank();
+
+        vm.prank(ALICE);
+        vault.redeem(SHARE, ALICE, _pair(0, 0), 0);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.SupplyBelowMinimum.selector, 1));
+        vm.prank(BOB);
+        vault.redeem(SHARE, BOB, _pair(0, 0), 0);
+
+        vm.prank(GOVERNANCE);
+        vault.activateLiquidation();
+        vm.startPrank(BOB);
+        vault.convertToClaims(SHARE);
+        uint256 paidHealthy = vault.claim(0, BOB, 0);
+        uint256 paidFaulty = vault.claim(1, BOB, 0);
+        vm.stopPrank();
+        assertApproxEqAbs(paidHealthy, 2e18, 10);
+        assertApproxEqAbs(paidFaulty, 5e18, 10);
+    }
+
     /// Fee GRET below 1 GRET held by the recipient keeps the last holder from leaving in full,
     /// even after both fees are cut to zero, until the recipient hands it over.
     function test_feeRecipientHoldsBackLastHolder() public {

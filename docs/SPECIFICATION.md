@@ -65,7 +65,9 @@ compatibility; fork results are specific to their block and code versions.
   `previewRedeemSkipping` quotes this exit without calling skipped tokens.
 - **Supply floor:** normal redemption leaves either zero or at least `MIN_SUPPLY = 1e18`.
   Fee shares remain outstanding, but a redemption of the whole supply pays no fee, so a holder
-  of every GRET can always leave in full.
+  of every GRET can always leave in full. GRET that can never move, which anyone can create
+  for a few base units, keeps anyone from holding every GRET; the last GRET then leaves only
+  through liquidation.
   Liquidation permits conversion below that floor and eventually zero unconverted supply.
 - **Mint pause only:** governance can pause/resume minting immediately; executing a write-off
   and a skipping redemption that leaves zero supply also pause it. Normal redemption is never
@@ -417,10 +419,11 @@ boolean alone is not a recovery guarantee.
   Registered components are protected while shares or liquidation rights exist; historically
   written-off tokens are always protected. A swap requires incoming value and guard approval.
 - Exercise issuer freezes, bad reads/return data, transfer failures, callbacks, loss/recovery
-  timing, different claim orders, minters/secondary holders, last exits, rounding and donations.
-  Without an eligibility contract, healthy exits must remain possible without cooperation
-  from other holders or the admin; with one, they also depend on its rules, which take effect
-  only after a notice that lets holders leave first.
+  timing, different claim orders, minters/secondary holders, last exits, rounding and
+  donations. Without an eligibility contract, healthy exits must remain possible without
+  cooperation from other holders or the admin, except the last GRET that the supply floor holds
+  back (see Known limitations); with one, they also depend on its rules, which take effect only
+  after a notice that lets holders leave first.
 - Tests, randomized sequences and reviews reduce risk; they do not prove the absence of bugs.
   An independent audit is pending before third-party funds. Mocks and fork observations
   cannot promise compatibility with future issuer upgrades.
@@ -514,7 +517,10 @@ design decision and must be made here first.
   refused; selling GRET remains.
 - **The supply floor can hold back the last holders.** A fraction of GRET held elsewhere, from
   a tiny mint or as fee GRET, keeps the others from redeeming the last GRET normally until it
-  is handed over; whoever then holds every GRET leaves without a fee. Liquidation lets every
+  is handed over; whoever then holds every GRET leaves without a fee. It may never be handed
+  over: anyone can mint a few wei of GRET for a few base units of each component and send them
+  to an address that cannot move them, and the last GRET, at most 1 GRET in aggregate, then
+  leaves only through liquidation, which only governance can activate. Liquidation lets every
   holder exit.
 - **Minimums bound what the vault sends, not what arrives.** A token that charges the
   recipient delivers less than `minAmountsOut` or `minAmount`, and a token that reports a
