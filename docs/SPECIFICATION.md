@@ -204,11 +204,12 @@ Guard limits and price assumptions:
 
 Rebalancer and guard appointments wait seven days and expire seven days later. The proposed
 rebalancer accepts its own appointment; anyone may apply a ready guard. Governance may revoke
-the rebalancer immediately. The guard cannot be removed, only replaced by another contract
-after the same notice. The notice gives holders time to redeem, skipping a component if
-necessary. A captured governance can appoint a malicious guard after the notice. The notice
-binds an address: a guard or component behind an upgradeable proxy can change its behavior
-later without one.
+the rebalancer immediately. The guard cannot be removed, only replaced after the same notice.
+Proposing the guard in place applies it again: within the week it keeps its own count, and it
+inherits nothing from an earlier week. The notice gives holders time to redeem, skipping a
+component if necessary. A captured governance can appoint a malicious guard after the notice.
+The notice binds an address: a guard or component behind an upgradeable proxy can change its
+behavior later without one.
 
 ## Fees and governance
 
