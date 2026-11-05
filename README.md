@@ -206,7 +206,8 @@ over.
 `ChainlinkPriceGuard` is the first price guard. It values both sides of each swap with one
 Chainlink feed per token and refuses a token without a fresh price, a swap that loses more
 than 2% of what the vault sells, and swaps that would take more than 2% of the vault's value in
-a week, each loss measured against the vault's value at that moment. It has
+a week, each loss measured against the vault's value at that moment. A token whose decimals
+change after the guard is deployed can no longer be swapped. It has
 no owner: its feeds and limits are fixed at deployment, and changing them means appointing
 another guard with the 7-day wait; the new guard continues the week's loss count of the one it
 replaces. It ignores the `guardData` the vault forwards from the rebalancer. Mint, redemption and
@@ -248,7 +249,7 @@ test/GRETVault.accounting.t.sol      Live balances with short deliveries, losses
 test/GRETVault.components.t.sol      Component removal keeps balances tied to token addresses
 test/GRETVault.exits.t.sol           Exits with a redemption fee, unreadable balances and skipped components
 test/GRETVault.governance.t.sol      Write-offs, basket versions, swap losses and proposal events
-test/GRETVault.guard.t.sol           Guard replacement, decimals, written-off components and lagging feeds
+test/GRETVault.guard.t.sol           Guard replacement, written-off components and lagging feeds
 test/GRETVault.eligibility.t.sol     The optional eligibility contract: notice, decisions, broken answers and removal
 test/GRETVault.liquidation.t.sol     Liquidation conservation and shortfall claims under fuzzing
 test/GRETVault.fuzz.t.sol            Property fuzzing in Solidity

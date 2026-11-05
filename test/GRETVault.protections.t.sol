@@ -10,7 +10,9 @@ import {MockFaultyERC20} from "../contracts/mocks/MockFaultyERC20.sol";
 import {MockPriceGuard} from "../contracts/mocks/MockPriceGuard.sol";
 import {ChainlinkPriceGuard, IChainlinkFeed} from "../contracts/ChainlinkPriceGuard.sol";
 import {MockAggregator} from "../contracts/mocks/MockAggregator.sol";
-import {GRETVaultCase, CaseToken, SenderSurchargeToken, GasBurnerToken} from "./helpers/GRETVaultCase.sol";
+import {
+    GRETVaultCase, CaseToken, SenderSurchargeToken, GasBurnerToken, RedenominatingToken
+} from "./helpers/GRETVaultCase.sol";
 
 /// @dev A component whose ledger can also be moved through a second address, as an issuer upgrade
 /// could create.
@@ -652,6 +654,71 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(vault.balanceOf(BOB), 0);
         assertEq(healthy.balanceOf(BOB) - healthyBefore, 2e18);
         assertEq(faulty.balanceOf(BOB) - faultyBefore, 5e18);
+    }
+
+    /// The guard reads each token's decimals at deployment. If an issuer changes them and rescales
+    /// the balances, keeping their value, those decimals would misprice every unit by a power of
+    /// ten. The guard refuses to value the token instead: swaps of it revert in either direction,
+    /// and it counts as zero in the vault's value. H and O are worth $100 and R $40.
+    function test_guardRefusesTokenWhoseDecimalsChanged() public {
+        MockERC20 other = new MockERC20("Other", "O", 18);
+        RedenominatingToken redenominated = new RedenominatingToken(18);
+        IERC20[] memory basket = new IERC20[](3);
+        basket[0] = healthy;
+        basket[1] = other;
+        basket[2] = IERC20(address(redenominated));
+        uint256[] memory initial = _three(1e18, 1e18, 5e18);
+        GRETVault target = new GRETVault(basket, initial, GOVERNANCE);
+        other.mint(ALICE, 1e18);
+        redenominated.mint(ALICE, 5e18);
+        other.mint(REBALANCER, 1e24);
+        redenominated.mint(REBALANCER, 1e24);
+        for (uint256 i; i < 2; ++i) {
+            vm.startPrank(i == 0 ? ALICE : REBALANCER);
+            for (uint256 j; j < 3; ++j) {
+                basket[j].approve(address(target), type(uint256).max);
+            }
+            vm.stopPrank();
+        }
+        vm.prank(ALICE);
+        target.mint(SHARE, ALICE, initial, SHARE, 0);
+
+        MockAggregator usd100 = new MockAggregator(8, 100e8);
+        MockAggregator usd40 = new MockAggregator(8, 40e8);
+        address[] memory tokens = new address[](3);
+        IChainlinkFeed[] memory feeds = new IChainlinkFeed[](3);
+        for (uint256 i; i < 3; ++i) {
+            tokens[i] = address(basket[i]);
+            feeds[i] = IChainlinkFeed(address(i == 2 ? usd40 : usd100));
+        }
+        ChainlinkPriceGuard guard =
+            new ChainlinkPriceGuard(address(target), tokens, feeds, _three(1 days, 1 days, 1 days));
+        _appoint(target, address(guard));
+        usd100.setAnswer(100e8);
+        usd40.setAnswer(40e8);
+        assertEq(guard.valueOf(address(redenominated), 5e18), 200e18);
+
+        address[] memory holders = new address[](2);
+        holders[0] = address(target);
+        holders[1] = REBALANCER;
+        redenominated.redenominate(6, holders); // the vault's 5 R are now 5e6 units of 6 decimals
+        bytes memory refused = abi.encodeWithSelector(
+            ChainlinkPriceGuard.DecimalsChanged.selector, address(redenominated), 18, 6
+        );
+        vm.expectRevert(refused);
+        guard.valueOf(address(redenominated), 5e6);
+
+        vm.startPrank(REBALANCER);
+        // The whole R reserve for one unit of H, and all of H for one unit of R.
+        vm.expectRevert(refused);
+        target.swap(address(redenominated), 5e6, address(healthy), 1, "");
+        vm.expectRevert(refused);
+        target.swap(address(healthy), 1e18, address(redenominated), 1, "");
+        // H for O at a $1 loss counts against the $200 of H and O alone.
+        target.swap(address(healthy), 1e18, address(other), 0.99e18, "");
+        vm.stopPrank();
+        assertEq(guard.weeklyLoss(), 5e15);
+        assertEq(redenominated.balanceOf(address(target)), 5e6);
     }
 
     /// @dev Sells whole reserves back and forth, each swap losing 1.9% of what it sells, until the

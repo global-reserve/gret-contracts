@@ -187,3 +187,32 @@ contract GasBurnerToken is CaseToken {
         }
     }
 }
+
+/// @dev Models an in-place issuer upgrade that changes decimals and rescales balances, keeping value.
+contract RedenominatingToken is ERC20 {
+    uint8 private _current;
+
+    constructor(uint8 decimals_) ERC20("Redenominating", "RD") {
+        _current = decimals_;
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function decimals() public view override returns (uint8) {
+        return _current;
+    }
+
+    function redenominate(uint8 next, address[] calldata accounts) external {
+        uint8 previous = _current;
+        for (uint256 i; i < accounts.length; ++i) {
+            uint256 balance = balanceOf(accounts[i]);
+            uint256 scaled =
+                next < previous ? balance / 10 ** (previous - next) : balance * 10 ** (next - previous);
+            _burn(accounts[i], balance);
+            _mint(accounts[i], scaled);
+        }
+        _current = next;
+    }
+}

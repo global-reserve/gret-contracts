@@ -3,7 +3,6 @@ pragma solidity 0.8.38;
 
 import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 import {GRETVault} from "../contracts/GRETVault.sol";
 import {ChainlinkPriceGuard, IChainlinkFeed} from "../contracts/ChainlinkPriceGuard.sol";
@@ -12,35 +11,6 @@ import {MockAggregator} from "../contracts/mocks/MockAggregator.sol";
 import {MockERC20} from "../contracts/mocks/MockERC20.sol";
 import {MockPriceGuard} from "../contracts/mocks/MockPriceGuard.sol";
 import {GRETVaultCase} from "./helpers/GRETVaultCase.sol";
-
-/// @dev Models an in-place issuer upgrade that changes decimals and rescales balances, keeping value.
-contract RedenominatingToken is ERC20 {
-    uint8 private _current;
-
-    constructor(uint8 decimals_) ERC20("Redenominating", "RD") {
-        _current = decimals_;
-    }
-
-    function mint(address to, uint256 amount) external {
-        _mint(to, amount);
-    }
-
-    function decimals() public view override returns (uint8) {
-        return _current;
-    }
-
-    function redenominate(uint8 next, address[] calldata accounts) external {
-        uint8 previous = _current;
-        for (uint256 i; i < accounts.length; ++i) {
-            uint256 balance = balanceOf(accounts[i]);
-            uint256 scaled =
-                next < previous ? balance / 10 ** (previous - next) : balance * 10 ** (next - previous);
-            _burn(accounts[i], balance);
-            _mint(accounts[i], scaled);
-        }
-        _current = next;
-    }
-}
 
 /// @dev An issuer freeze that only stops an account from sending (USDT-style blacklist on the sender).
 contract SenderFreezeToken is MockERC20 {
@@ -442,64 +412,6 @@ contract GRETVaultGuardTest is GRETVaultCase {
             (, vaultValue,) = abi.decode(logs[i].data, (uint256, uint256, uint256));
         }
         assertEq(vaultValue, activeValue);
-    }
-
-    // ------------------------------------------------------------------------------------------
-    // Token decimals are read once, at deployment
-    // ------------------------------------------------------------------------------------------
-
-    function test_decimalsDownLetsReserveGoForDust() public {
-        MockERC20 h = new MockERC20("H", "H", 18);
-        RedenominatingToken r = new RedenominatingToken(18);
-        GRETVault target = _twoTokenVault(h, MockERC20(address(r)), 2e18, 5e18);
-        MockAggregator hf = new MockAggregator(8, 100e8);
-        MockAggregator rf = new MockAggregator(8, 40e8);
-        ChainlinkPriceGuard g = _guardFor(target, address(h), address(r), hf, rf);
-        _appoint(target, address(g));
-        hf.setAnswer(100e8);
-        rf.setAnswer(40e8);
-
-        address[] memory holders = new address[](3);
-        holders[0] = address(target);
-        holders[1] = REBALANCER;
-        holders[2] = ALICE;
-        r.redenominate(6, holders); // value kept: 5e6 units of 6 decimals are still 5 R ($200)
-        assertEq(r.balanceOf(address(target)), 5e6);
-        assertEq(g.valueOf(address(r), 5e6), 2e8); // $2e-10 instead of $200
-
-        uint256 rBefore = r.balanceOf(REBALANCER);
-        vm.prank(REBALANCER);
-        target.swap(address(r), 5e6, address(h), 2e6, "");
-        assertEq(r.balanceOf(REBALANCER) - rBefore, 5e6); // 5 whole R, $200
-        assertEq(target.reserves()[1], 0);
-        assertEq(target.reserves()[0], 2e18 + 2e6);
-        assertEq(g.weeklyLoss(), 0);
-    }
-
-    function test_decimalsUpLetsOtherReservesGoForDust() public {
-        MockERC20 h = new MockERC20("H", "H", 18);
-        RedenominatingToken u = new RedenominatingToken(6);
-        GRETVault target = _twoTokenVault(h, MockERC20(address(u)), 2e18, 5e6);
-        MockAggregator hf = new MockAggregator(8, 100e8);
-        MockAggregator uf = new MockAggregator(8, 40e8);
-        ChainlinkPriceGuard g = _guardFor(target, address(h), address(u), hf, uf);
-        _appoint(target, address(g));
-        hf.setAnswer(100e8);
-        uf.setAnswer(40e8);
-
-        address[] memory holders = new address[](3);
-        holders[0] = address(target);
-        holders[1] = REBALANCER;
-        holders[2] = ALICE;
-        u.redenominate(18, holders);
-        assertEq(u.balanceOf(address(target)), 5e18);
-
-        uint256 hBefore = h.balanceOf(REBALANCER);
-        vm.prank(REBALANCER);
-        target.swap(address(h), 2e18, address(u), 5e6, ""); // 5e6 units = 5e-12 U now
-        assertEq(h.balanceOf(REBALANCER) - hBefore, 2e18); // all of H, $200
-        assertEq(target.reserves()[0], 0);
-        assertEq(g.weeklyLoss(), 0);
     }
 
     // ------------------------------------------------------------------------------------------

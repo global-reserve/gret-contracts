@@ -37,13 +37,16 @@ interface IGRETVaultView {
 /// that loses more than 2% of what the vault sells, or one that would make the week's swaps take
 /// more than 2% of the vault's value. Each loss counts as the share of the vault it takes when it
 /// happens, which is what every GRET loses, so mints and redemptions in between do not stretch the
-/// limit. A token without a feed, or whose price is stale, cannot be swapped. It has no owner:
-/// tokens, feeds and limits are fixed at deployment. Changing them means deploying another guard,
-/// which the vault applies only after its seven-day wait. A replacement continues the week's count
-/// of the guard it replaced, so it does not open a second budget.
+/// limit. A token without a feed, whose price is stale, or whose decimals changed after the guard
+/// was deployed, cannot be swapped. It has no owner: tokens, feeds and limits are fixed at
+/// deployment. Changing them means deploying another guard, which the vault applies only after its
+/// seven-day wait. A replacement continues the week's count of the guard it replaced, so it does
+/// not open a second budget.
 /// @dev Each feed must quote one whole token in US dollars, with nothing to convert. A loss the
 /// feeds do not see, such as a token that trades below the asset its feed prices, is not limited.
-/// Mint, redemption and liquidation never call the guard.
+/// Neither is a split or a multiplier change that alters what one unit of a token is worth before
+/// its feed prices the new unit: governance revokes the rebalancer around such changes. Mint,
+/// redemption and liquidation never call the guard.
 contract ChainlinkPriceGuard is IPriceGuard {
     /// @notice Highest loss of a single swap, in basis points of the value sold: 2%.
     uint256 public constant MAX_SWAP_LOSS = 200;
@@ -60,6 +63,7 @@ contract ChainlinkPriceGuard is IPriceGuard {
         IChainlinkFeed feed;
         /// @dev Oldest price accepted, in seconds since its last update.
         uint256 maxAge;
+        /// @dev Read at deployment; a token whose decimals later differ is refused.
         uint8 tokenDecimals;
     }
 
@@ -92,6 +96,7 @@ contract ChainlinkPriceGuard is IPriceGuard {
     error NoFeed(address token);
     error InvalidPrice(address token, int256 answer);
     error StalePrice(address token, uint256 updatedAt);
+    error DecimalsChanged(address token, uint8 expected, uint8 current);
     error SwapLossTooHigh(uint256 soldValue, uint256 boughtValue);
     error WeeklyLossTooHigh(uint256 weeklyLoss, uint256 limit);
 
@@ -147,7 +152,8 @@ contract ChainlinkPriceGuard is IPriceGuard {
     }
 
     /// @notice Value of `amount` units of `token` in US dollars with 18 decimals, rounded down.
-    /// Reverts if the token has no feed or its price is stale or not positive.
+    /// Reverts if the token has no feed, its price is stale or not positive, or its decimals
+    /// differ from those read at deployment.
     function valueOf(address token, uint256 amount) public view returns (uint256) {
         return _value(token, amount, Math.Rounding.Floor);
     }
@@ -173,7 +179,13 @@ contract ChainlinkPriceGuard is IPriceGuard {
         ) {
             revert StalePrice(token, updatedAt);
         }
-        uint256 scale = 10 ** (uint256(config.tokenDecimals) + feed.decimals());
+        // An issuer that changes the decimals changes what one unit is worth, so the cached scale
+        // would misprice every amount by a power of ten.
+        uint8 tokenDecimals = IERC20Metadata(token).decimals();
+        if (tokenDecimals != config.tokenDecimals) {
+            revert DecimalsChanged(token, config.tokenDecimals, tokenDecimals);
+        }
+        uint256 scale = 10 ** (uint256(tokenDecimals) + feed.decimals());
         return Math.mulDiv(amount, uint256(answer) * 1e18, scale, rounding);
     }
 
@@ -192,7 +204,8 @@ contract ChainlinkPriceGuard is IPriceGuard {
 
     /// @dev Live active backing immediately before the swap: the incoming buy amount is removed in
     /// token units before valuation. Each unreadable or unpriced component counts as zero, whether
-    /// its balance read reverts or answers with less than one word.
+    /// its balance read reverts or answers with less than one word, its price is unusable or its
+    /// decimals changed.
     function _vaultValue(address buy, uint256 received) private view returns (uint256 total) {
         address[] memory tokens = IGRETVaultView(vault).components();
         for (uint256 i; i < tokens.length; ++i) {

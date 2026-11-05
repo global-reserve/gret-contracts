@@ -179,6 +179,9 @@ Guard limits and price assumptions:
   backing, rounded up; the sum must be at most 2% during each fixed seven-day Unix epoch.
   Fair/favorable trades do not consume the budget. Deposits/withdrawals do not reset it.
 - The guard has no owner; feeds, max ages, cached token decimals and limits are immutable.
+  Every valuation reads the token's decimals again: a token whose decimals differ from the
+  cached ones cannot be valued, so swaps of it revert and it counts as zero in the vault's
+  value until another guard is applied.
   A replacement continues the weekly count: the vault records the guard it replaced as
   `previousPriceGuard`, and on its first loss in a week the new guard starts from what that
   guard recorded in the same week. A predecessor that reports another week, or does not
@@ -186,8 +189,10 @@ Guard limits and price assumptions:
   notice lets at most one replacement take effect per week, so one predecessor is enough.
   Losses on both sides of a week boundary can still reach about 4% within seven days.
 - Feeds may lag, price an underlying rather than the token's market peg, or become stale on
-  weekends. Six current components lack configured Ethereum feeds; they cannot be traded by
-  this guard. Neither price accuracy nor issuer solvency is guaranteed.
+  weekends. A split or multiplier change alters what one unit of a token is worth when the
+  issuer applies it, not when its feed moves. Six current components lack configured Ethereum
+  feeds; they cannot be traded by this guard. Neither price accuracy nor issuer solvency is
+  guaranteed.
 
 Rebalancer and guard appointments wait seven days and expire seven days later. The proposed
 rebalancer accepts its own appointment; anyone may apply a ready guard. Governance may revoke
@@ -428,10 +433,13 @@ them, and an assessment of the vault should take them as part of its trust model
 - **Monitor issuers, balances and prices.** Watch issuer notices and corporate actions,
   component balances against mint, redemption, swap and claim flows, `LossRecorded`, and each
   priced token's market price against its feed. Revoke the rebalancer after an unexpected loss
-  or a depeg. Income paid in another token or requiring an issuer claim is not counted
+  or a depeg, and before a scheduled split, multiplier change or any other change of what one
+  unit of a priced component represents; propose it again only once the feed prices the new
+  unit. Income paid in another token or requiring an issuer claim is not counted
   automatically.
 - **Time distributions.** Before a known distribution or multiplier change, consider pausing
-  minting so that entrants right before it do not share it; earlier entrants still do.
+  minting so that entrants right before it do not share it; earlier entrants still do. A
+  multiplier change also requires revoking the rebalancer, as above.
 - **Send swaps privately.** The rebalancer sends every `swap` through a private RPC, so nobody
   can redeem or mint around it in the same block.
 - **Write off only what stopped working.** Cancel a pending write-off if the component
@@ -472,9 +480,13 @@ design decision and must be made here first.
   proposed earlier is executed or the last holder leaves by skipping, which pauses it for good.
 - **The rebalancer chooses the price within the guard's view.** The guard bounds only the
   losses its feeds can see. Feeds may lag within their deviation thresholds, price an
-  underlying while the token trades below it, or go stale. Weeks are fixed epochs, so losses
-  on both sides of a boundary can reach about 4% within seven days. A guard behind an
-  upgradeable proxy can change its rules after its notice.
+  underlying while the token trades below it, or go stale. A split or multiplier change makes
+  one unit of a token worth a different amount from the moment the issuer applies it, while its
+  feed follows the market: until both agree, the guard misprices the token by the split ratio,
+  a swap that looks fair records no loss, and one swap can take a whole reserve. Revoking the
+  rebalancer before such a change prevents it. Weeks are fixed epochs, so losses on both sides
+  of a boundary can reach about 4% within seven days. A guard behind an upgradeable proxy can
+  change its rules after its notice.
 - **Allocation follows timing.** Whoever holds GRET when value arrives shares it: future
   income, a favorable swap, a reactivated component or an asset another holder skipped. A
   holder can redeem before a losing swap and return afterwards. A last skipping exit pauses
@@ -542,7 +554,7 @@ These items are proposals: none is approved, implemented or part of a deployment
 
 - Independent audit and issuer/fork verification before third-party funds.
 - Governance implementation and key recovery; the current governance is a wallet.
-- Feed coverage, market-peg monitoring and guard improvements, such as following token-decimal
-  changes.
+- Feed coverage, market-peg monitoring and guard improvements, such as a cap on the value that
+  swaps which look fair can move, which would also bound a mispricing the feeds do not see.
 - Deploying this source, and any migration from the October 27 pilot, requires a concrete
   deployment and funding plan.
