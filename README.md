@@ -32,7 +32,7 @@ A new vault and compatible guard require a separate deployment and migration dec
   paused, though an appointed eligibility contract decides who may redeem.
 - **Bounded rebalancing.** A rebalancer exchanges one component for another, and every swap
   must pass a price guard. `ChainlinkPriceGuard` refuses a swap that loses more than 2%, or
-  one that would take more than 2% of the vault's value in a week.
+  one that would take more than 2% of the vault's priced backing in a week.
 - **Open by default.** Anyone may mint and redeem. Governance may appoint an eligibility
   contract, after the same 7-day notice, that decides who may; it can remove it at once.
 - **An exit for everyone.** Governance can start an irreversible liquidation in which every
@@ -205,8 +205,9 @@ over; an expired proposal stays there until it is cancelled or replaced.
 
 `ChainlinkPriceGuard` is the first price guard. It values both sides of each swap with one
 Chainlink feed per token and refuses a token without a fresh price, a swap that loses more
-than 2% of what the vault sells, and swaps that would take more than 2% of the vault's value in
-a week, each loss measured against the vault's value at that moment. A token whose decimals
+than 2% of what the vault sells, and swaps that would take more than 2% of the vault's priced
+backing in a week: its active, readable components with a feed, measured at the moment of each
+loss. A token whose decimals
 change after the guard is deployed can no longer be swapped. It has
 no owner: its feeds and limits are fixed at deployment, and changing them means appointing
 another guard with the 7-day wait; the new guard continues the week's loss count of the one it
