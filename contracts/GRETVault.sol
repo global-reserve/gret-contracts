@@ -45,6 +45,9 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// @notice Highest number of components. Mint and redemption visit every component in one
     /// transaction, so the cap keeps them within Ethereum's per-transaction gas limit.
     uint256 public constant MAX_COMPONENTS = 128;
+    /// @notice Highest number of tokens that may be announced and waiting to join at once, so that
+    /// an exit prepared in advance can list every one of them.
+    uint256 public constant MAX_PENDING_ANNOUNCEMENTS = 128;
     /// @notice Base units a component may deliver below the requested amount on mint or on a swap
     /// purchase. Covers tokens that convert amounts to internal shares (xStocks) while their
     /// multiplier stays below about ten; transfer fees still revert.
@@ -153,6 +156,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// prepared for, so their limits never land on another token. Redemption minima that are all
     /// zero, or none, limit nothing and are not tied to a version.
     uint256 public basketVersion;
+    /// @notice Tokens announced and neither added nor cancelled, expired announcements included.
+    uint256 public pendingAnnouncements;
 
     /// @notice Set by `activateLiquidation` and never cleared.
     bool public liquidationActive;
@@ -235,6 +240,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     error SameComponent(address token);
     error SwapExceedsReserve(address token, uint256 amount, uint256 reserve);
     error NoPendingComponent(address token);
+    error TooManyAnnouncements();
     error ComponentNotEmpty(address token, uint256 balance);
     error EmptyBasket();
     error NoPendingWriteOff(address token);
@@ -364,8 +370,9 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// review what was left before a bootstrap takes it.
     /// @dev Skipped components are not called at all, so no token can block this exit. It keeps the
     /// 7-day notice of a new rebalancer meaningful: whoever may redeem can always leave with every
-    /// component that still works. Prepared with no positive minimum, and skipping every token
-    /// announced for the basket, it does not depend on the basket staying as it was.
+    /// component that still works. Prepared with no positive minimum, skipping every token
+    /// announced for the basket and every component the holder does not want, excluded ones
+    /// included, it does not depend on the basket staying as it was for the following seven days.
     function redeemSkipping(
         uint256 shares,
         address to,
@@ -617,10 +624,15 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
 
     /// @notice Announces a token for the basket. It can join only after `BASKET_CHANGE_DELAY`, so
     /// holders see it coming before the rebalancer can buy it with the reserves. Announcing it
-    /// again restarts the wait. The vault itself and EIP-7702 accounts are refused. Named apart
-    /// from a voting governance's `propose`.
+    /// again restarts the wait. At most `MAX_PENDING_ANNOUNCEMENTS` tokens wait at once, so that a
+    /// holder can skip every one of them in an exit prepared in advance. The vault itself and
+    /// EIP-7702 accounts are refused. Named apart from a voting governance's `propose`.
     function announceComponent(address token) external onlyGovernance {
         _requireNewComponent(token);
+        if (componentReadyAt[token] == 0) {
+            if (pendingAnnouncements == MAX_PENDING_ANNOUNCEMENTS) revert TooManyAnnouncements();
+            ++pendingAnnouncements;
+        }
         uint256 readyAt = block.timestamp + BASKET_CHANGE_DELAY;
         componentReadyAt[token] = readyAt;
         emit ComponentAnnounced(token, readyAt);
@@ -630,6 +642,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     function cancelComponentAnnouncement(address token) external onlyGovernance {
         if (componentReadyAt[token] == 0) revert NoPendingComponent(token);
         delete componentReadyAt[token];
+        --pendingAnnouncements;
         emit ComponentAnnouncementCancelled(token);
     }
 
@@ -647,6 +660,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         if (count == MAX_COMPONENTS) revert InvalidComponentCount(count + 1);
 
         delete componentReadyAt[token];
+        --pendingAnnouncements;
         _pushComponent(token, 0);
         excluded[token] = true;
         ++basketVersion;

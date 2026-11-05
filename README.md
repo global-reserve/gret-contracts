@@ -176,7 +176,7 @@ Functions of `GRETVault`, besides the standard ERC-20 ones and EIP-2612 `permit`
 | `acceptRebalancer()` | Proposed rebalancer | Takes over the role, 7 to 14 days after the proposal; there is none at deployment |
 | `proposePriceGuard(guard)` / `cancelPriceGuardProposal()` | Governance | Proposes or discards the contract that must accept every swap; never the vault or an EIP-7702 account |
 | `applyPriceGuard()` | Anyone | Applies the proposed guard, 7 to 14 days after the proposal; there is none at deployment, and without one there are no swaps |
-| `announceComponent(token)` / `cancelComponentAnnouncement(token)` | Governance | Announces or discards a new component; never the vault or an EIP-7702 account |
+| `announceComponent(token)` / `cancelComponentAnnouncement(token)` | Governance | Announces or discards a new component; at most 128 waiting at once; never the vault or an EIP-7702 account |
 | `addComponent(token)` | Anyone | Adds an announced component, 7 to 14 days later, initially excluded |
 | `removeComponent(token)` | Governance | Removes an empty ordinary component under the bounded dust rule, never a written-off one; later indices shift |
 | `setMintPaused(paused)` | Governance | Pauses or resumes minting at once; a write-off and a skipping exit that empties the supply also pause it; redemption is never paused |

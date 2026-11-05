@@ -874,6 +874,67 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(guard.weeklyLoss(), Math.mulDiv(1e18, 1e18, 300e18, Math.Rounding.Ceil));
     }
 
+    /// At most 128 tokens can be announced and waiting at once. An addition or a cancellation frees a
+    /// slot, and announcing a waiting token again restarts its wait without taking another.
+    function test_pendingAnnouncementsAreCapped() public {
+        uint256 max = vault.MAX_PENDING_ANNOUNCEMENTS();
+        address[] memory announced = new address[](max);
+        for (uint256 i; i < max; ++i) {
+            announced[i] = address(new EmptyComponent());
+        }
+        address extra = address(new EmptyComponent());
+        vm.startPrank(GOVERNANCE);
+        for (uint256 i; i < max; ++i) {
+            vault.announceComponent(announced[i]);
+        }
+        assertEq(vault.pendingAnnouncements(), max);
+        vm.expectRevert(GRETVault.TooManyAnnouncements.selector);
+        vault.announceComponent(extra);
+        vault.announceComponent(announced[0]);
+        vault.cancelComponentAnnouncement(announced[1]);
+        vault.announceComponent(extra);
+        vm.stopPrank();
+        assertEq(vault.pendingAnnouncements(), max);
+        vm.warp(block.timestamp + 7 days);
+        vault.addComponent(announced[2]);
+        assertEq(vault.pendingAnnouncements(), max - 1);
+    }
+
+    /// With every slot taken, an exit prepared in advance lists all 128 waiting tokens and still fits
+    /// well within a transaction. When governance adds one of them and activates it at once, with
+    /// every call to it reverting, the exit goes through.
+    function test_preparedExitListingEveryAnnouncementSurvivesTheirActivation() public {
+        vm.prank(BOB);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
+        uint256 max = vault.MAX_PENDING_ANNOUNCEMENTS();
+        MockFaultyERC20 joining = new MockFaultyERC20("Joining", "J", 18);
+        address[] memory skipped = new address[](max);
+        skipped[0] = address(joining);
+        for (uint256 i = 1; i < max; ++i) {
+            skipped[i] = address(new EmptyComponent());
+        }
+        vm.startPrank(GOVERNANCE);
+        for (uint256 i; i < max; ++i) {
+            vault.announceComponent(skipped[i]);
+        }
+        vm.stopPrank();
+        uint256 prepared = vault.basketVersion();
+
+        vm.warp(block.timestamp + 7 days);
+        vault.addComponent(address(joining));
+        joining.setFault(MockFaultyERC20.Fault.RevertOnBalanceOf);
+        vm.prank(GOVERNANCE);
+        vault.activateComponent(address(joining));
+
+        uint256 healthyBefore = healthy.balanceOf(BOB);
+        vm.prank(BOB);
+        uint256 gasBefore = gasleft();
+        vault.redeemSkipping(SHARE, BOB, new uint256[](0), skipped, prepared);
+        assertLt(gasBefore - gasleft(), 2_000_000);
+        assertEq(vault.balanceOf(BOB), 0);
+        assertEq(healthy.balanceOf(BOB) - healthyBefore, 2e18);
+    }
+
     /// @dev Sells whole reserves back and forth, each swap losing 1.9% of what it sells, until the
     /// guard refuses one for the week's limit; returns how many passed.
     function _lossySwapsUntilRefused(ChainlinkPriceGuard guard) internal returns (uint256 passed) {

@@ -89,8 +89,11 @@ EIP-7702 accounts, whose code is a delegation designator their key holder can re
 notice, are refused with `InvalidContract`, as components, price guards and eligibility
 contracts. Constructor components are active and have positive initial amounts. Governance
 announces additions; anyone may add one after seven days and before the following seven-day
-execution window expires. A new component enters **excluded**, with zero initial amount. Even
-donations cannot make it active.
+execution window expires. At most `MAX_PENDING_ANNOUNCEMENTS = 128` tokens may be announced and
+waiting at once (`pendingAnnouncements`): an addition or a cancellation frees a slot,
+announcing a waiting token again restarts its wait without taking another, and an expired
+announcement keeps its slot until it is cancelled. A new component enters **excluded**, with
+zero initial amount. Even donations cannot make it active.
 
 `activateComponent(token)`, only governance in normal mode, makes the entire balance active
 without making a token call. It is explicit, immediate and idempotent. Calling it for an
@@ -505,13 +508,15 @@ design decision and must be made here first.
   a positive minimum revert with `BasketChanged` throughout a notice. Redemptions whose minima
   are all zero are not tied to the version, but accept whatever swaps the guard allows until
   they execute. An announced token can join and be activated at once; if its calls fail, every
-  exit that does not skip it reverts; an exit prepared in advance avoids this by listing every
-  announced token. If the governance key is lost, nobody can activate liquidation, reactivate
-  components, change the basket, revoke the rebalancer, propose a new guard or replace
-  governance, while proposals made before the loss stay executable through their windows.
-  Redemption keeps working unless an eligibility contract was appointed or proposed before the
-  loss, and minting keeps working until a write-off proposed earlier is executed or the last
-  holder leaves by skipping, which pauses it for good.
+  exit that does not skip it reverts; an exit prepared in advance avoids this for seven days by
+  listing every token announced and waiting, at most 128, and every component the holder does
+  not want, excluded ones included, since governance can reactivate those at once. If the
+  governance key is lost, nobody can activate liquidation, reactivate components, change the
+  basket, revoke the rebalancer, propose a new guard or replace governance, while proposals
+  made before the loss stay executable through their windows. Redemption keeps working unless
+  an eligibility contract was appointed or proposed before the loss, and minting keeps working
+  until a write-off proposed earlier is executed or the last holder leaves by skipping, which
+  pauses it for good.
 - **The rebalancer chooses the price within the guard's view.** The guard bounds only the
   losses its feeds can see. Feeds may lag within their deviation thresholds, price an
   underlying while the token trades below it, or go stale. A split or multiplier change makes
