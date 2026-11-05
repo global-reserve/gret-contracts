@@ -432,8 +432,10 @@ them, and an assessment of the vault should take them as part of its trust model
 
 - **Admit components with care.** No transfer fees, callbacks or second addresses over the same
   balances; at least 8 decimals, since the dust and receipt allowances are fixed in base units;
-  and a usable Chainlink feed if the component will be rebalanced. Mocks do not prove an
-  issuer's compatibility; the mainnet fork tests do.
+  for a token that converts amounts to shares, a multiplier below about ten, since each
+  transfer can arrive up to about one multiplier of base units short; and a usable Chainlink
+  feed if the component will be rebalanced. Mocks do not prove an issuer's compatibility; the
+  mainnet fork tests do.
 - **Monitor issuers, balances and prices.** Watch issuer notices and corporate actions,
   component balances against mint, redemption, swap and claim flows, `LossRecorded`, and each
   priced token's market price against its feed. Revoke the rebalancer after an unexpected loss
@@ -443,7 +445,9 @@ them, and an assessment of the vault should take them as part of its trust model
   automatically.
 - **Time distributions.** Before a known distribution or multiplier change, consider pausing
   minting so that entrants right before it do not share it; earlier entrants still do. A
-  multiplier change also requires revoking the rebalancer, as above.
+  multiplier change also requires revoking the rebalancer, as above. A split that would take a
+  share-converting component's multiplier above about ten requires selling the component out or
+  writing it off first.
 - **Send swaps privately.** The rebalancer sends every `swap` through a private RPC, so nobody
   can redeem or mint around it in the same block.
 - **Write off only what stopped working.** Cancel a pending write-off if the component
@@ -516,9 +520,12 @@ design decision and must be made here first.
   recipient delivers less than `minAmountsOut` or `minAmount`, and a token that reports a
   transfer without moving anything still consumes the claimed right.
 - **The receipt tolerance is fixed in base units.** A component may arrive up to ten base units
-  short in a mint or a swap. After a severe loss leaves only a few units of a rounding
-  component, those units bound the issuance and the minter overpays the other components;
-  `minShares` lets the minter refuse.
+  short in a mint or a swap. A token that converts amounts to shares can arrive up to about one
+  multiplier of base units short, so once its multiplier exceeds about ten, part of all mints,
+  and of all swaps that buy it, revert with `UnexpectedBalance` whatever their size, until the
+  component is sold out and deactivated or written off. After a severe loss leaves only a few
+  units of a rounding component, those units bound the issuance and the minter overpays the
+  other components; `minShares` lets the minter refuse.
 - **A small mint can revert on a nearly empty rounding component.** While such a component keeps
   only a few units, a small mint asks it for one or two, which a token that converts amounts to
   shares can deliver as nothing; the mint reverts until the remainder is sold or the component

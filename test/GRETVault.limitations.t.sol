@@ -192,6 +192,43 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         assertEq(guard.valueOf(address(split), split.balanceOf(address(target))), 50_000e18);
     }
 
+    /// A token that converts amounts to shares arrives up to about one multiplier of base units
+    /// short, and the receipt tolerance is ten units. At SPYx's multiplier every mint passes; at
+    /// twenty times it, as after splits applied through the multiplier, part of the mints of
+    /// ordinary size revert with `UnexpectedBalance`.
+    function test_multiplierAboveTenBreaksTheReceiptTolerance() public {
+        assertEq(_mintsRefusedAtMultiplier(1.007474126658766e18), 0);
+        assertGt(_mintsRefusedAtMultiplier(20.14948253317532e18), 0);
+    }
+
+    /// @dev A vault of one share-converting token, bootstrapped with SPYx's pilot amount per GRET.
+    /// The multiplier is then set to `multiplier`, and Bob tries 25 mints of 0.08 to 1.98 GRET.
+    function _mintsRefusedAtMultiplier(uint256 multiplier) internal returns (uint256 refused) {
+        MultiplierToken token = new MultiplierToken();
+        token.setMultiplier(1.007474126658766e18);
+        IERC20[] memory basket = new IERC20[](1);
+        basket[0] = IERC20(address(token));
+        GRETVault single = new GRETVault(basket, _one(9.789e15), GOVERNANCE);
+        for (uint256 k; k < 2; ++k) {
+            address user = k == 0 ? ALICE : BOB;
+            token.mint(user, 1e24);
+            vm.prank(user);
+            token.approve(address(single), type(uint256).max);
+        }
+        vm.prank(ALICE);
+        single.mint(SHARE, ALICE, _one(type(uint256).max), 0, 0);
+        token.setMultiplier(multiplier);
+        for (uint256 k = 1; k <= 25; ++k) {
+            uint256 shares = SHARE * (k * 7919) / 100_000 + k * 104_729;
+            vm.prank(BOB);
+            try single.mint(shares, BOB, _one(type(uint256).max), 0, 0) {}
+            catch (bytes memory reason) {
+                assertEq(bytes4(reason), GRETVault.UnexpectedBalance.selector);
+                ++refused;
+            }
+        }
+    }
+
     /// A token announced for the basket can join and be activated at once. Every exit that does not
     /// skip it then calls it, so a token whose calls revert refuses those exits until the holder
     /// lists it, including exits prepared earlier that listed only other tokens.

@@ -45,7 +45,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// transaction, so the cap keeps them within Ethereum's per-transaction gas limit.
     uint256 public constant MAX_COMPONENTS = 128;
     /// @notice Base units a component may deliver below the requested amount on mint. Covers tokens
-    /// that convert amounts to internal shares (xStocks); transfer fees still revert.
+    /// that convert amounts to internal shares (xStocks) while their multiplier stays below about
+    /// ten; transfer fees still revert.
     uint256 public constant MAX_RECEIPT_SHORTFALL = 10;
     /// @notice Minimum wait, enforced by the vault, before a proposed governance may accept.
     uint256 public constant GOVERNANCE_TRANSFER_DELAY = 7 days;
