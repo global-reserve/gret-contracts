@@ -721,6 +721,33 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         assertEq(redenominated.balanceOf(address(target)), 5e6);
     }
 
+    /// The guard in place can be proposed and applied again as its own successor. Its first loss in a
+    /// later week then starts from zero, not from the total of the week it last recorded. H is worth
+    /// $100 and F $40; each swap sells 1 H for 2.4525 F, a $1.90 loss.
+    function test_guardReappliedAsItsOwnSuccessorStartsEachWeekAtZero() public {
+        ChainlinkPriceGuard guard = _chainlinkGuard();
+        vm.prank(REBALANCER);
+        vault.swap(address(healthy), 1e18, address(faulty), 2.4525e18, "");
+        assertEq(guard.weeklyLoss(), 4.75e15); // $1.90 of $400
+        uint256 lastWeek = guard.currentWeek();
+
+        vm.prank(GOVERNANCE);
+        vault.proposePriceGuard(address(guard));
+        vm.warp(_priceGuardReadyAt());
+        vault.applyPriceGuard();
+        assertEq(vault.previousPriceGuard(), address(guard));
+        (address healthyFeed,) = guard.priceFeed(address(healthy));
+        (address faultyFeed,) = guard.priceFeed(address(faulty));
+        MockAggregator(healthyFeed).setAnswer(100e8);
+        MockAggregator(faultyFeed).setAnswer(40e8);
+
+        vm.prank(REBALANCER);
+        vault.swap(address(healthy), 1e18, address(faulty), 2.4525e18, "");
+        assertGt(guard.currentWeek(), lastWeek);
+        // $1.90 of the $398.10 left, and nothing from the earlier week.
+        assertEq(guard.weeklyLoss(), Math.mulDiv(1.9e18, 1e18, 398.1e18, Math.Rounding.Ceil));
+    }
+
     /// @dev Sells whole reserves back and forth, each swap losing 1.9% of what it sells, until the
     /// guard refuses one for the week's limit; returns how many passed.
     function _lossySwapsUntilRefused(ChainlinkPriceGuard guard) internal returns (uint256 passed) {

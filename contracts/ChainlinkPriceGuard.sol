@@ -139,8 +139,11 @@ contract ChainlinkPriceGuard is IPriceGuard {
         if (loss * BPS > soldValue * MAX_SWAP_LOSS) revert SwapLossTooHigh(soldValue, boughtValue);
         uint256 week = block.timestamp / WEEK;
         if (week != currentWeek) {
+            // Asked before the new week is stored: a guard applied again as its own successor then
+            // reports its last week, which is not this one, and inherits nothing.
+            uint256 inherited = _inheritedLoss(week);
             currentWeek = week;
-            weeklyLoss = _inheritedLoss(week);
+            weeklyLoss = inherited;
         }
         // Buy tokens have arrived and sell tokens have not left. Exclude the receipt so the
         // denominator is pre-swap backing, not both sides of the exchange.
