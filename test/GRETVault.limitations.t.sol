@@ -570,6 +570,44 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         assertEq(single.balanceOf(BOB), SHARE);
     }
 
+    /// A sell token that debits the vault more than it sends takes the difference on every swap that
+    /// sells it, and the guard, which values the requested amount, records no loss. Once enabled, S
+    /// burns 1% more from the sender; H and S are worth $100.
+    function test_senderSurchargeOnASwapIsNotSeenByTheGuard() public {
+        SenderSurchargeToken surcharged = new SenderSurchargeToken();
+        IERC20[] memory basket = new IERC20[](2);
+        basket[0] = healthy;
+        basket[1] = surcharged;
+        GRETVault target = new GRETVault(basket, _pair(1e18, 1e18), GOVERNANCE);
+        surcharged.mint(ALICE, 1e18);
+        vm.startPrank(ALICE);
+        healthy.approve(address(target), type(uint256).max);
+        surcharged.approve(address(target), type(uint256).max);
+        target.mint(SHARE, ALICE, _pair(1e18, 1e18), SHARE, 0);
+        vm.stopPrank();
+        vm.prank(REBALANCER);
+        healthy.approve(address(target), type(uint256).max);
+        MockAggregator usd100 = new MockAggregator(8, 100e8);
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(healthy);
+        tokens[1] = address(surcharged);
+        IChainlinkFeed[] memory feeds = new IChainlinkFeed[](2);
+        feeds[0] = IChainlinkFeed(address(usd100));
+        feeds[1] = IChainlinkFeed(address(usd100));
+        ChainlinkPriceGuard guard =
+            new ChainlinkPriceGuard(address(target), tokens, feeds, _pair(1 days, 1 days));
+        _appoint(target, address(guard));
+        usd100.setAnswer(100e8);
+
+        surcharged.enable();
+        // 0.5 S for 0.5 H, a fair swap at the feeds.
+        vm.prank(REBALANCER);
+        target.swap(address(surcharged), 0.5e18, address(healthy), 0.5e18, "");
+        assertEq(guard.weeklyLoss(), 0);
+        assertEq(healthy.balanceOf(address(target)), 1.5e18);
+        assertEq(surcharged.balanceOf(address(target)), 0.495e18); // 0.505 S left the vault
+    }
+
     /// Liquidation does not lift the sender surcharge's dead end for the last claimant.
     function test_senderSurchargeBlocksLastClaim() public {
         SenderSurchargeToken token = new SenderSurchargeToken();
