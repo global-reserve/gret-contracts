@@ -60,8 +60,10 @@ compatibility; fork results are specific to their block and code versions.
 - **Skipping:** `redeemSkipping` never calls listed tokens or excluded components, even for
   `balanceOf`. Their outputs and minima must be zero. Listed addresses that are not components
   are ignored, so a token announced for the basket can be listed before it joins. Skipped
-  assets remain for other holders, or, if supply empties, for a later bootstrap once
-  governance resumes minting; the exiting holder retains no separate right.
+  assets remain for other holders, or, if supply empties, for a later bootstrap once governance
+  resumes minting; the exiting holder retains no separate right. A skipping redemption that
+  leaves zero supply pauses minting whenever its list is not empty, even if the list names no
+  component.
   `previewRedeemSkipping` quotes this exit without calling skipped tokens.
 - **Supply floor:** normal redemption leaves either zero or at least `MIN_SUPPLY = 1e18`.
   Fee shares remain outstanding, but a redemption of the whole supply pays no fee, so a holder

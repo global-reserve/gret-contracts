@@ -366,8 +366,9 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// be sent: an issuer froze the vault, or a token was made to fail. The caller gives up its
     /// share of them, which stays with the other holders, and their `minAmountsOut` must be zero.
     /// Listed addresses that are not components are ignored, so a token announced for the basket
-    /// can be listed before it joins. If nobody remains, minting pauses so that governance can
-    /// review what was left before a bootstrap takes it.
+    /// can be listed before it joins. If nobody remains and the list is not empty, even if it names
+    /// no component, minting pauses so that governance can review what was left before a bootstrap
+    /// takes it.
     /// @dev Skipped components are not called at all, so no token can block this exit. It keeps the
     /// 7-day notice of a new rebalancer meaningful: whoever may redeem can always leave with every
     /// component that still works. Prepared with no positive minimum, skipping every token
