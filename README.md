@@ -201,7 +201,7 @@ effective nominal bases, not remaining token balances; `liquidationBasis` return
 stored bases established by successful claims, and `totalConsumedRights` and `totalPaid` the
 rights consumed and the amounts paid per component. `governanceProposal`, `rebalancerProposal`,
 `priceGuardProposal` and `eligibilityProposal` return each pending successor and when it can take
-over.
+over; an expired proposal stays there until it is cancelled or replaced.
 
 `ChainlinkPriceGuard` is the first price guard. It values both sides of each swap with one
 Chainlink feed per token and refuses a token without a fresh price, a swap that loses more

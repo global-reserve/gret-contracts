@@ -77,12 +77,14 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// the rebalancer and its own successor.
     address public governance;
     /// @notice Proposed successor of `governance`, which may accept from `readyAt`; zero if none.
+    /// Kept after it expires, until it is cancelled or replaced.
     Proposal public governanceProposal;
 
     /// @notice Exchanges one component for another at the price it chooses, within the limits of
     /// the price guard. Zero when nobody can, as at deployment.
     address public rebalancer;
-    /// @notice Proposed rebalancer, which may accept from `readyAt`; zero if none.
+    /// @notice Proposed rebalancer, which may accept from `readyAt`; zero if none. Kept after it
+    /// expires, until it is cancelled or replaced.
     Proposal public rebalancerProposal;
     /// @notice Prices every swap and refuses the ones that lose too much. None at deployment, and
     /// without one there are no swaps.
@@ -90,15 +92,19 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// @notice The guard that `applyPriceGuard` last replaced, from which the next one can continue
     /// the week's loss count; zero until the first replacement.
     address public previousPriceGuard;
-    /// @notice Proposed price guard, which anyone may apply from `readyAt`; zero if none.
+    /// @notice Proposed price guard, which anyone may apply from `readyAt`; zero if none. Kept after
+    /// it expires, until it is cancelled or replaced.
     Proposal public priceGuardProposal;
     /// @notice Decides who may mint and redeem. None at deployment, and without one anyone may.
     IEligibility public eligibility;
     /// @notice Proposed eligibility contract, which anyone may apply from `readyAt`; zero if none.
+    /// Kept after it expires, until it is cancelled or replaced.
     Proposal public eligibilityProposal;
     /// @notice Earliest timestamp at which an announced token may join the basket; zero if none.
+    /// Kept after the announcement expires, until it is cancelled or repeated.
     mapping(address token => uint256) public componentReadyAt;
-    /// @notice Earliest timestamp at which a proposed write-off may take effect; zero if none.
+    /// @notice Earliest timestamp at which a proposed write-off may take effect; zero if none. Kept
+    /// after the proposal expires, until it is cancelled or repeated.
     mapping(address token => uint256) public writeOffReadyAt;
     /// @notice Permanent write-off history. These tokens can never be rescued or removed, even
     /// after governance reactivates them for normal operation.
@@ -115,7 +121,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     address public feeRecipient;
     uint256 public pendingMintFee;
     uint256 public pendingRedeemFee;
-    /// @notice Earliest timestamp at which the pending fees may be applied; zero if none.
+    /// @notice Earliest timestamp at which the pending fees may be applied; zero if none. Kept after
+    /// the proposal expires, until it is cancelled or replaced.
     uint256 public pendingFeesReadyAt;
 
     IERC20[] private _components;

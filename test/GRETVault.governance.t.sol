@@ -343,6 +343,26 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
     // The six proposal events and their readyAt
     // ---------------------------------------------------------------------------------------------
 
+    /// A proposal stays in its view after it expires, until it is cancelled or replaced, although
+    /// it can no longer execute.
+    function test_expiredProposalStaysInItsView() public {
+        vm.prank(GOVERNANCE);
+        vault.proposeRebalancer(REBALANCER);
+        (, uint256 readyAt) = vault.rebalancerProposal();
+        uint256 expiredAt = readyAt + vault.EXECUTION_WINDOW();
+        vm.warp(expiredAt + 1);
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.ProposalExpired.selector, expiredAt));
+        vm.prank(REBALANCER);
+        vault.acceptRebalancer();
+        (address next, uint256 stillReadyAt) = vault.rebalancerProposal();
+        assertEq(next, REBALANCER);
+        assertEq(stillReadyAt, readyAt);
+        vm.prank(GOVERNANCE);
+        vault.cancelRebalancerProposal();
+        (next,) = vault.rebalancerProposal();
+        assertEq(next, address(0));
+    }
+
     function test_proposalEventsCarryReadyAt() public {
         uint256 readyAt = block.timestamp + 7 days;
         MockPriceGuard guard = new MockPriceGuard();

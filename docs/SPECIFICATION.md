@@ -352,8 +352,10 @@ rights; it is **not** a remaining-token-balance view then.
 `liquidationBasis()` exposes only bases established by successful claims without token calls.
 `pendingRights`/`claimable` compute effective current rights/payouts for one component.
 `governanceProposal`, `rebalancerProposal`, `priceGuardProposal` and `eligibilityProposal`
-return each pending successor and the earliest time it can take over; zero when none is
-pending.
+return the last proposed successor and the earliest time it can take over, or zero if none
+was proposed. Like `componentReadyAt`, `writeOffReadyAt` and `pendingFeesReadyAt`, they keep a
+proposal until it is executed, cancelled or replaced, also after it expires at `readyAt +
+EXECUTION_WINDOW`, when it can no longer execute.
 
 `reserves`, both normal previews, the skipping preview, `pendingRights` and `claimable` use
 `nonReentrantView`: callback consumers cannot read an intermediate accounting state. Mutations
