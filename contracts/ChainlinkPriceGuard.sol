@@ -35,13 +35,13 @@ interface IGRETVaultView {
 /// @title Chainlink price guard of the GRET vault
 /// @notice Values both sides of every swap in US dollars with Chainlink feeds. It refuses a swap
 /// that loses more than 2% of what the vault sells, or one that would make the week's swaps take
-/// more than 2% of the vault's value. Each loss counts as the share of the vault it takes when it
-/// happens, which is what every GRET loses, so mints and redemptions in between do not stretch the
-/// limit. A token without a feed, whose price is stale, or whose decimals changed after the guard
-/// was deployed, cannot be swapped. It has no owner: tokens, feeds and limits are fixed at
-/// deployment. Changing them means deploying another guard, which the vault applies only after its
-/// seven-day wait. A replacement continues the week's count of the guard it replaced, so it does
-/// not open a second budget.
+/// more than 2% of the vault's priced backing: its active, readable components with a feed. Each
+/// loss counts as its share of that backing when it happens, which is at least what every GRET
+/// loses, so mints and redemptions in between do not stretch the limit. A token without a feed,
+/// whose price is stale, or whose decimals changed after the guard was deployed, cannot be swapped.
+/// It has no owner: tokens, feeds and limits are fixed at deployment. Changing them means deploying
+/// another guard, which the vault applies only after its seven-day wait. A replacement continues
+/// the week's count of the guard it replaced, so it does not open a second budget.
 /// @dev Each feed must quote one whole token in US dollars, with nothing to convert. A loss the
 /// feeds do not see, such as a token that trades below the asset its feed prices, is not limited.
 /// Neither is a split or a multiplier change that alters what one unit of a token is worth before
@@ -50,8 +50,8 @@ interface IGRETVaultView {
 contract ChainlinkPriceGuard is IPriceGuard {
     /// @notice Highest loss of a single swap, in basis points of the value sold: 2%.
     uint256 public constant MAX_SWAP_LOSS = 200;
-    /// @notice Highest share of the vault's value that all swaps in a week can take, in basis
-    /// points: 2%. Each loss is measured against the vault's value just before that swap.
+    /// @notice Highest share of the vault's priced backing that all swaps in a week can take, in
+    /// basis points: 2%. Each loss is measured against that backing just before the swap.
     uint256 public constant MAX_WEEKLY_LOSS = 200;
     /// @notice Weeks are fixed periods of this length, counted from the Unix epoch.
     uint256 public constant WEEK = 7 days;
@@ -77,8 +77,8 @@ contract ChainlinkPriceGuard is IPriceGuard {
 
     /// @notice Week of the last recorded loss.
     uint256 public currentWeek;
-    /// @notice Share of the vault's value that swaps took in `currentWeek`, with 18 decimals (1e18
-    /// is all of it): the sum of each loss divided by the vault's value just before it.
+    /// @notice Share of the vault's priced backing that swaps took in `currentWeek`, with 18
+    /// decimals (1e18 is all of it): the sum of each loss divided by that backing just before it.
     uint256 public weeklyLoss;
 
     /// @param loss In US dollars with 18 decimals.

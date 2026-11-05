@@ -15,17 +15,18 @@ import {IPriceGuard} from "./IPriceGuard.sol";
 /// @title Global Reserve Token vault
 /// @notice Basket of ERC-20 components whose shares are GRET. Mint and normal redemption are in
 /// kind and proportional to the active components' actual balances, so no amount per GRET is set
-/// anywhere: it follows what the vault holds. Governance, an external contract whose voting lives
-/// outside the vault, can start an irreversible liquidation in which any holder exits component by
-/// component, decides what to do with tokens that are not backing GRET, and changes the basket: it
-/// adds and removes components and appoints a rebalancer that exchanges one component for another.
-/// Nobody can take reserves without delivering another component in exchange, and every exchange
-/// must pass a price guard, an external contract that holds the prices and the loss limits; every
-/// new rebalancer, price guard and component waits seven days. A component that stops working can
-/// be written off after the same wait. Governance can charge mint and redemption fees in GRET, at
-/// most 5% each; raising them waits too. It can pause minting at once, but never redemption. After
-/// the same wait it can appoint an eligibility contract that decides who may mint and redeem;
-/// without one, anyone may. GRET supports EIP-2612 `permit`.
+/// anywhere: it follows what the vault holds. Governance, an external address (a wallet in the
+/// pilot, later a contract whose voting lives outside the vault), can start an irreversible
+/// liquidation in which any holder exits component by component, decides what to do with tokens
+/// that are not backing GRET, and changes the basket: it adds and removes components and appoints a
+/// rebalancer that exchanges one component for another. Nobody can take reserves without delivering
+/// another component in exchange, and every exchange must pass a price guard, an external contract
+/// that holds the prices and the loss limits; every new rebalancer, price guard and component waits
+/// seven days. A component that stops working can be written off after the same wait. Governance
+/// can charge mint and redemption fees in GRET, at most 5% each; raising them waits too. It can
+/// pause minting at once, but never redemption. After the same wait it can appoint an eligibility
+/// contract that decides who may mint and redeem; without one, anyone may. GRET supports EIP-2612
+/// `permit`.
 /// @dev Not independently audited. The specification, including the known limitations, is in
 /// docs/SPECIFICATION.md.
 contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
@@ -44,9 +45,9 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// @notice Highest number of components. Mint and redemption visit every component in one
     /// transaction, so the cap keeps them within Ethereum's per-transaction gas limit.
     uint256 public constant MAX_COMPONENTS = 128;
-    /// @notice Base units a component may deliver below the requested amount on mint. Covers tokens
-    /// that convert amounts to internal shares (xStocks) while their multiplier stays below about
-    /// ten; transfer fees still revert.
+    /// @notice Base units a component may deliver below the requested amount on mint or on a swap
+    /// purchase. Covers tokens that convert amounts to internal shares (xStocks) while their
+    /// multiplier stays below about ten; transfer fees still revert.
     uint256 public constant MAX_RECEIPT_SHORTFALL = 10;
     /// @notice Minimum wait, enforced by the vault, before a proposed governance may accept.
     uint256 public constant GOVERNANCE_TRANSFER_DELAY = 7 days;
@@ -92,8 +93,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// @notice The guard that `applyPriceGuard` last replaced, from which the next one can continue
     /// the week's loss count; zero until the first replacement.
     address public previousPriceGuard;
-    /// @notice Proposed price guard, which anyone may apply from `readyAt`; zero if none. Kept after
-    /// it expires, until it is cancelled or replaced.
+    /// @notice Proposed price guard, which anyone may apply from `readyAt`; zero if none. Kept
+    /// after it expires, until it is cancelled or replaced.
     Proposal public priceGuardProposal;
     /// @notice Decides who may mint and redeem. None at deployment, and without one anyone may.
     IEligibility public eligibility;
@@ -121,8 +122,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     address public feeRecipient;
     uint256 public pendingMintFee;
     uint256 public pendingRedeemFee;
-    /// @notice Earliest timestamp at which the pending fees may be applied; zero if none. Kept after
-    /// the proposal expires, until it is cancelled or replaced.
+    /// @notice Earliest timestamp at which the pending fees may be applied; zero if none. Kept
+    /// after the proposal expires, until it is cancelled or replaced.
     uint256 public pendingFeesReadyAt;
 
     IERC20[] private _components;
@@ -138,7 +139,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         uint256 basis;
         /// @dev Rights consumed, before any loss haircut.
         uint256 consumedRights;
-        /// @dev Amounts actually paid out.
+        /// @dev Payouts requested from the token after any cut; a token may deliver less.
         uint256 paid;
     }
 
@@ -285,7 +286,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// prepared for. An appointed eligibility contract must approve the caller and `to`.
     /// @dev Contributions round up. GRET is issued for what actually arrived, rounded down, so a
     /// component that delivers a few units less costs the minter, never the existing holders;
-    /// `minShares` bounds that cost. Every limit is checked before any input is pulled.
+    /// `minShares` bounds that cost. Every `maxAmountsIn` is checked before any input is pulled;
+    /// `minShares`, which depends on what arrived, after.
     function mint(
         uint256 shares,
         address to,
@@ -337,12 +339,12 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     }
 
     /// @notice Takes `shares` GRET from the caller: the redemption fee goes to `feeRecipient` and
-    /// the rest is burned for the proportional amount of every component, which goes to `to`;
-    /// redeeming the whole supply pays no fee. All or nothing: if any transfer fails the whole
-    /// redemption reverts. The supply left must be zero or at least `MIN_SUPPLY`. `version` is the
-    /// `basketVersion` that `minAmountsOut` was prepared for; minima that are all zero, or none,
-    /// limit nothing, so `version` is then ignored. An appointed eligibility contract must approve
-    /// the caller and `to`.
+    /// the rest is burned for the proportional amount of every active component, which goes to
+    /// `to`; redeeming the whole supply pays no fee. All or nothing: if any transfer fails the
+    /// whole redemption reverts. The supply left must be zero or at least `MIN_SUPPLY`. `version`
+    /// is the `basketVersion` that `minAmountsOut` was prepared for; minima that are all zero, or
+    /// none, limit nothing, so `version` is then ignored. An appointed eligibility contract must
+    /// approve the caller and `to`.
     /// @dev Amounts round down, in favor of the vault. Live balances include all income and losses
     /// before calculating proportional outputs.
     function redeem(uint256 shares, address to, uint256[] calldata minAmountsOut, uint256 version)
@@ -507,7 +509,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         }
     }
 
-    /// @notice Amounts paid out by claims, per component.
+    /// @notice Payouts that claims requested from each component, after any cut.
     function totalPaid() external view returns (uint256[] memory amounts) {
         amounts = new uint256[](_components.length);
         for (uint256 i; i < amounts.length; ++i) {
@@ -943,7 +945,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     // ---------------------------------------------------------------------------------------------
 
     /// @dev GRET sent to the vault would be lost to its sender, so such transfers revert. The vault
-    /// never holds GRET: mint goes to the caller and redemption burns from the caller.
+    /// never holds GRET: mint issues it to `to` and to `feeRecipient`, and redemption transfers its
+    /// fee and burns the rest from the caller.
     function _update(address from, address to, uint256 value) internal override {
         if (to == address(this)) revert InvalidRecipient();
         super._update(from, to, value);
