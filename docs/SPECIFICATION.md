@@ -189,8 +189,8 @@ Guard limits and price assumptions:
   Fair/favorable trades do not consume the budget. Deposits/withdrawals do not reset it.
 - The guard has no owner; feeds, max ages, cached token decimals and limits are immutable.
   Every valuation reads the token's decimals again: a token whose decimals differ from the
-  cached ones cannot be valued, so swaps of it revert and it counts as zero in the vault's
-  value until another guard is applied.
+  cached ones cannot be valued while they differ, so swaps of it revert and it counts as zero
+  in the vault's priced backing until its decimals return or another guard is applied.
   A replacement continues the weekly count: the vault records the guard it replaced as
   `previousPriceGuard`, and on its first loss in a week the new guard starts from what that
   guard recorded in the same week. A predecessor that reports another week, or does not
@@ -364,10 +364,11 @@ rights; it is **not** a remaining-token-balance view then.
 `liquidationBasis()` exposes only bases established by successful claims without token calls.
 `pendingRights`/`claimable` compute effective current rights/payouts for one component.
 `governanceProposal`, `rebalancerProposal`, `priceGuardProposal` and `eligibilityProposal`
-return the last proposed successor and the earliest time it can take over, or zero if none
-was proposed. Like `componentReadyAt`, `writeOffReadyAt` and `pendingFeesReadyAt`, they keep a
-proposal until it is executed, cancelled or replaced, also after it expires at `readyAt +
-EXECUTION_WINDOW`, when it can no longer execute.
+return the pending successor and the earliest time it can take over, or zero when none is
+pending: none was proposed, or the last one was executed or cancelled. Like `componentReadyAt`,
+`writeOffReadyAt` and `pendingFeesReadyAt`, they keep a proposal until it is executed,
+cancelled or replaced, also after it expires at `readyAt + EXECUTION_WINDOW`, when it can no
+longer execute.
 
 Activation, the mint pause and eligibility removal emit their events only on a change. Other
 setters emit on every successful call, even when nothing changes: `revokeRebalancer` emits
@@ -566,8 +567,10 @@ design decision and must be made here first.
   holders' backing, and the last exit of that component can fail even in liquidation. Swaps are
   included: the vault sends the requested sell amount and the guard values that amount, so a
   sell token that debits the vault more takes the difference without the guard seeing it.
-  Checking the vault's balance after every outgoing transfer was rejected: it would add a read
-  to every exit and cover one behavior among the many an issuer controls.
+  Checking the vault's balance after every outgoing transfer was rejected: on exits it would
+  add a read to every redemption and claim, and on swaps as on exits it would cover one
+  behavior among the many an issuer controls, which the operating assumptions already keep out
+  of the basket.
 - **Issuers control their tokens.** A freeze, an upgrade, an expensive call or an unreadable
   balance can block normal mint and redemption until holders skip the component or governance
   writes it off; its liquidation claim waits until reads and transfers recover. The

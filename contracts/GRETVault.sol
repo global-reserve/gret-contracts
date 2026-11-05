@@ -108,7 +108,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// Kept after the announcement expires, until it is cancelled or repeated.
     mapping(address token => uint256) public componentReadyAt;
     /// @notice Earliest timestamp at which a proposed write-off may take effect; zero if none. Kept
-    /// after the proposal expires, until it is cancelled or repeated.
+    /// after the proposal expires, until it is executed, cancelled or repeated, or the component is
+    /// removed.
     mapping(address token => uint256) public writeOffReadyAt;
     /// @notice Permanent write-off history. These tokens can never be rescued or removed, even
     /// after governance reactivates them for normal operation.
