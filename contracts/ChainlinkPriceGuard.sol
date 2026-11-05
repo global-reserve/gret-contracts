@@ -56,6 +56,10 @@ contract ChainlinkPriceGuard is IPriceGuard {
     /// @notice Weeks are fixed periods of this length, counted from the Unix epoch.
     uint256 public constant WEEK = 7 days;
     uint256 private constant BPS = 10_000;
+    /// @dev Gas for each balance read, each read of the predecessor's count and each valuation in
+    /// `_vaultValue`, far above what tokens and feeds need, so that no single contract can take the
+    /// gas of the whole swap.
+    uint256 private constant READ_GAS = 200_000;
     /// @dev `MAX_WEEKLY_LOSS` as a share with 18 decimals.
     uint256 private constant WEEKLY_LIMIT = MAX_WEEKLY_LOSS * 1e18 / BPS;
 
@@ -194,35 +198,51 @@ contract ChainlinkPriceGuard is IPriceGuard {
 
     /// @dev The loss the guard this one replaced recorded in `week`. The vault's seven-day wait
     /// lets at most one replacement take effect per week, so one predecessor is enough. A
-    /// predecessor that reports another week, or answers with malformed data, counts as zero.
+    /// predecessor that reports another week, answers with malformed data or needs more than
+    /// `READ_GAS` counts as zero.
     function _inheritedLoss(uint256 week) private view returns (uint256) {
         address previous = IGRETVaultView(vault).previousPriceGuard();
         if (previous == address(0)) return 0;
-        (bool ok, bytes memory data) = previous.staticcall(abi.encodeCall(this.currentWeek, ()));
-        if (!ok || data.length != 32 || abi.decode(data, (uint256)) != week) return 0;
-        (ok, data) = previous.staticcall(abi.encodeCall(this.weeklyLoss, ()));
-        if (!ok || data.length != 32) return 0;
-        return abi.decode(data, (uint256));
+        (bool ok, uint256 size, uint256 answer) =
+            _readWord(previous, abi.encodeCall(this.currentWeek, ()));
+        if (!ok || size != 32 || answer != week) return 0;
+        (ok, size, answer) = _readWord(previous, abi.encodeCall(this.weeklyLoss, ()));
+        if (!ok || size != 32) return 0;
+        return answer;
     }
 
     /// @dev Live active backing immediately before the swap: the incoming buy amount is removed in
     /// token units before valuation. Each unreadable or unpriced component counts as zero, whether
-    /// its balance read reverts or answers with less than one word, its price is unusable or its
-    /// decimals changed.
+    /// its balance read reverts, answers with less than one word or needs more than `READ_GAS`, its
+    /// price is unusable, its decimals changed or its valuation needs more than `READ_GAS`.
     function _vaultValue(address buy, uint256 received) private view returns (uint256 total) {
         address[] memory tokens = IGRETVaultView(vault).components();
         for (uint256 i; i < tokens.length; ++i) {
             address token = tokens[i];
             if (address(_feeds[token].feed) == address(0)) continue;
             if (IGRETVaultView(vault).excluded(token)) continue;
-            (bool ok, bytes memory data) =
-                token.staticcall(abi.encodeCall(IERC20.balanceOf, (vault)));
-            if (!ok || data.length < 32) continue;
-            uint256 balance = abi.decode(data, (uint256));
+            (bool ok, uint256 size, uint256 balance) =
+                _readWord(token, abi.encodeCall(IERC20.balanceOf, (vault)));
+            if (!ok || size < 32) continue;
             if (token == buy) balance = Math.saturatingSub(balance, received);
-            try this.valueOf(token, balance) returns (uint256 value) {
+            try this.valueOf{gas: READ_GAS}(token, balance) returns (uint256 value) {
                 total += value;
             } catch {}
+        }
+    }
+
+    /// @dev Calls `target` with `query` and at most `READ_GAS`, copying only the first word of the
+    /// answer, so that an oversized answer cannot exhaust the swap's gas. Also returns the answer's
+    /// full size, for the caller to check.
+    function _readWord(address target, bytes memory query)
+        private
+        view
+        returns (bool ok, uint256 size, uint256 word)
+    {
+        assembly ("memory-safe") {
+            ok := staticcall(READ_GAS, target, add(query, 0x20), mload(query), 0, 0x20)
+            size := returndatasize()
+            word := mload(0)
         }
     }
 }

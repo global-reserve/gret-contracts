@@ -56,6 +56,39 @@ contract EmptyComponent {
     }
 }
 
+/// @dev Answers `word` padded to a size chosen from the gas received: about 60% of that gas pays
+/// for the answer's memory, so a caller that copied the whole answer would run out of gas.
+abstract contract OversizedAnswer {
+    function _answer(uint256 word) internal view {
+        uint256 target = gasleft() * 6 / 10;
+        uint256 size = (Math.sqrt(1536 * 1536 + 2048 * target) - 1536) / 2 * 32;
+        assembly ("memory-safe") {
+            mstore(0, word)
+            return(0, size)
+        }
+    }
+}
+
+/// @dev Once enabled, `balanceOf` answers the balance padded to an oversized payload.
+contract OversizedBalanceToken is CaseToken, OversizedAnswer {
+    constructor() CaseToken("Oversized balance") {}
+
+    function balanceOf(address account) public view override returns (uint256 amount) {
+        amount = super.balanceOf(account);
+        if (enabled) _answer(amount);
+    }
+}
+
+/// @dev A guard that is later replaced and whose `currentWeek` answers an oversized payload.
+contract OversizedPredecessor is OversizedAnswer {
+    function checkSwap(address, uint256, address, uint256, bytes calldata) external {}
+
+    function currentWeek() external view returns (uint256 week) {
+        week = block.timestamp / 7 days;
+        _answer(week);
+    }
+}
+
 /// @notice Protections: each test plays an attack or a failure and shows what the vault refuses
 /// or lets holders do about it.
 contract GRETVaultProtectionsTest is GRETVaultCase {
@@ -756,6 +789,89 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         basket[0] = IERC20(next);
         vm.expectRevert(abi.encodeWithSelector(GRETVault.InvalidContract.selector, next));
         new GRETVault(basket, _one(1), GOVERNANCE);
+    }
+
+    /// A component whose `balanceOf` answers an oversized payload, or burns all the gas it gets,
+    /// cannot block `rescue` of other tokens: each read gets limited gas and only its first word is
+    /// copied.
+    function test_oversizedOrCostlyBalanceReadDoesNotBlockRescue() public {
+        OversizedBalanceToken oversized = new OversizedBalanceToken();
+        GasBurnerToken burner = new GasBurnerToken();
+        IERC20[] memory basket = new IERC20[](3);
+        basket[0] = oversized;
+        basket[1] = burner;
+        basket[2] = healthy;
+        uint256[] memory initial = _three(1e18, 1e18, 1e18);
+        GRETVault target = new GRETVault(basket, initial, GOVERNANCE);
+        oversized.mint(ALICE, 1e18);
+        burner.mint(ALICE, 1e18);
+        vm.startPrank(ALICE);
+        for (uint256 i; i < 3; ++i) {
+            basket[i].approve(address(target), type(uint256).max);
+        }
+        target.mint(SHARE, ALICE, initial, SHARE, 0);
+        vm.stopPrank();
+        MockERC20 foreign = new MockERC20("Foreign", "FX", 18);
+        foreign.mint(address(target), 1e18); // sent to the vault by mistake
+
+        oversized.enable();
+        burner.enable();
+        vm.prank(GOVERNANCE);
+        target.rescue{gas: 16_777_216}(address(foreign), CAROL, 1e18);
+        assertEq(foreign.balanceOf(CAROL), 1e18);
+    }
+
+    /// A replaced guard whose `currentWeek` answers an oversized payload counts as zero, like one
+    /// that reverts, instead of making every lossy swap of its successor run out of gas.
+    function test_oversizedPredecessorAnswerCountsAsZero() public {
+        _appoint(vault, address(new OversizedPredecessor()));
+        ChainlinkPriceGuard guard = _chainlinkGuard();
+        // 1 H ($100) for 2.45025 F ($98.01): a 1.99% loss, of the $400 vault.
+        vm.prank(REBALANCER);
+        vault.swap{gas: 16_777_216}(address(healthy), 1e18, address(faulty), 2.45025e18, "");
+        assertEq(guard.weeklyLoss(), 4.975e15);
+    }
+
+    /// A priced component whose `balanceOf` answers an oversized payload does not make the guard's
+    /// valuation of the vault run out of gas: only the first word is read. H, O and X are worth $100.
+    function test_oversizedPricedBalanceDoesNotBlockLossySwaps() public {
+        MockERC20 other = new MockERC20("Other", "O", 18);
+        OversizedBalanceToken oversized = new OversizedBalanceToken();
+        IERC20[] memory basket = new IERC20[](3);
+        basket[0] = healthy;
+        basket[1] = other;
+        basket[2] = oversized;
+        uint256[] memory initial = _three(1e18, 1e18, 1e18);
+        GRETVault target = new GRETVault(basket, initial, GOVERNANCE);
+        other.mint(ALICE, 1e18);
+        other.mint(REBALANCER, 1e24);
+        oversized.mint(ALICE, 1e18);
+        for (uint256 i; i < 2; ++i) {
+            vm.startPrank(i == 0 ? ALICE : REBALANCER);
+            for (uint256 j; j < 3; ++j) {
+                basket[j].approve(address(target), type(uint256).max);
+            }
+            vm.stopPrank();
+        }
+        vm.prank(ALICE);
+        target.mint(SHARE, ALICE, initial, SHARE, 0);
+        MockAggregator usd100 = new MockAggregator(8, 100e8);
+        address[] memory tokens = new address[](3);
+        IChainlinkFeed[] memory feeds = new IChainlinkFeed[](3);
+        for (uint256 i; i < 3; ++i) {
+            tokens[i] = address(basket[i]);
+            feeds[i] = IChainlinkFeed(address(usd100));
+        }
+        ChainlinkPriceGuard guard =
+            new ChainlinkPriceGuard(address(target), tokens, feeds, _three(1 days, 1 days, 1 days));
+        _appoint(target, address(guard));
+        usd100.setAnswer(100e8);
+
+        oversized.enable();
+        // H for O at a $1 loss, measured against the $300 of H, O and X.
+        vm.prank(REBALANCER);
+        target.swap{gas: 16_777_216}(address(healthy), 1e18, address(other), 0.99e18, "");
+        assertEq(guard.weeklyLoss(), Math.mulDiv(1e18, 1e18, 300e18, Math.Rounding.Ceil));
     }
 
     /// @dev Sells whole reserves back and forth, each swap losing 1.9% of what it sells, until the

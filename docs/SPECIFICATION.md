@@ -167,9 +167,10 @@ denominator. Excluded components do not count. Donations received before the exc
 count, because they back GRET.
 
 The guard enumerates component addresses and reads each priced, active token separately.
-A balance read that reverts or answers with less than one word, or an unusable price,
-contributes zero, making the loss fraction more conservative. It does not call the aggregate
-`reserves()` view, which is unavailable during mutation.
+Each balance read and each valuation gets 200,000 gas, and only the first word of an answer
+is copied. A balance read that reverts, answers with less than one word or needs more gas,
+or an unusable price, contributes zero, making the loss fraction more conservative. It does
+not call the aggregate `reserves()` view, which is unavailable during mutation.
 
 Guard limits and price assumptions:
 
@@ -185,8 +186,9 @@ Guard limits and price assumptions:
   A replacement continues the weekly count: the vault records the guard it replaced as
   `previousPriceGuard`, and on its first loss in a week the new guard starts from what that
   guard recorded in the same week. A predecessor that reports another week, or does not
-  answer `currentWeek` and `weeklyLoss` with one word each, counts as zero. The seven-day
-  notice lets at most one replacement take effect per week, so one predecessor is enough.
+  answer `currentWeek` and `weeklyLoss` with one word each within 200,000 gas, counts as
+  zero. The seven-day notice lets at most one replacement take effect per week, so one
+  predecessor is enough.
   Losses on both sides of a week boundary can still reach about 4% within seven days.
 - Feeds may lag, price an underlying rather than the token's market peg, or become stale on
   weekends. A split or multiplier change alters what one unit of a token is worth when the
@@ -236,9 +238,11 @@ redirected by calling them surplus; in liquidation, neither can late claim distr
 Removing a component under the dust rule explicitly changes it to foreign status.
 A rescue reads every component balance before and after its transfer and reverts with
 `ComponentBalanceReduced` if any other component's balance fell, so a second address over a
-component's ledger, which an issuer upgrade could create, cannot move registered backing. A
-component whose read reverts or answers with less than one word counts as zero before the
-transfer, so it is not compared and does not block rescues of other tokens.
+component's ledger, which an issuer upgrade could create, cannot move registered backing.
+Each read gets 200,000 gas and copies only the first word of the answer. A component whose
+read reverts, answers with less than one word or needs more gas counts as zero before the
+transfer, so it is not compared; neither it nor an oversized answer blocks rescues of other
+tokens.
 
 ### Eligibility contract
 

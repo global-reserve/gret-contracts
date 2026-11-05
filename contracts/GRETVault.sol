@@ -62,6 +62,9 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// @notice Minimum wait, enforced by the vault, before a raise of either fee takes effect.
     uint256 public constant FEE_INCREASE_DELAY = 7 days;
     uint256 private constant FEE_DENOMINATOR = 10_000;
+    /// @dev Gas for each balance read in `rescue`, far above what a token needs to answer one, so a
+    /// component that burns its gas cannot take the gas of the whole rescue.
+    uint256 private constant READ_GAS = 200_000;
 
     /// @dev A successor waiting out its notice: who takes over, and from when.
     struct Proposal {
@@ -1131,12 +1134,19 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         emit MintPauseChanged(paused);
     }
 
-    /// @dev The vault's balance of `token`, or zero if the read reverts or answers with less than a
-    /// word, so an unreadable component does not block rescues of other tokens.
-    function _readableBalance(IERC20 token) private view returns (uint256) {
-        (bool ok, bytes memory data) =
-            address(token).staticcall(abi.encodeCall(IERC20.balanceOf, (address(this))));
-        return ok && data.length >= 32 ? abi.decode(data, (uint256)) : 0;
+    /// @dev The vault's balance of `token`, or zero if the read reverts, answers with less than a
+    /// word or needs more than `READ_GAS`. Only the first word of the answer is copied, so neither
+    /// an oversized answer nor a read that burns its gas blocks rescues of other tokens.
+    function _readableBalance(IERC20 token) private view returns (uint256 amount) {
+        bytes memory query = abi.encodeCall(IERC20.balanceOf, (address(this)));
+        bool ok;
+        uint256 size;
+        assembly ("memory-safe") {
+            ok := staticcall(READ_GAS, token, add(query, 0x20), mload(query), 0, 0x20)
+            size := returndatasize()
+            amount := mload(0)
+        }
+        if (!ok || size < 32) amount = 0;
     }
 
     /// @dev Names `next` to take over once `delay` has passed, replacing any earlier proposal.
