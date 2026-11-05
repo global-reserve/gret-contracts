@@ -47,6 +47,13 @@ contract TwinAddress {
     }
 }
 
+/// @dev A contract governance can announce as a component; it reports an empty balance.
+contract EmptyComponent {
+    function balanceOf(address) external pure returns (uint256) {
+        return 0;
+    }
+}
+
 /// @notice Protections: each test plays an attack or a failure and shows what the vault refuses
 /// or lets holders do about it.
 contract GRETVaultProtectionsTest is GRETVaultCase {
@@ -564,6 +571,87 @@ contract GRETVaultProtectionsTest is GRETVaultCase {
         target.redeem(SHARE, ALICE, signedMinima, signedVersion);
         assertEq(protectedToken.balanceOf(ALICE), 0);
         assertEq(target.balanceOf(ALICE), SHARE);
+    }
+
+    /// A hostile governance changes the basket version before each prepared redemption, for example
+    /// during the notice of a rebalancer whose guard accepts every swap. Positional minima are
+    /// refused, but minima that are all zero, or none, limit nothing: such redemptions are not tied
+    /// to the version and go through, so the notice still lets holders leave.
+    function test_redemptionsWithoutMinimaIgnoreBasketChanges() public {
+        vm.prank(BOB);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
+        address[] memory junk = new address[](2);
+        vm.startPrank(GOVERNANCE);
+        for (uint256 i; i < 2; ++i) {
+            junk[i] = address(new EmptyComponent());
+            vault.announceComponent(junk[i]);
+        }
+        vm.stopPrank();
+        vm.warp(block.timestamp + 7 days);
+        vm.startPrank(GOVERNANCE);
+        vault.proposeRebalancer(REBALANCER);
+        vault.proposePriceGuard(address(new MockPriceGuard()));
+        vm.stopPrank();
+
+        // Bob prepared his redemptions for this version and two components.
+        uint256 prepared = vault.basketVersion();
+        vault.addComponent(junk[0]);
+        vault.addComponent(junk[1]);
+        vm.prank(GOVERNANCE);
+        vault.removeComponent(junk[0]); // also moves junk[1] down one position
+        assertEq(vault.basketVersion(), prepared + 3);
+
+        vm.expectRevert(abi.encodeWithSelector(GRETVault.BasketChanged.selector, prepared, prepared + 3));
+        vm.prank(BOB);
+        vault.redeem(SHARE / 4, BOB, _pair(1, 0), prepared);
+
+        address[] memory none = new address[](0);
+        uint256 healthyBefore = healthy.balanceOf(BOB);
+        uint256 faultyBefore = faulty.balanceOf(BOB);
+        vm.startPrank(BOB);
+        vault.redeem(SHARE / 4, BOB, _pair(0, 0), prepared);
+        vault.redeem(SHARE / 4, BOB, new uint256[](0), prepared);
+        vault.redeemSkipping(SHARE / 4, BOB, _pair(0, 0), none, prepared);
+        vault.redeemSkipping(SHARE / 4, BOB, new uint256[](0), none, prepared);
+        vm.stopPrank();
+        assertEq(vault.balanceOf(BOB), 0);
+        assertEq(healthy.balanceOf(BOB) - healthyBefore, 2e18);
+        assertEq(faulty.balanceOf(BOB) - faultyBefore, 5e18);
+        (, uint256 readyAt) = vault.rebalancerProposal();
+        assertLt(block.timestamp, readyAt);
+    }
+
+    /// A token announced for the basket can join and be activated at once, and every exit that does
+    /// not skip it then calls it. An exit prepared without minima that already lists the announced
+    /// token goes through even if every call to that token reverts; listed addresses that are not
+    /// components are ignored.
+    function test_preparedExitSkipsAnnouncedTokenBeforeItJoins() public {
+        vm.prank(BOB);
+        vault.mint(SHARE, BOB, _pair(2e18, 5e18), SHARE, 0);
+        MockFaultyERC20 joining = new MockFaultyERC20("Joining", "J", 18);
+        vm.prank(GOVERNANCE);
+        vault.announceComponent(address(joining));
+
+        // Bob prepares his exit now, listing the announced token and an address outside the basket.
+        address[] memory skipped = new address[](2);
+        skipped[0] = address(joining);
+        skipped[1] = CAROL;
+        uint256 prepared = vault.basketVersion();
+        assertEq(vault.previewRedeemSkipping(SHARE, skipped), vault.previewRedeem(SHARE));
+
+        vm.warp(block.timestamp + 7 days);
+        vault.addComponent(address(joining));
+        joining.setFault(MockFaultyERC20.Fault.RevertOnBalanceOf);
+        vm.prank(GOVERNANCE);
+        vault.activateComponent(address(joining));
+
+        uint256 healthyBefore = healthy.balanceOf(BOB);
+        uint256 faultyBefore = faulty.balanceOf(BOB);
+        vm.prank(BOB);
+        vault.redeemSkipping(SHARE, BOB, new uint256[](0), skipped, prepared);
+        assertEq(vault.balanceOf(BOB), 0);
+        assertEq(healthy.balanceOf(BOB) - healthyBefore, 2e18);
+        assertEq(faulty.balanceOf(BOB) - faultyBefore, 5e18);
     }
 
     /// @dev Sells whole reserves back and forth, each swap losing 1.9% of what it sells, until the

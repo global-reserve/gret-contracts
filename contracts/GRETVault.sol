@@ -138,7 +138,8 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     bool public mintPaused;
     /// @notice Grows by one whenever a component is added or removed. Calls that pass amounts by
     /// position (`mint`, both redemptions, `setInitialAmounts`) state the version they were
-    /// prepared for, so their limits never land on another token.
+    /// prepared for, so their limits never land on another token. Redemption minima that are all
+    /// zero, or none, limit nothing and are not tied to a version.
     uint256 public basketVersion;
 
     /// @notice Set by `activateLiquidation` and never cleared.
@@ -328,8 +329,9 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     /// the rest is burned for the proportional amount of every component, which goes to `to`;
     /// redeeming the whole supply pays no fee. All or nothing: if any transfer fails the whole
     /// redemption reverts. The supply left must be zero or at least `MIN_SUPPLY`. `version` is the
-    /// `basketVersion` that `minAmountsOut` was prepared for. An appointed eligibility contract
-    /// must approve the caller and `to`.
+    /// `basketVersion` that `minAmountsOut` was prepared for; minima that are all zero, or none,
+    /// limit nothing, so `version` is then ignored. An appointed eligibility contract must approve
+    /// the caller and `to`.
     /// @dev Amounts round down, in favor of the vault. Live balances include all income and losses
     /// before calculating proportional outputs.
     function redeem(uint256 shares, address to, uint256[] calldata minAmountsOut, uint256 version)
@@ -337,18 +339,20 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         nonReentrant
         returns (uint256[] memory amounts)
     {
-        _requireBasket(version, minAmountsOut.length);
+        _requireBasketForLimits(version, minAmountsOut);
         return _redeem(shares, to, minAmountsOut, new bool[](_components.length));
     }
 
     /// @notice Like `redeem`, but leaves out the `skipped` components, for when one of them cannot
     /// be sent: an issuer froze the vault, or a token was made to fail. The caller gives up its
     /// share of them, which stays with the other holders, and their `minAmountsOut` must be zero.
-    /// If nobody remains, minting pauses so that governance can review what was left before a
-    /// bootstrap takes it.
+    /// Listed addresses that are not components are ignored, so a token announced for the basket
+    /// can be listed before it joins. If nobody remains, minting pauses so that governance can
+    /// review what was left before a bootstrap takes it.
     /// @dev Skipped components are not called at all, so no token can block this exit. It keeps the
     /// 7-day notice of a new rebalancer meaningful: whoever may redeem can always leave with every
-    /// component that still works.
+    /// component that still works. Prepared with no positive minimum, and skipping every token
+    /// announced for the basket, it does not depend on the basket staying as it was.
     function redeemSkipping(
         uint256 shares,
         address to,
@@ -356,7 +360,7 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         address[] calldata skipped,
         uint256 version
     ) external nonReentrant returns (uint256[] memory amounts) {
-        _requireBasket(version, minAmountsOut.length);
+        _requireBasketForLimits(version, minAmountsOut);
         amounts = _redeem(shares, to, minAmountsOut, _skipMask(skipped));
         if (skipped.length != 0 && totalSupply() == 0) _setMintPaused(true);
     }
@@ -989,12 +993,13 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         uint256 burned = shares - fee;
         uint256 remaining = totalSupply() - burned;
         if (remaining != 0 && remaining < MIN_SUPPLY) revert SupplyBelowMinimum(remaining);
-        uint256 count = amounts.length;
-        for (uint256 i; i < count; ++i) {
-            if (amounts[i] < minAmountsOut[i]) {
+        // A positive minimum means the length matched the basket; zero minima are never read.
+        for (uint256 i; i < minAmountsOut.length; ++i) {
+            if (minAmountsOut[i] != 0 && amounts[i] < minAmountsOut[i]) {
                 revert AmountOutBelowMin(i, amounts[i], minAmountsOut[i]);
             }
         }
+        uint256 count = amounts.length;
 
         if (fee != 0) {
             _transfer(msg.sender, feeRecipient, fee);
@@ -1026,10 +1031,12 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
         }
     }
 
+    /// @dev Addresses that are not components are ignored: skipping them changes nothing.
     function _skipMask(address[] calldata skipped) private view returns (bool[] memory skip) {
         skip = new bool[](_components.length);
         for (uint256 i; i < skipped.length; ++i) {
-            skip[_indexOf(skipped[i])] = true;
+            uint256 slot = _componentSlot[skipped[i]];
+            if (slot != 0) skip[slot - 1] = true;
         }
     }
 
@@ -1198,5 +1205,17 @@ contract GRETVault is ERC20, ERC20Permit, ReentrancyGuardTransient {
     function _requireBasket(uint256 version, uint256 length) private view {
         if (version != basketVersion) revert BasketChanged(version, basketVersion);
         if (length != _components.length) revert LengthMismatch(_components.length, length);
+    }
+
+    /// @dev Redemption minima are positional only when one is positive. Minima that are all zero,
+    /// or none, limit nothing, so they are not tied to a version: a new version, which a hostile
+    /// governance can set again and again throughout a notice, cannot refuse such a redemption.
+    function _requireBasketForLimits(uint256 version, uint256[] calldata minima) private view {
+        for (uint256 i; i < minima.length; ++i) {
+            if (minima[i] != 0) {
+                _requireBasket(version, minima.length);
+                return;
+            }
+        }
     }
 }

@@ -58,9 +58,10 @@ compatibility; fork results are specific to their block and code versions.
   Every transfer must succeed atomically.
   Minimum outputs bound requested transfers, not the recipient's actual balance increase.
 - **Skipping:** `redeemSkipping` never calls listed tokens or excluded components, even for
-  `balanceOf`. Their outputs and minima must be zero. Skipped assets remain for other holders,
-  or, if supply empties, for a later bootstrap once governance resumes minting; the exiting
-  holder retains no separate right.
+  `balanceOf`. Their outputs and minima must be zero. Listed addresses that are not components
+  are ignored, so a token announced for the basket can be listed before it joins. Skipped
+  assets remain for other holders, or, if supply empties, for a later bootstrap once
+  governance resumes minting; the exiting holder retains no separate right.
   `previewRedeemSkipping` quotes this exit without calling skipped tokens.
 - **Supply floor:** normal redemption leaves either zero or at least `MIN_SUPPLY = 1e18`.
   Fee shares remain outstanding, but a redemption of the whole supply pays no fee, so a holder
@@ -128,14 +129,17 @@ so does any later issuer recovery of a removed token: it is outside the claim sy
 `basketVersion` increases on addition/removal, not activation or write-off. Positional limits
 must match this version and current array length. This is intentional: the version protects
 address/index mapping, not a frozen price or active set. `maxAmountsIn` and `minShares` protect
-mint economics; `minAmountsOut` protects redemption. Activating funded backing after a quote
-with a zero input cap reverts with `AmountInAboveMax`. Excluding a component after quoting a
-positive output minimum reverts with `AmountOutBelowMin`, even though the version matches.
-A caller supplying loose/zero limits accepts the corresponding changes. Governance can change
-initial amounts at any time, but they affect only bootstrap. `setInitialAmounts` requires at
-least one positive amount on an active component when it is called; a later deactivation,
-write-off or removal can leave none, and bootstrap then reverts with `EmptyBasket` until
-governance sets new amounts.
+mint economics; `minAmountsOut` protects redemption. Redemption minima are positional only when
+one is positive: minima that are all zero, or an empty array, limit nothing, so neither the
+version nor the length is checked, and a change of version, which a hostile governance could
+repeat throughout a notice, cannot refuse such a redemption. Activating funded backing after a
+quote with a zero input cap reverts with `AmountInAboveMax`. Excluding a component after
+quoting a positive output minimum reverts with `AmountOutBelowMin`, even though the version
+matches. A caller supplying loose/zero limits accepts the corresponding changes. Governance can
+change initial amounts at any time, but they affect only bootstrap. `setInitialAmounts`
+requires at least one positive amount on an active component when it is called; a later
+deactivation, write-off or removal can leave none, and bootstrap then reverts with
+`EmptyBasket` until governance sets new amounts.
 
 Dust tolerance is bounded, not a general removal guarantee. Large donations can still obstruct
 removal; broken metadata or balance reads can also prevent an ordinary removal. The delayed
@@ -451,17 +455,21 @@ them, and an assessment of the vault should take them as part of its trust model
 These are accepted consequences of the design, not defects. A change to any of them is a
 design decision and must be made here first.
 
-- **Governance holds broad powers.** At once it can activate the irreversible liquidation, pause
-  minting, reactivate components, rescue foreign tokens, change the fee recipient, lower fees,
-  revoke the rebalancer and remove the eligibility contract. After seven days' notice it can
-  appoint a rebalancer with a guard that accepts every swap and exchange the reserves for
+- **Governance holds broad powers.** At once it can activate the irreversible liquidation,
+  pause minting, reactivate components, rescue foreign tokens, change the fee recipient, lower
+  fees, revoke the rebalancer and remove the eligibility contract. After seven days' notice it
+  can appoint a rebalancer with a guard that accepts every swap and exchange the reserves for
   anything, add or write off components, raise fees up to 5%, appoint an eligibility contract
   that refuses mint and redemption, and hand over governance. Removing empty components and
-  adding announced ones change `basketVersion`, so a hostile governance can make redemptions
-  prepared for a fixed version revert with `BasketChanged`. If the governance key is lost, nobody
-  can activate liquidation, reactivate components, change the basket or replace governance;
-  redemption keeps working, and so does minting until a write-off proposed earlier is executed or
-  the last holder leaves by skipping, which pauses it for good.
+  adding announced ones change `basketVersion`, so a hostile governance that announced enough
+  tokens a week earlier can make every redemption with a positive minimum revert with
+  `BasketChanged` throughout a notice. Redemptions whose minima are all zero are not tied to
+  the version, but accept whatever swaps the guard allows until they execute. An announced
+  token can join and be activated at once; if its calls fail, every exit that does not skip it
+  reverts; an exit prepared in advance avoids this by listing every announced token. If the
+  governance key is lost, nobody can activate liquidation, reactivate components, change the
+  basket or replace governance; redemption keeps working, and so does minting until a write-off
+  proposed earlier is executed or the last holder leaves by skipping, which pauses it for good.
 - **The rebalancer chooses the price within the guard's view.** The guard bounds only the
   losses its feeds can see. Feeds may lag within their deviation thresholds, price an
   underlying while the token trades below it, or go stale. Weeks are fixed epochs, so losses

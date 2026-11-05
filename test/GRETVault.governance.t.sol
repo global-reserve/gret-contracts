@@ -151,7 +151,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // basketVersion bumps revert prepared redemptions during a notice
+    // basketVersion bumps revert redemptions prepared with positional minima during a notice
     // ---------------------------------------------------------------------------------------------
 
     function _announceJunk(uint256 n) internal returns (address[] memory junk) {
@@ -184,7 +184,9 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         uint256 reverted;
         for (uint256 k; k < 2 * n; ++k) {
             uint256 v = vault.basketVersion();
+            // A positive minimum makes the limits positional, so they are tied to the version.
             uint256[] memory minOut = new uint256[](vault.componentCount());
+            minOut[0] = 1;
             // Front-run: anyone adds a ready junk token, or governance removes one at once.
             if (k < n) {
                 vault.addComponent(junk[k]);
@@ -228,6 +230,7 @@ contract GRETVaultGovernanceTest is GRETVaultCase {
         vault.addComponent(address(late));
         uint256 v = vault.basketVersion();
         uint256[] memory minOut = new uint256[](vault.componentCount());
+        minOut[0] = 1;
         vm.prank(GOVERNANCE);
         vault.removeComponent(junk[1]); // not the last index: also shifts junk[2]
         vm.expectRevert(abi.encodeWithSelector(GRETVault.BasketChanged.selector, v, v + 1));

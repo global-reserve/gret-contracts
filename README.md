@@ -162,7 +162,7 @@ Functions of `GRETVault`, besides the standard ERC-20 ones and EIP-2612 `permit`
 | --- | --- | --- |
 | `mint(shares, to, maxAmountsIn, minShares, version)` | Anyone, or whom the eligibility contract approves | The caller contributes every component with a reserve in proportion; `to` receives the GRET, minus the mint fee; the first mint issues exactly 1 GRET |
 | `redeem(shares, to, minAmountsOut, version)` | Any holder, or whom the eligibility contract approves | Pays the redemption fee in GRET and burns the rest; `to` receives every component; redeeming the whole supply pays no fee; all or nothing; leaves the supply at 0 or at least 1 GRET |
-| `redeemSkipping(shares, to, minAmountsOut, skipped, version)` | Any holder, or whom the eligibility contract approves | Same redemption without the listed components, which are not called; the caller gives up its share of them; leaving zero supply pauses minting |
+| `redeemSkipping(shares, to, minAmountsOut, skipped, version)` | Any holder, or whom the eligibility contract approves | Same redemption without the listed components, which are not called; listed addresses outside the basket are ignored; the caller gives up its share of them; leaving zero supply pauses minting |
 | `convertToClaims(shares)` | Any holder | During liquidation, burns GRET in exchange for per-component rights |
 | `claim(i, to, minAmount)` | Whoever converted | Withdraws the pending right over component `i` |
 | `activateLiquidation()` | Governance | With positive supply, freezes the share denominator and closes mint/normal redemption without token calls |
@@ -216,7 +216,9 @@ no Ethereum feed and cannot be swapped.
 
 Arrays of amounts follow the order of `components()`. `version` is the `basketVersion()` they
 were prepared for: it grows with every addition or removal, and a call prepared for another
-basket reverts with `BasketChanged` instead of applying a limit to another token.
+basket reverts with `BasketChanged` instead of applying a limit to another token. Redemption
+minima that are all zero, or an empty array, limit nothing, so the redemption ignores `version`
+and no basket change can refuse it for that reason.
 
 ## Repository layout
 

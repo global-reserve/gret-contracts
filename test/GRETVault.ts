@@ -484,15 +484,14 @@ describe("GRETVault: basket, mint, normal redemption and live income", async () 
       assert.equal(await faulty.read.balanceOf([vault.address]), INITIAL_AMOUNTS[2]);
     });
 
-    it("redeemSkipping checks the skipped list, the minima and who may redeem", async () => {
+    it("redeemSkipping ignores addresses outside the basket and checks the minima and who may redeem", async () => {
       const { vault, tokens, faulty, alice, carol } = await networkHelpers.loadFixture(bootstrappedFixture);
       await vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account });
 
-      await viem.assertions.revertWithCustomErrorWithArgs(
-        vault.write.redeemSkipping([INITIAL_SHARES, alice.account.address, NO_MIN, [carol.account.address], 0n], { account: alice.account }),
-        vault,
-        "NotAComponent",
-        [getAddress(carol.account.address)],
+      // Listing an address that is not a component skips nothing.
+      assert.deepEqual(
+        await vault.read.previewRedeemSkipping([INITIAL_SHARES, [carol.account.address]]),
+        await vault.read.previewRedeem([INITIAL_SHARES]),
       );
       await viem.assertions.revertWithCustomErrorWithArgs(
         vault.write.redeemSkipping([INITIAL_SHARES, alice.account.address, [0n, 0n, 1n], [faulty.address], 0n], { account: alice.account }),

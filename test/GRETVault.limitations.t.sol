@@ -57,6 +57,30 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         assertGt(marketBefore - marketAfter, marketBefore * 98 / 100);
     }
 
+    /// A token announced for the basket can join and be activated at once. Every exit that does not
+    /// skip it then calls it, so a token whose calls revert refuses those exits until the holder
+    /// lists it, including exits prepared earlier that listed only other tokens.
+    function test_activatedNewcomerRefusesExitsThatDoNotSkipIt() public {
+        MockFaultyERC20 joining = new MockFaultyERC20("Joining", "J", 18);
+        vm.prank(GOVERNANCE);
+        vault.announceComponent(address(joining));
+        vm.warp(block.timestamp + 7 days);
+        vault.addComponent(address(joining));
+        joining.setFault(MockFaultyERC20.Fault.RevertOnBalanceOf);
+        vm.prank(GOVERNANCE);
+        vault.activateComponent(address(joining));
+
+        address[] memory skipped = new address[](1);
+        skipped[0] = address(faulty);
+        vm.startPrank(ALICE);
+        vm.expectRevert(MockFaultyERC20.BalanceOfBlocked.selector);
+        vault.redeem(SHARE, ALICE, new uint256[](0), 0);
+        vm.expectRevert(MockFaultyERC20.BalanceOfBlocked.selector);
+        vault.redeemSkipping(SHARE, ALICE, new uint256[](0), skipped, 0);
+        vm.stopPrank();
+        assertEq(vault.balanceOf(ALICE), SHARE);
+    }
+
     /// The notice binds an eligibility contract's address, not its rules: its list can refuse a
     /// holder at once, and a broken contract refuses everyone until governance removes it.
     function test_eligibilityRulesChangeWithoutNotice() public {

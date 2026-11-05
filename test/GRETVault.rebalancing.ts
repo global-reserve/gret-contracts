@@ -627,16 +627,19 @@ describe("GRETVault: rebalancing and basket changes", async () => {
       await vault.write.addComponent([tokenD.address], { account: alice.account });
       assert.equal(await vault.read.basketVersion(), 2n);
 
+      // A positive minimum makes redemption limits positional; zero minima limit nothing and are
+      // not tied to a version.
+      const positional = [1n, 0n, 0n];
       for (const call of [
         () => vault.write.mint([INITIAL_SHARES, alice.account.address, NO_MAX, 0n, 0n], { account: alice.account }),
-        () => vault.write.redeem([INITIAL_SHARES, alice.account.address, NO_MIN, 0n], { account: alice.account }),
-        () => vault.write.redeemSkipping([INITIAL_SHARES, alice.account.address, NO_MIN, [], 0n], { account: alice.account }),
+        () => vault.write.redeem([INITIAL_SHARES, alice.account.address, positional, 0n], { account: alice.account }),
+        () => vault.write.redeemSkipping([INITIAL_SHARES, alice.account.address, positional, [], 0n], { account: alice.account }),
         () => vault.write.setInitialAmounts([INITIAL_AMOUNTS, 0n], { account: governance.account }),
       ]) {
         await viem.assertions.revertWithCustomErrorWithArgs(call(), vault, "BasketChanged", [0n, 2n]);
       }
-      // The same arrays, prepared for the current basket, go through.
-      await vault.write.redeem([INITIAL_SHARES, alice.account.address, NO_MIN, 2n], { account: alice.account });
+      // The same limits, prepared for the current basket, go through.
+      await vault.write.redeem([INITIAL_SHARES, alice.account.address, positional, 2n], { account: alice.account });
       assert.equal(await vault.read.balanceOf([alice.account.address]), 0n);
     });
 

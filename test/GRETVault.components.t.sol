@@ -106,9 +106,11 @@ contract GRETVaultComponentsTest is Test {
         vm.expectRevert(abi.encodeWithSelector(GRETVault.BasketChanged.selector, oldVersion, oldVersion + 2));
         vm.prank(BOB);
         vault.mint(SHARE, BOB, new uint256[](4), 0, oldVersion);
+        uint256[] memory positional = new uint256[](4);
+        positional[index] = 1;
         vm.expectRevert(abi.encodeWithSelector(GRETVault.BasketChanged.selector, oldVersion, oldVersion + 2));
         vm.prank(ALICE);
-        vault.redeem(SHARE, ALICE, new uint256[](4), oldVersion);
+        vault.redeem(SHARE, ALICE, positional, oldVersion);
 
         // Give the re-added token a distinct reserve, so later removals exercise every position.
         MockERC20(sold).mint(address(vault), donation * 1e10);
