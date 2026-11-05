@@ -363,6 +363,14 @@ was proposed. Like `componentReadyAt`, `writeOffReadyAt` and `pendingFeesReadyAt
 proposal until it is executed, cancelled or replaced, also after it expires at `readyAt +
 EXECUTION_WINDOW`, when it can no longer execute.
 
+Activation, the mint pause and eligibility removal emit their events only on a change. Other
+setters emit on every successful call, even when nothing changes: `revokeRebalancer` emits
+`RebalancerChanged` when there is no rebalancer, `setFeeRecipient` and `proposeFees` emit
+`FeeRecipientChanged` and `FeesChanged` with unchanged values, and re-appointing the current
+rebalancer, guard, eligibility contract or governance emits `RebalancerChanged`,
+`PriceGuardChanged`, `EligibilityChanged` or `GovernanceTransferred` with equal previous and
+next addresses. Monitors compare the values instead of counting events.
+
 `reserves`, both normal previews, the skipping preview, `pendingRights` and `claimable` use
 `nonReentrantView`: callback consumers cannot read an intermediate accounting state. Mutations
 use the transient reentrancy guard. Storage-only membership, exclusion and
