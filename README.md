@@ -10,9 +10,9 @@ assets on Ethereum, minted and redeemed in kind.
 **[Website](https://grt.finance)** · [Specification](docs/SPECIFICATION.md)
 
 > [!WARNING]
-> **Not audited by an audit firm.** An AI model audited this source at the project's request; its
-> [report](docs/audits/2026-11-05-ai-audit.md) lists every finding and how each was fixed or
-> documented. An earlier version of the vault, which that audit does not cover, is deployed on
+> **Not audited by an audit firm.** An AI model, Claude Opus 5.5, audited this source at the
+> project's request; its [report](docs/audits/2026-11-05-claude-opus-5-5.md) lists every finding and
+> how each was fixed or documented. An earlier version of the vault, which that audit does not cover, is deployed on
 > Ethereum mainnet as a pilot with the project's own funds, not meant for third parties. Nothing in
 > this repository is an offer to buy or sell any asset, nor investment advice. Use it at your own
 > risk.
@@ -81,7 +81,7 @@ touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the
 | --- | --- |
 | [Specification](docs/SPECIFICATION.md) | Design, rules, implementation details, operating assumptions and known limitations |
 | [Mainnet pilot](docs/PILOT.md) | Steps to deploy the vault and make the first mint, and the record of the October 27 deployment |
-| [Audit report](docs/audits/2026-11-05-ai-audit.md) | The AI audit of tag `audit-2026-11`: findings, evidence and the status of each fix |
+| [Audit report](docs/audits/2026-11-05-claude-opus-5-5.md) | The audit of tag `audit-2026-11` by Claude Opus 5.5, an AI model: findings, evidence and the status of each fix |
 | [Security policy](SECURITY.md) | How to report a vulnerability |
 | [Contributing](CONTRIBUTING.md) | Setup, what to run for each change and conventions |
 | [Code of conduct](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
@@ -313,8 +313,9 @@ it for reentrancy guards that are cleared at the end of the call is safe.
 
 ## Security
 
-An AI model audited this source at tag `audit-2026-11` at the project's request, and a second AI
-review checked the fixes that followed; the [report](docs/audits/2026-11-05-ai-audit.md) records
+An AI model, Claude Opus 5.5, audited this source at tag `audit-2026-11` at the project's request,
+and a second agent of the same model checked the fixes that followed; the
+[report](docs/audits/2026-11-05-claude-opus-5-5.md) records
 every finding, its status and its evidence. No audit firm has reviewed the contracts. Report
 vulnerabilities privately as described in [SECURITY.md](SECURITY.md); the limitations accepted
 by design are described in the [specification](docs/SPECIFICATION.md#known-limitations).
