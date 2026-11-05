@@ -215,8 +215,11 @@ fee delays both values: anyone may apply it after seven days and within the foll
 Positive fees require a nonzero recipient distinct from the vault. Mint fees split the paid
 issuance; redemption fees transfer GRET to that recipient and only the remainder is burned,
 except that redeeming the whole supply pays no fee. Fees round up, so a positive rate never
-charges nothing; a mint whose fee would take every share reverts with `ZeroShares`.
-Liquidation has no fees. Fee rounding and the minimum supply can affect very small positions.
+charges nothing; a mint whose fee would take every share reverts with `ZeroShares`. A
+redemption whose fee takes every share, such as 1 wei under a positive fee when it is not the
+whole supply, still pays that fee but burns and sends nothing; a positive `minAmountsOut`
+refuses it. Liquidation has no fees. Fee rounding and the minimum supply can affect very small
+positions.
 
 Governance may pause minting, activate liquidation, manage component lifecycle and initial
 amounts, configure fees and their recipient, rescue permitted tokens, and appoint the guard,
