@@ -468,20 +468,25 @@ These are accepted consequences of the design, not defects. A change to any of t
 design decision and must be made here first.
 
 - **Governance holds broad powers.** At once it can activate the irreversible liquidation,
-  pause minting, reactivate components, rescue foreign tokens, change the fee recipient, lower
-  fees, revoke the rebalancer and remove the eligibility contract. After seven days' notice it
-  can appoint a rebalancer with a guard that accepts every swap and exchange the reserves for
-  anything, add or write off components, raise fees up to 5%, appoint an eligibility contract
-  that refuses mint and redemption, and hand over governance. Removing empty components and
-  adding announced ones change `basketVersion`, so a hostile governance that announced enough
-  tokens a week earlier can make every redemption with a positive minimum revert with
-  `BasketChanged` throughout a notice. Redemptions whose minima are all zero are not tied to
-  the version, but accept whatever swaps the guard allows until they execute. An announced
-  token can join and be activated at once; if its calls fail, every exit that does not skip it
-  reverts; an exit prepared in advance avoids this by listing every announced token. If the
-  governance key is lost, nobody can activate liquidation, reactivate components, change the
-  basket or replace governance; redemption keeps working, and so does minting until a write-off
-  proposed earlier is executed or the last holder leaves by skipping, which pauses it for good.
+  pause or resume minting, reactivate components, rescue foreign tokens, change the fee
+  recipient, lower fees, revoke the rebalancer and remove the eligibility contract. Resuming
+  minting and reactivating together can take a written-off component's recovery: in one
+  transaction, a governance that ignores the operating assumption on write-offs resumes
+  minting, mints without paying for the excluded component, reactivates it and redeems, taking
+  nearly all of what recovered. Holders' claim on a written-off balance therefore rests on that
+  assumption. After seven days' notice it can appoint a rebalancer with a guard that accepts
+  every swap and exchange the reserves for anything, add or write off components, raise fees up
+  to 5%, appoint an eligibility contract that refuses mint and redemption, and hand over
+  governance. Removing empty components and adding announced ones change `basketVersion`, so a
+  hostile governance that announced enough tokens a week earlier can make every redemption with
+  a positive minimum revert with `BasketChanged` throughout a notice. Redemptions whose minima
+  are all zero are not tied to the version, but accept whatever swaps the guard allows until
+  they execute. An announced token can join and be activated at once; if its calls fail, every
+  exit that does not skip it reverts; an exit prepared in advance avoids this by listing every
+  announced token. If the governance key is lost, nobody can activate liquidation, reactivate
+  components, change the basket or replace governance; redemption keeps working, and so does
+  minting until a write-off proposed earlier is executed or the last holder leaves by skipping,
+  which pauses it for good.
 - **The rebalancer chooses the price within the guard's view.** The guard bounds only the
   losses its feeds can see. Feeds may lag within their deviation thresholds, price an
   underlying while the token trades below it, or go stale. A split or multiplier change makes

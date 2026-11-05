@@ -67,6 +67,33 @@ contract MultiplierToken {
     }
 }
 
+/// @dev Governance as a contract, such as a Safe or a timelock executor, that runs a batch in one
+/// transaction.
+contract BatchingGovernance {
+    function proposeWriteOff(GRETVault vault, address token) external {
+        vault.proposeWriteOff(token);
+    }
+
+    /// @dev Resumes minting, mints `shares` and redeems them, reactivating `writtenOff` before the
+    /// mint, as the operating assumption asks, or between the mint and the redemption.
+    function enterAndLeave(GRETVault vault, address writtenOff, uint256 shares, bool reactivateFirst)
+        external
+    {
+        IERC20[] memory tokens = vault.components();
+        uint256[] memory maxIn = new uint256[](tokens.length);
+        for (uint256 i; i < tokens.length; ++i) {
+            tokens[i].approve(address(vault), type(uint256).max);
+            maxIn[i] = type(uint256).max;
+        }
+        if (reactivateFirst) vault.activateComponent(writtenOff);
+        vault.setMintPaused(false);
+        vault.mint(shares, address(this), maxIn, 0, vault.basketVersion());
+        if (!reactivateFirst) vault.activateComponent(writtenOff);
+        vault.redeem(shares, address(this), new uint256[](0), 0);
+        vault.setMintPaused(true);
+    }
+}
+
 /// @notice Known limitations (docs/SPECIFICATION.md): each test reproduces the accepted behavior;
 /// change it if the decision changes.
 contract GRETVaultLimitationsTest is GRETVaultCase {
@@ -187,6 +214,56 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vault.redeemSkipping(SHARE, ALICE, new uint256[](0), skipped, 0);
         vm.stopPrank();
         assertEq(vault.balanceOf(ALICE), SHARE);
+    }
+
+    /// Resuming minting and reactivating a component are both immediate. Once a written-off F
+    /// recovers, a governance that reactivates it only after minting takes nearly all of it in one
+    /// transaction: it mints 99 GRET paying only H, reactivates F and redeems. Alice, who bore the
+    /// write-off, keeps 1% of her F.
+    function test_governanceCanTakeAWrittenOffRecoveryAtOnce() public {
+        (GRETVault target, BatchingGovernance batch) = _writtenOffAndRecovered();
+        batch.enterAndLeave(target, address(faulty), 99 * SHARE, false);
+        assertEq(healthy.balanceOf(address(batch)), 198e18); // its contribution, back in full
+        assertEq(faulty.balanceOf(address(batch)), 495e18 + 4.95e18); // 4.95 F it never paid for
+        vm.prank(ALICE);
+        uint256[] memory paid = target.redeem(SHARE, ALICE, new uint256[](0), 0);
+        assertEq(paid[0], 2e18);
+        assertEq(paid[1], 0.05e18);
+    }
+
+    /// The same batch in the order the operating assumption asks, reactivating before minting,
+    /// leaves the whole recovery to Alice.
+    function test_reactivatingBeforeMintingLeavesTheRecoveryToHolders() public {
+        (GRETVault target, BatchingGovernance batch) = _writtenOffAndRecovered();
+        batch.enterAndLeave(target, address(faulty), 99 * SHARE, true);
+        assertEq(healthy.balanceOf(address(batch)), 198e18);
+        assertEq(faulty.balanceOf(address(batch)), 495e18); // paid for F and got it back
+        vm.prank(ALICE);
+        uint256[] memory paid = target.redeem(SHARE, ALICE, new uint256[](0), 0);
+        assertEq(paid[1], 5e18);
+    }
+
+    /// @dev Alice alone holds 1 GRET (2 H, 5 F) of a vault governed by `batch`. F is frozen, written
+    /// off after its notice, and then recovers.
+    function _writtenOffAndRecovered() internal returns (GRETVault target, BatchingGovernance batch) {
+        batch = new BatchingGovernance();
+        IERC20[] memory basket = new IERC20[](2);
+        basket[0] = healthy;
+        basket[1] = faulty;
+        target = new GRETVault(basket, _pair(2e18, 5e18), address(batch));
+        vm.startPrank(ALICE);
+        healthy.approve(address(target), type(uint256).max);
+        faulty.approve(address(target), type(uint256).max);
+        target.mint(SHARE, ALICE, _pair(2e18, 5e18), SHARE, 0);
+        vm.stopPrank();
+        faulty.setFault(MockFaultyERC20.Fault.RevertOnTransfer); // the issuer freezes F
+        batch.proposeWriteOff(target, address(faulty));
+        vm.warp(block.timestamp + 7 days);
+        target.writeOffComponent(address(faulty));
+        assertTrue(target.mintPaused());
+        faulty.setFault(MockFaultyERC20.Fault.None); // F recovers
+        healthy.mint(address(batch), 198e18);
+        faulty.mint(address(batch), 495e18);
     }
 
     /// The notice binds an eligibility contract's address, not its rules: its list can refuse a
