@@ -192,6 +192,29 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         assertEq(guard.valueOf(address(split), split.balanceOf(address(target))), 50_000e18);
     }
 
+    /// The receipt check adds the ten-unit tolerance to what arrived, so a request within ten units
+    /// of the largest `uint256` reverts with an arithmetic panic even when everything arrives. Ten
+    /// units less goes through.
+    function test_receiptToleranceOverflowsNearTheLargestAmount() public {
+        MockERC20 huge = new MockERC20("Maximum supply", "MAX", 18);
+        IERC20[] memory basket = new IERC20[](1);
+        basket[0] = huge;
+        GRETVault target = new GRETVault(basket, _one(type(uint256).max), GOVERNANCE);
+        huge.mint(ALICE, type(uint256).max);
+        vm.prank(ALICE);
+        huge.approve(address(target), type(uint256).max);
+
+        vm.expectRevert(abi.encodeWithSignature("Panic(uint256)", 0x11));
+        vm.prank(ALICE);
+        target.mint(SHARE, ALICE, _one(type(uint256).max), SHARE, 0);
+
+        vm.prank(GOVERNANCE);
+        target.setInitialAmounts(_one(type(uint256).max - 10), 0);
+        vm.prank(ALICE);
+        (uint256 minted,) = target.mint(SHARE, ALICE, _one(type(uint256).max), SHARE, 0);
+        assertEq(minted, SHARE);
+    }
+
     /// A token that converts amounts to shares arrives up to about one multiplier of base units
     /// short, and the receipt tolerance is ten units. At SPYx's multiplier every mint passes; at
     /// twenty times it, as after splits applied through the multiplier, part of the mints of

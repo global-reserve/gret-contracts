@@ -563,7 +563,9 @@ design decision and must be made here first.
   and of all swaps that buy it, revert with `UnexpectedBalance` whatever their size, until the
   component is sold out and deactivated or written off. After a severe loss leaves only a few
   units of a rounding component, those units bound the issuance and the minter overpays the
-  other components; `minShares` lets the minter refuse.
+  other components; `minShares` lets the minter refuse. The check adds the tolerance to what
+  arrived, so a request within ten units of the largest `uint256` reverts with an arithmetic
+  panic even when everything arrives; no real token comes near that amount.
 - **A small mint can revert on a nearly empty rounding component.** While such a component keeps
   only a few units, a small mint asks it for one or two, which a token that converts amounts to
   shares can deliver as nothing; the mint reverts until the remainder is sold or the component
