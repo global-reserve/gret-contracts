@@ -10,12 +10,12 @@ assets on Ethereum, minted and redeemed in kind.
 **[Website](https://grt.finance)** · [Specification](docs/SPECIFICATION.md)
 
 > [!WARNING]
-> **Not audited by an audit firm.** An AI model, Claude Opus 5.5, audited this source at the
-> project's request; its [report](docs/audits/2026-11-05-claude-opus-5-5.md) lists every finding and
-> how each was fixed or documented. An earlier version of the vault, which that audit does not cover, is deployed on
-> Ethereum mainnet as a pilot with the project's own funds, not meant for third parties. Nothing in
-> this repository is an offer to buy or sell any asset, nor investment advice. Use it at your own
-> risk.
+> **Not audited by an audit firm.** AI models reviewed this source at the project's request; their
+> reports are in [`docs/audits/`](docs/audits/). The latest, by Codex on tag `audit-2026-11-fixes`,
+> found two Low issues that are not fixed yet. An earlier version of the vault, which these reviews
+> do not cover, is deployed on Ethereum mainnet as a pilot with the project's own funds, not meant
+> for third parties. Nothing in this repository is an offer to buy or sell any asset, nor
+> investment advice. Use it at your own risk.
 
 The current source implements automatic live-balance accounting and has **not been deployed**.
 The immutable October 27 pilot below still uses recognized reserves and governance `sync`.
@@ -81,7 +81,9 @@ touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the
 | --- | --- |
 | [Specification](docs/SPECIFICATION.md) | Design, rules, implementation details, operating assumptions and known limitations |
 | [Mainnet pilot](docs/PILOT.md) | Steps to deploy the vault and make the first mint, and the record of the October 27 deployment |
-| [Audit report](docs/audits/2026-11-05-claude-opus-5-5.md) | The audit of tag `audit-2026-11` by Claude Opus 5.5, an AI model: findings, evidence and the status of each fix |
+| [Audit by Claude Opus 5.5](docs/audits/2026-11-05-claude-opus-5-5.md) | Audit of tag `audit-2026-11`: sixteen findings, and a review of the commits that fixed or documented each |
+| [Review by Gemini](docs/audits/2026-11-05-gemini.md) | Review of the vault file alone at tag `audit-2026-11-fixes`: no findings |
+| [Audit by Codex](docs/audits/2026-11-09-codex.md) | Audit of tag `audit-2026-11-fixes`: two Low findings, not fixed yet |
 | [Security policy](SECURITY.md) | How to report a vulnerability |
 | [Contributing](CONTRIBUTING.md) | Setup, what to run for each change and conventions |
 | [Code of conduct](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
@@ -211,14 +213,12 @@ over; an expired proposal stays there until it is cancelled or replaced.
 Chainlink feed per token and refuses a token without a fresh price, a swap that loses more
 than 2% of what the vault sells, and swaps that would take more than 2% of the vault's priced
 backing in a week: its active, readable components with a feed, measured at the moment of each
-loss. A token whose decimals
-change after the guard is deployed can no longer be swapped. It has
+loss. A token whose decimals change after the guard is deployed can no longer be swapped. It has
 no owner: its feeds and limits are fixed at deployment, and changing them means appointing
 another guard with the 7-day wait; the new guard continues the week's loss count of the one it
 replaces. It ignores the `guardData` the vault forwards from the rebalancer. Mint, redemption and
-liquidation never call it. The
-proposed feeds are `PRICE_FEEDS` in `scripts/pilot/config.ts`; six of the 11 components have
-no Ethereum feed and cannot be swapped.
+liquidation never call it. The proposed feeds are `PRICE_FEEDS` in `scripts/pilot/config.ts`;
+six of the 11 components have no Ethereum feed and cannot be swapped.
 
 Arrays of amounts follow the order of `components()`. `version` is the `basketVersion()` they
 were prepared for: it grows with every addition or removal, and a call prepared for another
@@ -313,12 +313,16 @@ it for reentrancy guards that are cleared at the end of the call is safe.
 
 ## Security
 
-An AI model, Claude Opus 5.5, audited this source at tag `audit-2026-11` at the project's request,
-and a second agent of the same model checked the fixes that followed; the
-[report](docs/audits/2026-11-05-claude-opus-5-5.md) records
-every finding, its status and its evidence. No audit firm has reviewed the contracts. Report
-vulnerabilities privately as described in [SECURITY.md](SECURITY.md); the limitations accepted
-by design are described in the [specification](docs/SPECIFICATION.md#known-limitations).
+Three AI reviews are recorded in [`docs/audits/`](docs/audits/), each with the commit it covers:
+
+- an audit of tag `audit-2026-11` by Claude Opus 5.5, with a review of the fixes that followed;
+- a review of the vault file at tag `audit-2026-11-fixes` by Gemini, with no findings;
+- an audit of tag `audit-2026-11-fixes` by Codex, which found two Low issues that are not fixed
+  yet.
+
+No audit firm has reviewed the contracts. Report vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md); the limitations accepted by design are described in the
+[specification](docs/SPECIFICATION.md#known-limitations).
 
 ## License
 

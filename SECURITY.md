@@ -35,10 +35,9 @@ Out of scope:
 
 ## Status
 
-An AI model, Claude Opus 5.5, audited this source at tag `audit-2026-11` at the project's request.
-Its report, [`docs/audits/2026-11-05-claude-opus-5-5.md`](docs/audits/2026-11-05-claude-opus-5-5.md),
-lists every finding,
-including those fixed since, with its status. No audit firm has reviewed the contracts. The
-limitations accepted by design are described in
+AI models reviewed this source at the project's request. Their reports are in
+[`docs/audits/`](docs/audits/), each naming the commit it covers. The latest, by Codex on tag
+`audit-2026-11-fixes`, found two Low issues that are not fixed yet. No audit firm has reviewed
+the contracts. The limitations accepted by design are described in
 [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md#known-limitations). Nothing so far clears the
 vault for material third-party capital.
