@@ -11,11 +11,11 @@ assets on Ethereum, minted and redeemed in kind.
 
 > [!WARNING]
 > **Not audited by an audit firm.** AI models reviewed this source at the project's request; their
-> reports are in [`docs/audits/`](docs/audits/). The latest, by Codex on tag `audit-2026-11-fixes`,
-> found two Low issues that are not fixed yet. An earlier version of the vault, which these reviews
-> do not cover, is deployed on Ethereum mainnet as a pilot with the project's own funds, not meant
-> for third parties. Nothing in this repository is an offer to buy or sell any asset, nor
-> investment advice. Use it at your own risk.
+> reports are in [`docs/audits/`](docs/audits/). The latest, by Codex on tag
+> `audit-2026-11-fixes`, found two Low issues, now documented as known limitations. An earlier
+> version of the vault, which these reviews do not cover, is deployed on Ethereum mainnet as a
+> pilot with the project's own funds, not meant for third parties. Nothing in this repository is
+> an offer to buy or sell any asset, nor investment advice. Use it at your own risk.
 
 The current source implements automatic live-balance accounting and has **not been deployed**.
 The immutable October 27 pilot below still uses recognized reserves and governance `sync`.
@@ -83,7 +83,7 @@ touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the
 | [Mainnet pilot](docs/PILOT.md) | Steps to deploy the vault and make the first mint, and the record of the October 27 deployment |
 | [Audit by Claude Opus 5.5](docs/audits/2026-11-05-claude-opus-5-5.md) | Audit of tag `audit-2026-11`: sixteen findings, and a review of the commits that fixed or documented each |
 | [Review by Gemini](docs/audits/2026-11-05-gemini.md) | Review of the vault file alone at tag `audit-2026-11-fixes`: no findings |
-| [Audit by Codex](docs/audits/2026-11-09-codex.md) | Audit of tag `audit-2026-11-fixes`: two Low findings, not fixed yet |
+| [Audit by Codex](docs/audits/2026-11-09-codex.md) | Audit of tag `audit-2026-11-fixes`: two Low findings, documented as known limitations |
 | [Security policy](SECURITY.md) | How to report a vulnerability |
 | [Contributing](CONTRIBUTING.md) | Setup, what to run for each change and conventions |
 | [Code of conduct](CODE_OF_CONDUCT.md) | Contributor Covenant 2.1 |
@@ -317,8 +317,8 @@ Three AI reviews are recorded in [`docs/audits/`](docs/audits/), each with the c
 
 - an audit of tag `audit-2026-11` by Claude Opus 5.5, with a review of the fixes that followed;
 - a review of the vault file at tag `audit-2026-11-fixes` by Gemini, with no findings;
-- an audit of tag `audit-2026-11-fixes` by Codex, which found two Low issues that are not fixed
-  yet.
+- an audit of tag `audit-2026-11-fixes` by Codex, which found two Low issues, now documented as
+  known limitations.
 
 No audit firm has reviewed the contracts. Report vulnerabilities privately as described in
 [SECURITY.md](SECURITY.md); the limitations accepted by design are described in the

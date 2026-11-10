@@ -37,7 +37,7 @@ Out of scope:
 
 AI models reviewed this source at the project's request. Their reports are in
 [`docs/audits/`](docs/audits/), each naming the commit it covers. The latest, by Codex on tag
-`audit-2026-11-fixes`, found two Low issues that are not fixed yet. No audit firm has reviewed
-the contracts. The limitations accepted by design are described in
+`audit-2026-11-fixes`, found two Low issues, now documented as known limitations. No audit firm
+has reviewed the contracts. The limitations accepted by design are described in
 [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md#known-limitations). Nothing so far clears the
 vault for material third-party capital.
