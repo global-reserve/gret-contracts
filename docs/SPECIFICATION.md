@@ -201,8 +201,9 @@ Guard limits and price assumptions:
 - Feeds may lag, price an underlying rather than the token's market peg, or become stale on
   weekends. A split or multiplier change alters what one unit of a token is worth when the
   issuer applies it, not when its feed moves. Six current components lack configured Ethereum
-  feeds; they cannot be traded by this guard. Neither price accuracy nor issuer solvency is
-  guaranteed.
+  feeds; they cannot be traded by this guard, so the rebalancer cannot sell them, and while
+  GRET is outstanding such a component can stop backing it only through a write-off, which
+  keeps its slot. Neither price accuracy nor issuer solvency is guaranteed.
 
 Rebalancer and guard appointments wait seven days and expire seven days later. The proposed
 rebalancer accepts its own appointment; anyone may apply a ready guard. Governance may revoke
@@ -467,8 +468,10 @@ them, and an assessment of the vault should take them as part of its trust model
   priced token's market price against its feed. Revoke the rebalancer after an unexpected loss
   or a depeg, and before a scheduled split, multiplier change or any other change of what one
   unit of a priced component represents; propose it again only once the feed prices the new
-  unit. Income paid in another token or requiring an issuer claim is not counted
-  automatically.
+  unit. `Minted` and `Redeemed` list amounts by position, and a removal moves the components
+  after it, so match those amounts to tokens by replaying `ComponentAdded` and
+  `ComponentRemoved` in log order. Income paid in another token or requiring an issuer claim is
+  not counted automatically.
 - **Time distributions.** Before a known distribution or multiplier change, consider pausing
   minting so that entrants right before it do not share it; earlier entrants still do. A
   multiplier change also requires revoking the rebalancer, as above. A split that would take a
@@ -485,8 +488,10 @@ them, and an assessment of the vault should take them as part of its trust model
   announced, added and activated again. During liquidation it cannot rejoin: rescue it and
   distribute it outside the vault, recording each payment.
 - **Reconcile liquidation.** Reconstruct conversions and payouts from `ConvertedToClaims` and
-  `Claimed`. Recoveries are shared pro rata, so any targeted compensation for a cut is settled
-  outside the vault.
+  `Claimed`. `Claimed` records the payout requested from the token, so a transfer that moves
+  nothing looks like a full payment: compare each claim with what the token actually moved.
+  Recoveries are shared pro rata, so any targeted compensation for a cut is settled outside the
+  vault.
 - **Govern with a recoverable key.** Before third-party funds, a Safe multisig with a tested
   recovery procedure governs.
 - **Configure feeds to their heartbeat.** Each guard feed's `maxAge` follows that feed's update
@@ -573,8 +578,9 @@ design decision and must be made here first.
   of the basket.
 - **Issuers control their tokens.** A freeze, an upgrade, an expensive call or an unreadable
   balance can block normal mint and redemption until holders skip the component or governance
-  writes it off; its liquidation claim waits until reads and transfers recover. The
-  128-component cap cannot bound arbitrary issuer code.
+  writes it off; its liquidation claim waits until reads and transfers recover. A written-off
+  component keeps its slot for good, so repeated issuer failures can fill the 128 slots and
+  leave no room for new components. The 128-component cap cannot bound arbitrary issuer code.
 - **Dust and donations.** One unsolicited base unit makes an active zero-balance component
   required again. A donation can front-run a removal; for a token that cannot be sold, a
   donation above the dust allowance leaves a write-off, which keeps the slot forever, as the
