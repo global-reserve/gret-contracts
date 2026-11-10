@@ -13,7 +13,11 @@ import {MockEligibility} from "../contracts/mocks/MockEligibility.sol";
 import {ChainlinkPriceGuard, IChainlinkFeed} from "../contracts/ChainlinkPriceGuard.sol";
 import {MockAggregator} from "../contracts/mocks/MockAggregator.sol";
 import {
-    GRETVaultCase, SenderSurchargeToken, NoOpTransferToken, ShareRoundingToken
+    GRETVaultCase,
+    SenderSurchargeToken,
+    NoOpTransferToken,
+    ShareRoundingToken,
+    GasBurnerToken
 } from "./helpers/GRETVaultCase.sol";
 
 /// @dev Model of a token that keeps internal shares and lists each balance as shares times a
@@ -213,6 +217,53 @@ contract GRETVaultLimitationsTest is GRETVaultCase {
         vm.prank(ALICE);
         (uint256 minted,) = target.mint(SHARE, ALICE, _one(type(uint256).max), SHARE, 0);
         assertEq(minted, SHARE);
+    }
+
+    /// Each balance read in `rescue` gets at most 200,000 gas, but their sum is not bounded. In a basket
+    /// of 128 components, 127 of them whose reads burn all the gas they get make a rescue of a foreign
+    /// token exceed the per-transaction gas cap; while their reads are cheap, the same rescue passes.
+    function test_manyCostlyReadsCanBlockRescueAtTheComponentCap() public {
+        uint256 count = 128;
+        IERC20[] memory basket = new IERC20[](count);
+        GasBurnerToken[] memory burners = new GasBurnerToken[](count);
+        uint256[] memory initial = new uint256[](count);
+        basket[0] = healthy;
+        for (uint256 i = 1; i < count; ++i) {
+            burners[i] = new GasBurnerToken();
+            basket[i] = burners[i];
+            initial[i] = 1;
+        }
+        initial[0] = 1e18;
+        GRETVault target = new GRETVault(basket, initial, GOVERNANCE);
+        // The first mint contributes H alone; each other component already holds a balance.
+        uint256[] memory healthyOnly = new uint256[](count);
+        healthyOnly[0] = 1e18;
+        vm.prank(GOVERNANCE);
+        target.setInitialAmounts(healthyOnly, 0);
+        for (uint256 i = 1; i < count; ++i) {
+            burners[i].mint(address(target), 1e18);
+        }
+        uint256[] memory maxIn = new uint256[](count);
+        maxIn[0] = 1e18;
+        vm.startPrank(ALICE);
+        healthy.approve(address(target), type(uint256).max);
+        target.mint(SHARE, ALICE, maxIn, SHARE, 0);
+        vm.stopPrank();
+        MockERC20 foreign = new MockERC20("Foreign", "FX", 18);
+        foreign.mint(address(target), 2e18);
+
+        bytes memory rescue = abi.encodeCall(GRETVault.rescue, (address(foreign), CAROL, 1e18));
+        vm.prank(GOVERNANCE);
+        (bool ok,) = address(target).call{gas: 16_777_216}(rescue);
+        assertTrue(ok, "control: cheap reads");
+
+        for (uint256 i = 1; i < count; ++i) {
+            burners[i].enable();
+        }
+        vm.prank(GOVERNANCE);
+        (ok,) = address(target).call{gas: 16_777_216}(rescue);
+        assertFalse(ok, "out of gas at the cap");
+        assertEq(foreign.balanceOf(CAROL), 1e18);
     }
 
     /// A token that converts amounts to shares arrives up to about one multiplier of base units

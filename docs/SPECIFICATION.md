@@ -257,7 +257,8 @@ them fell, so a second address over a component's ledger, which an issuer upgrad
 cannot move registered backing. Each read gets 200,000 gas and copies only the first word of
 the answer. A component whose read reverts, answers with less than one word or needs more gas
 counts as zero before the transfer, so it is not compared; neither it nor an oversized answer
-blocks rescues of other tokens.
+blocks rescues of other tokens. The reads are bounded one by one, not in sum (see Known
+limitations).
 
 ### Eligibility contract
 
@@ -583,6 +584,10 @@ design decision and must be made here first.
   writes it off; its liquidation claim waits until reads and transfers recover. A written-off
   component keeps its slot for good, so repeated issuer failures can fill the 128 slots and
   leave no room for new components. The 128-component cap cannot bound arbitrary issuer code.
+  Each balance read in `rescue`, and each read and valuation in the guard, gets at most 200,000
+  gas, but their sum is not bounded: in a large basket, enough components whose reads use that
+  gas make a rescue, or a swap with a loss, exceed the per-transaction gas cap until their
+  reads get cheaper.
 - **Dust and donations.** One unsolicited base unit makes an active zero-balance component
   required again. A donation can front-run a removal; for a token that cannot be sold, a
   donation above the dust allowance leaves a write-off, which keeps the slot forever, as the
