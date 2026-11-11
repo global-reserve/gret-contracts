@@ -12,15 +12,16 @@ assets on Ethereum, minted and redeemed in kind.
 > [!WARNING]
 > **Not audited by an audit firm.** AI models reviewed this source at the project's request; their
 > reports are in [`docs/audits/`](docs/audits/). The latest, by Codex on tag
-> `audit-2026-11-fixes`, found two Low issues, now documented as known limitations. An earlier
-> version of the vault, which these reviews do not cover, is deployed on Ethereum mainnet as a
-> pilot with the project's own funds, not meant for third parties. Nothing in this repository is
-> an offer to buy or sell any asset, nor investment advice. Use it at your own risk.
+> `audit-2026-11-fixes`, found two Low issues, now documented as known limitations. That code is
+> deployed on Ethereum mainnet as a pilot with the project's own funds, not meant for third
+> parties. An earlier vault, which these reviews do not cover, is also deployed and holds no GRET.
+> Nothing in this repository is an offer to buy or sell any asset, nor investment advice. Use it
+> at your own risk.
 
-The current source implements automatic live-balance accounting and has **not been deployed**.
-The October 27 pilot below runs earlier code, with recognized reserves and governance `sync`;
-its only GRET was redeemed on November 11, 2026. Deploying the current source requires a new
-vault and a compatible guard.
+The current source implements automatic live-balance accounting and has been deployed on
+Ethereum mainnet since November 11, 2026; see [Deployments](#deployments). The October 27 pilot
+vault runs earlier code, with recognized reserves and governance `sync`; its only GRET was
+redeemed on November 11, 2026.
 
 ## Overview
 
@@ -93,25 +94,38 @@ touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the
 
 | Network | Contract | Address |
 | --- | --- | --- |
+| Ethereum mainnet | `GRETVault` (current code, since November 11, 2026) | [`0x8cC6dfd77A5BDB9098d90d8beccF9F7eC145e8BA`](https://etherscan.io/address/0x8cC6dfd77A5BDB9098d90d8beccF9F7eC145e8BA) |
 | Ethereum mainnet | `GRETVault` (October 27 pilot; previous code; supply zero since November 11) | [`0x21b823334D2794a637cb9c0fd7fF8671b35F5A23`](https://etherscan.io/address/0x21b823334D2794a637cb9c0fd7fF8671b35F5A23) |
 
-Basket at deployment, in the order of `components()`, with the amounts in the first GRET from
-`initialAmounts()`. Addresses verified against each issuer's official sources; see the
-[pilot record](docs/PILOT.md#the-mint).
+The current vault was deployed on November 11, 2026, at 18:19 UTC, in block 26,393,434
+(transaction
+[`0x20db…2268`](https://etherscan.io/tx/0x20db61144af89fd8810d451e3a5a7047d531f38231704610be289219a22b2268)),
+from commit `9ab7e6fcdd893db29b924094571a83d6c7a0bcab`, whose `contracts/` is identical to tag
+`audit-2026-11-fixes`. Its source is verified on Sourcify (exact match) and on Etherscan.
+Governance is the pilot wallet `0xe03E228E1f1c50a985556Cc9c05b0aB953Feb7fd`; there is no
+rebalancer, price guard or eligibility contract, fees are zero and minting is open. The first
+mint of 1 GRET was made on November 11, 2026, at 18:29 UTC, in block 26,393,486 (transaction
+[`0x854b…dc3c`](https://etherscan.io/tx/0x854b4de637841ad2fe61052b2b57f67b4bf8dae6567488a852f3f31d43dfdc3c)).
+
+Basket of the current vault, in the order of `components()`, with the amounts in the first GRET
+from `initialAmounts()`: about USD 100, split by the target weights, at DefiLlama prices of
+November 11, 2026, 17:45 UTC. Addresses verified against each issuer's official sources; see
+[`scripts/pilot/config.ts`](scripts/pilot/config.ts). The October 27 vault has the same
+components with other amounts, recorded in [`docs/PILOT.md`](docs/PILOT.md#the-redemption).
 
 | # | Token | Asset | Address | In 1 GRET |
 | ---: | --- | --- | --- | ---: |
-| 0 | ITOTon | iShares Core S&P Total U.S. Stock Market ETF (Ondo) | [`0x0692481C369E2BDc728A69ae31b848343a4567Be`](https://etherscan.io/token/0x0692481C369E2BDc728A69ae31b848343a4567Be) | 0.0447 |
-| 1 | SPYx | SPDR S&P 500 ETF Trust (Backed / xStocks) | [`0x90A2a4c76b5D8c0bc892A69EA28Aa775a8f2dD48`](https://etherscan.io/token/0x90A2a4c76b5D8c0bc892A69EA28Aa775a8f2dD48) | 0.009789 |
-| 2 | EFAon | iShares MSCI EAFE ETF (Ondo) | [`0x4111b60bc87F2Bd1e81E783E271D7F0ec6EE088B`](https://etherscan.io/token/0x4111b60bc87F2Bd1e81E783E271D7F0ec6EE088B) | 0.07099 |
-| 3 | IEMGon | iShares Core MSCI Emerging Markets ETF (Ondo) | [`0xcDD60D15125bf3362b6838D2506b0Fa33bc1a515`](https://etherscan.io/token/0xcDD60D15125bf3362b6838D2506b0Fa33bc1a515) | 0.03256 |
-| 4 | SGOVon | iShares 0-3 Month Treasury Bond ETF (Ondo) | [`0x8De5D49725550f7b318b2FA0f1B1F118E98E8D0F`](https://etherscan.io/token/0x8De5D49725550f7b318b2FA0f1B1F118E98E8D0F) | 0.09729 |
-| 5 | BILon | SPDR Bloomberg 1-3 Month T-Bill ETF (Ondo) | [`0x2710E30d84B376c34a3B3036aa196b26a83A321b`](https://etherscan.io/token/0x2710E30d84B376c34a3B3036aa196b26a83A321b) | 0.108 |
-| 6 | JAAAx | Janus Henderson AAA CLO ETF (Backed / xStocks) | [`0x3bf2E3be4A829Bb3a5f5BE450AE4c8Eb3488da71`](https://etherscan.io/token/0x3bf2E3be4A829Bb3a5f5BE450AE4c8Eb3488da71) | 0.3953 |
-| 7 | PAXG | Physical gold (Paxos) | [`0x45804880De22913dAFE09f4980848ECE6EcbAf78`](https://etherscan.io/token/0x45804880De22913dAFE09f4980848ECE6EcbAf78) | 0.004936 |
-| 8 | cbBTC | Bitcoin (Coinbase) | [`0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf`](https://etherscan.io/token/0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf) | 0.00003081 |
-| 9 | VNQon | Vanguard Real Estate ETF (Ondo) | [`0xcCAe8843E26259278C200C6506F6E5A3bdD524cd`](https://etherscan.io/token/0xcCAe8843E26259278C200C6506F6E5A3bdD524cd) | 0.02658 |
-| 10 | DBCon | Invesco DB Commodity Index Tracking Fund (Ondo) | [`0x20224080aD516769723c9a4A18325fC4E8C9Ab5D`](https://etherscan.io/token/0x20224080aD516769723c9a4A18325fC4E8C9Ab5D) | 0.2974 |
+| 0 | ITOTon | iShares Core S&P Total U.S. Stock Market ETF (Ondo) | [`0x0692481C369E2BDc728A69ae31b848343a4567Be`](https://etherscan.io/token/0x0692481C369E2BDc728A69ae31b848343a4567Be) | 0.04468 |
+| 1 | SPYx | SPDR S&P 500 ETF Trust (Backed / xStocks) | [`0x90A2a4c76b5D8c0bc892A69EA28Aa775a8f2dD48`](https://etherscan.io/token/0x90A2a4c76b5D8c0bc892A69EA28Aa775a8f2dD48) | 0.009803 |
+| 2 | EFAon | iShares MSCI EAFE ETF (Ondo) | [`0x4111b60bc87F2Bd1e81E783E271D7F0ec6EE088B`](https://etherscan.io/token/0x4111b60bc87F2Bd1e81E783E271D7F0ec6EE088B) | 0.07002 |
+| 3 | IEMGon | iShares Core MSCI Emerging Markets ETF (Ondo) | [`0xcDD60D15125bf3362b6838D2506b0Fa33bc1a515`](https://etherscan.io/token/0xcDD60D15125bf3362b6838D2506b0Fa33bc1a515) | 0.03236 |
+| 4 | SGOVon | iShares 0-3 Month Treasury Bond ETF (Ondo) | [`0x8De5D49725550f7b318b2FA0f1B1F118E98E8D0F`](https://etherscan.io/token/0x8De5D49725550f7b318b2FA0f1B1F118E98E8D0F) | 0.09708 |
+| 5 | BILon | SPDR Bloomberg 1-3 Month T-Bill ETF (Ondo) | [`0x2710E30d84B376c34a3B3036aa196b26a83A321b`](https://etherscan.io/token/0x2710E30d84B376c34a3B3036aa196b26a83A321b) | 0.1078 |
+| 6 | JAAAx | Janus Henderson AAA CLO ETF (Backed / xStocks) | [`0x3bf2E3be4A829Bb3a5f5BE450AE4c8Eb3488da71`](https://etherscan.io/token/0x3bf2E3be4A829Bb3a5f5BE450AE4c8Eb3488da71) | 0.3956 |
+| 7 | PAXG | Physical gold (Paxos) | [`0x45804880De22913dAFE09f4980848ECE6EcbAf78`](https://etherscan.io/token/0x45804880De22913dAFE09f4980848ECE6EcbAf78) | 0.00501 |
+| 8 | cbBTC | Bitcoin (Coinbase) | [`0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf`](https://etherscan.io/token/0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf) | 0.00003355 |
+| 9 | VNQon | Vanguard Real Estate ETF (Ondo) | [`0xcCAe8843E26259278C200C6506F6E5A3bdD524cd`](https://etherscan.io/token/0xcCAe8843E26259278C200C6506F6E5A3bdD524cd) | 0.02536 |
+| 10 | DBCon | Invesco DB Commodity Index Tracking Fund (Ondo) | [`0x20224080aD516769723c9a4A18325fC4E8C9Ab5D`](https://etherscan.io/token/0x20224080aD516769723c9a4A18325fC4E8C9Ab5D) | 0.3237 |
 
 ## Getting started
 
