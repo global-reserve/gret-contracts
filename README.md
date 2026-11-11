@@ -82,7 +82,7 @@ touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the
 | Document | Contents |
 | --- | --- |
 | [Specification](docs/SPECIFICATION.md) | Design, rules, implementation details, operating assumptions and known limitations |
-| [Mainnet pilot](docs/PILOT.md) | Record of the pilot: the deployed commit, the mint, the sync and the redemption |
+| [October 27 pilot vault](docs/PILOT.md) | Record of the earlier vault: the deployed commit, the mint, the sync and the redemption |
 | [Audit by Claude Opus 5.5](docs/audits/2026-11-05-claude-opus-5-5.md) | Audit of tag `audit-2026-11`: sixteen findings, and a review of the commits that fixed or documented each |
 | [Review by Gemini](docs/audits/2026-11-05-gemini.md) | Review of the vault file alone at tag `audit-2026-11-fixes`: no findings |
 | [Audit by Codex](docs/audits/2026-11-09-codex.md) | Audit of tag `audit-2026-11-fixes`: two Low findings, documented as known limitations |
@@ -169,7 +169,7 @@ and prints which one; pinning a block requires an RPC with historical state. For
 MAINNET_RPC_URL=https://ethereum-rpc.publicnode.com npm run test:fork
 ```
 
-The mainnet pilot is recorded in [`docs/PILOT.md`](docs/PILOT.md).
+The October 27 pilot vault is recorded in [`docs/PILOT.md`](docs/PILOT.md).
 
 To keep a local network between runs, leave `npm run node` open in one terminal and run
 `npm run deploy:local` in another. Hardhat provides the test accounts; no private keys need
@@ -288,7 +288,7 @@ assets/gret-logo.svg, -256.png       GRET logo (SVG, and 256 px PNG for wallets 
 hardhat.config.ts                    Compiler, plugins and local networks
 foundry.toml                         Formatting only, for `forge fmt contracts`; Hardhat builds and tests the project
 docs/SPECIFICATION.md                Specification: design, rules, implementation details and known limitations
-docs/PILOT.md                        Record of the mainnet pilot
+docs/PILOT.md                        Record of the October 27 pilot vault
 docs/audits/                         Audit reports, one per review, named with its date and reviewer
 .github/workflows/ci.yml             Continuous integration: compile, type-check and test
 CONTRIBUTING.md                      Setup, what to run for each change and conventions

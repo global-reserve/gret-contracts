@@ -1,9 +1,10 @@
-# Ethereum mainnet pilot
+# October 27 pilot vault
 
 From October 27 to November 11, 2026, the project ran a GRET vault on Ethereum mainnet with its
 own funds. One wallet deployed the vault, minted 1 GRET with the 11 components, synced two
 components and redeemed the GRET, receiving the 11 components back. This page records those
-steps and their transactions.
+steps and their transactions. The vault in use, deployed on November 11, 2026 with the current
+source, is listed in the [README](../README.md#deployments).
 
 ## The contract
 
@@ -17,10 +18,10 @@ steps and their transactions.
   optimizer at 200 runs and EVM `cancun`.
 - **Verification:** exact match on Sourcify (creation and runtime bytecode) and verified on
   Etherscan, both on October 27, 2026.
-- **Pilot wallet:** `0xe03E228E1f1c50a985556Cc9c05b0aB953Feb7fd`, an externally owned
-  account. It deployed the vault, was its governance and its only holder, and signed every
-  transaction below with MetaMask, from the local pilot page (`npm run pilot`); the two syncs
-  went through a copy of that page with a `sync` button added.
+- **Pilot wallet:** `0xe03E228E1f1c50a985556Cc9c05b0aB953Feb7fd`, an externally owned account
+  during the pilot. It deployed the vault, was its governance and its only holder, and signed
+  every transaction below with MetaMask, from the local pilot page (`npm run pilot`); the two
+  syncs went through a copy of that page with a `sync` button added.
 - **Settings at deployment:** governance was the pilot wallet; there was no rebalancer, no
   price guard and no eligibility contract; fees were zero and minting was open.
 

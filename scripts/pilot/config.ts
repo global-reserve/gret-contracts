@@ -4,8 +4,10 @@ import type { Address } from "viem";
  * Parameters of the mainnet pilot, decided on 20 October 2026. The amounts of the first GRET were
  * updated on 11 November 2026.
  *
- * A deployment fixes them for that vault: the components, the basket of the first GRET and the
- * initial governance, which can later be handed over in two steps with the vault's 7-day wait.
+ * A deployment sets them for that vault: the components, the basket of the first GRET and the
+ * initial governance. Governance can later change the components under the specification's rules
+ * and the basket of the first GRET while the supply is zero, and can hand itself over in two steps
+ * with the vault's 7-day wait.
  *
  * Addresses checked on 20 October 2026: the seven Ondo tokens against Ondo's official token list
  * (v13.0.0), SPYx and JAAAx against Backed's product pages, PAXG against Paxos's repository, and
