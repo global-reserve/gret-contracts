@@ -1,7 +1,8 @@
 import type { Address } from "viem";
 
 /**
- * Parameters of the mainnet pilot, decided on 20 October 2026.
+ * Parameters of the mainnet pilot, decided on 20 October 2026. The amounts of the first GRET were
+ * updated on 11 November 2026.
  *
  * A deployment fixes them for that vault: the components, the basket of the first GRET and the
  * initial governance, which can later be handed over in two steps with the vault's 7-day wait.
@@ -11,7 +12,8 @@ import type { Address } from "viem";
  * cbBTC against coinbase.com/cbbtc, confirmed by hand by the project owner.
  *
  * `perGret` gives 1 GRET worth about USD 100, split by the target weights of 22 October 2026, at the
- * DefiLlama prices of 22 October 2026, 17:53 UTC (`priceUsd`, for reference only).
+ * DefiLlama prices of 11 November 2026, 17:45 UTC (`priceUsd`, for reference only), with four
+ * significant digits.
  */
 export const PILOT_WALLET: Address = "0xe03E228E1f1c50a985556Cc9c05b0aB953Feb7fd";
 
@@ -19,19 +21,19 @@ export const PILOT = {
   /** Deploys, governs and makes the first mint. Deploying gives no power over the vault. */
   wallet: PILOT_WALLET,
   governance: PILOT_WALLET,
-  pricedAt: "2026-10-22T17:53Z",
+  pricedAt: "2026-11-11T17:45Z",
   components: [
-    { symbol: "ITOTon", address: "0x0692481c369e2bdc728a69ae31b848343a4567be", decimals: 18, weightPct: 7.5, priceUsd: 167.8, perGret: "0.0447" },
-    { symbol: "SPYx", address: "0x90a2a4c76b5d8c0bc892a69ea28aa775a8f2dd48", decimals: 18, weightPct: 7.5, priceUsd: 766.15, perGret: "0.009789" },
-    { symbol: "EFAon", address: "0x4111b60bc87f2bd1e81e783e271d7f0ec6ee088b", decimals: 18, weightPct: 7.5, priceUsd: 105.65, perGret: "0.07099" },
-    { symbol: "IEMGon", address: "0xcdd60d15125bf3362b6838d2506b0fa33bc1a515", decimals: 18, weightPct: 2.5, priceUsd: 76.77, perGret: "0.03256" },
-    { symbol: "SGOVon", address: "0x8de5d49725550f7b318b2fa0f1b1f118e98e8d0f", decimals: 18, weightPct: 10, priceUsd: 102.78, perGret: "0.09729" },
-    { symbol: "BILon", address: "0x2710e30d84b376c34a3b3036aa196b26a83a321b", decimals: 18, weightPct: 10, priceUsd: 92.6, perGret: "0.108" },
-    { symbol: "JAAAx", address: "0x3bf2e3be4a829bb3a5f5be450ae4c8eb3488da71", decimals: 18, weightPct: 20, priceUsd: 50.6, perGret: "0.3953" },
-    { symbol: "PAXG", address: "0x45804880de22913dafe09f4980848ece6ecbaf78", decimals: 18, weightPct: 20, priceUsd: 4051.64, perGret: "0.004936" },
-    { symbol: "cbBTC", address: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", decimals: 8, weightPct: 2.5, priceUsd: 81150.78, perGret: "0.00003081" },
-    { symbol: "VNQon", address: "0xccae8843e26259278c200c6506f6e5a3bdd524cd", decimals: 18, weightPct: 2.5, priceUsd: 94.06, perGret: "0.02658" },
-    { symbol: "DBCon", address: "0x20224080ad516769723c9a4a18325fc4e8c9ab5d", decimals: 18, weightPct: 10, priceUsd: 33.63, perGret: "0.2974" },
+    { symbol: "ITOTon", address: "0x0692481c369e2bdc728a69ae31b848343a4567be", decimals: 18, weightPct: 7.5, priceUsd: 167.86, perGret: "0.04468" },
+    { symbol: "SPYx", address: "0x90a2a4c76b5d8c0bc892a69ea28aa775a8f2dd48", decimals: 18, weightPct: 7.5, priceUsd: 765.1, perGret: "0.009803" },
+    { symbol: "EFAon", address: "0x4111b60bc87f2bd1e81e783e271d7f0ec6ee088b", decimals: 18, weightPct: 7.5, priceUsd: 107.11, perGret: "0.07002" },
+    { symbol: "IEMGon", address: "0xcdd60d15125bf3362b6838d2506b0fa33bc1a515", decimals: 18, weightPct: 2.5, priceUsd: 77.26, perGret: "0.03236" },
+    { symbol: "SGOVon", address: "0x8de5d49725550f7b318b2fa0f1b1f118e98e8d0f", decimals: 18, weightPct: 10, priceUsd: 103.01, perGret: "0.09708" },
+    { symbol: "BILon", address: "0x2710e30d84b376c34a3b3036aa196b26a83a321b", decimals: 18, weightPct: 10, priceUsd: 92.79, perGret: "0.1078" },
+    { symbol: "JAAAx", address: "0x3bf2e3be4a829bb3a5f5be450ae4c8eb3488da71", decimals: 18, weightPct: 20, priceUsd: 50.56, perGret: "0.3956" },
+    { symbol: "PAXG", address: "0x45804880de22913dafe09f4980848ece6ecbaf78", decimals: 18, weightPct: 20, priceUsd: 3991.71, perGret: "0.00501" },
+    { symbol: "cbBTC", address: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", decimals: 8, weightPct: 2.5, priceUsd: 74519.59, perGret: "0.00003355" },
+    { symbol: "VNQon", address: "0xccae8843e26259278c200c6506f6e5a3bdd524cd", decimals: 18, weightPct: 2.5, priceUsd: 98.59, perGret: "0.02536" },
+    { symbol: "DBCon", address: "0x20224080ad516769723c9a4a18325fc4e8c9ab5d", decimals: 18, weightPct: 10, priceUsd: 30.9, perGret: "0.3237" },
   ],
 } as const;
 
