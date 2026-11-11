@@ -18,8 +18,9 @@ assets on Ethereum, minted and redeemed in kind.
 > an offer to buy or sell any asset, nor investment advice. Use it at your own risk.
 
 The current source implements automatic live-balance accounting and has **not been deployed**.
-The immutable October 27 pilot below still uses recognized reserves and governance `sync`.
-A new vault and compatible guard require a separate deployment and migration decision.
+The October 27 pilot below runs earlier code, with recognized reserves and governance `sync`;
+its only GRET was redeemed on November 11, 2026. Deploying the current source requires a new
+vault and a compatible guard.
 
 ## Overview
 
@@ -80,7 +81,7 @@ touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the
 | Document | Contents |
 | --- | --- |
 | [Specification](docs/SPECIFICATION.md) | Design, rules, implementation details, operating assumptions and known limitations |
-| [Mainnet pilot](docs/PILOT.md) | Steps to deploy the vault and make the first mint, and the record of the October 27 deployment |
+| [Mainnet pilot](docs/PILOT.md) | Record of the pilot: the deployed commit, the mint, the sync and the redemption |
 | [Audit by Claude Opus 5.5](docs/audits/2026-11-05-claude-opus-5-5.md) | Audit of tag `audit-2026-11`: sixteen findings, and a review of the commits that fixed or documented each |
 | [Review by Gemini](docs/audits/2026-11-05-gemini.md) | Review of the vault file alone at tag `audit-2026-11-fixes`: no findings |
 | [Audit by Codex](docs/audits/2026-11-09-codex.md) | Audit of tag `audit-2026-11-fixes`: two Low findings, documented as known limitations |
@@ -92,11 +93,11 @@ touching it. The [specification](docs/SPECIFICATION.md) is authoritative for the
 
 | Network | Contract | Address |
 | --- | --- | --- |
-| Ethereum mainnet | `GRETVault` (October 27 pilot; previous code) | [`0x21b823334D2794a637cb9c0fd7fF8671b35F5A23`](https://etherscan.io/address/0x21b823334D2794a637cb9c0fd7fF8671b35F5A23) |
+| Ethereum mainnet | `GRETVault` (October 27 pilot; previous code; supply zero since November 11) | [`0x21b823334D2794a637cb9c0fd7fF8671b35F5A23`](https://etherscan.io/address/0x21b823334D2794a637cb9c0fd7fF8671b35F5A23) |
 
 Basket at deployment, in the order of `components()`, with the amounts in the first GRET from
 `initialAmounts()`. Addresses verified against each issuer's official sources; see the
-[pilot guide](docs/PILOT.md#october-27-2026-deployment).
+[pilot record](docs/PILOT.md#the-mint).
 
 | # | Token | Asset | Address | In 1 GRET |
 | ---: | --- | --- | --- | ---: |
@@ -154,7 +155,7 @@ and prints which one; pinning a block requires an RPC with historical state. For
 MAINNET_RPC_URL=https://ethereum-rpc.publicnode.com npm run test:fork
 ```
 
-The mainnet pilot is explained step by step in [`docs/PILOT.md`](docs/PILOT.md).
+The mainnet pilot is recorded in [`docs/PILOT.md`](docs/PILOT.md).
 
 To keep a local network between runs, leave `npm run node` open in one terminal and run
 `npm run deploy:local` in another. Hardhat provides the test accounts; no private keys need
@@ -273,7 +274,7 @@ assets/gret-logo.svg, -256.png       GRET logo (SVG, and 256 px PNG for wallets 
 hardhat.config.ts                    Compiler, plugins and local networks
 foundry.toml                         Formatting only, for `forge fmt contracts`; Hardhat builds and tests the project
 docs/SPECIFICATION.md                Specification: design, rules, implementation details and known limitations
-docs/PILOT.md                        Mainnet pilot guide and record of the October 27 deployment
+docs/PILOT.md                        Record of the mainnet pilot
 docs/audits/                         Audit reports, one per review, named with its date and reviewer
 .github/workflows/ci.yml             Continuous integration: compile, type-check and test
 CONTRIBUTING.md                      Setup, what to run for each change and conventions

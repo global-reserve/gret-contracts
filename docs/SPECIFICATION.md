@@ -1,9 +1,10 @@
 # GRET specification
 
-Updated on November 5, 2026. This document states what the contracts in `contracts/` must do.
+Updated on November 11, 2026. This document states what the contracts in `contracts/` must do.
 The current source has not been deployed. The pilot vault deployed on Ethereum mainnet on
 October 27, 2026 runs an earlier, immutable version, which kept a recognized-reserve ledger
-updated by governance `sync`; [PILOT.md](PILOT.md) records that deployment.
+updated by governance `sync`; [PILOT.md](PILOT.md) records that pilot, which ended with its
+only GRET redeemed.
 
 ## Overview
 
@@ -623,5 +624,4 @@ These items are proposals: none is approved, implemented or part of a deployment
 - Governance implementation and key recovery; the current governance is a wallet.
 - Feed coverage, market-peg monitoring and guard improvements, such as a cap on the value that
   swaps which look fair can move, which would also bound a mispricing the feeds do not see.
-- Deploying this source, and any migration from the October 27 pilot, requires a concrete
-  deployment and funding plan.
+- Deploying this source requires a concrete deployment and funding plan.
