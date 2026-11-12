@@ -26,6 +26,7 @@
     "test:coverage": "hardhat test --coverage",
     "test:deep": "hardhat test solidity --test-profile deep",
     "test:fork": "hardhat test nodejs test-fork/GRETVault.mainnet.ts",
+    "test:deployed": "MAINNET_RPC_URL=${MAINNET_RPC_URL:-https://ethereum-rpc.publicnode.com} hardhat test nodejs test-fork/GRETVault.deployed.ts",
     "pilot:rehearse": "MAINNET_RPC_URL=${MAINNET_RPC_URL:-https://ethereum-rpc.publicnode.com} hardhat test nodejs test-fork/GRETVault.pilot.ts",
     "pilot:fork-node": "hardhat node --fork ${MAINNET_RPC_URL:-https://ethereum-rpc.publicnode.com}",
     "pilot": "hardhat run scripts/pilot/server.ts",

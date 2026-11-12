@@ -3,22 +3,20 @@ import { after, describe, it } from "node:test";
 
 import { network } from "hardhat";
 import {
-  encodeAbiParameters,
   erc20Abi,
   formatUnits,
   getAddress,
-  keccak256,
   maxUint256,
   parseAbi,
   parseEther,
   parseEventLogs,
   parseUnits,
-  toHex,
   type Address,
   type Hex,
 } from "viem";
 
 import { PRICE_FEEDS } from "../scripts/pilot/config.js";
+import { storageFunding } from "./funding.js";
 
 /**
  * Runs the vault against the real basket components on an Ethereum mainnet fork.
@@ -51,8 +49,6 @@ const BASKET = [
 const EIP1967_IMPLEMENTATION = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 const EIP1967_ADMIN = "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
 const EIP1967_BEACON = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50";
-// OpenZeppelin ERC20Upgradeable v5 namespaced storage: `_balances` is its first field.
-const OZ5_ERC20_STORAGE = 0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace00n;
 const INITIAL_SHARES = 10n ** 18n;
 // Base units a transfer may lose to rounding in tokens that store shares (xStocks).
 const ROUNDING = 10n;
@@ -81,63 +77,7 @@ describe("GRETVault on an Ethereum mainnet fork", { skip: RPC_URL === undefined 
   const block = await publicClient.getBlock();
   console.log(`Fork of Ethereum mainnet at block ${block.number} (${new Date(Number(block.timestamp) * 1000).toISOString()})`);
 
-  const balanceSlots = new Map<Address, (account: Address) => Hex>();
-
-  /** Finds how a token stores balances by writing candidate slots and watching balanceOf. */
-  async function findBalanceSlot(token: Address) {
-    const probe = getAddress("0x00000000000000000000000000000000000b0b0b");
-    const candidates: ((account: Address) => Hex)[] = [
-      (account) => keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [account, OZ5_ERC20_STORAGE])),
-    ];
-    // Solidity mappings first (xStocks keep balances at slot 263), then Vyper-style keys.
-    for (let slot = 0n; slot < 300n; slot++) {
-      candidates.push((account) =>
-        keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [account, slot])),
-      );
-    }
-    for (let slot = 0n; slot < 60n; slot++) {
-      candidates.push((account) =>
-        keccak256(encodeAbiParameters([{ type: "uint256" }, { type: "address" }], [slot, account])),
-      );
-    }
-    const readBalance = () => publicClient.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [probe] });
-    const before = await readBalance();
-    for (const keyOf of candidates) {
-      const key = keyOf(probe);
-      const previous = await publicClient.getStorageAt({ address: token, slot: key });
-      // Large enough to survive a share-to-balance multiplier.
-      await networkHelpers.setStorageAt(token, key, toHex(10n ** 30n, { size: 32 }));
-      if ((await readBalance()) !== before) {
-        await networkHelpers.setStorageAt(token, key, previous ?? toHex(0n, { size: 32 }));
-        return keyOf;
-      }
-      await networkHelpers.setStorageAt(token, key, previous ?? toHex(0n, { size: 32 }));
-    }
-    throw new Error(`balance slot not found for ${token}`);
-  }
-
-  /**
-   * Sets `account`'s balance of `token` to at least `amount` by writing its storage. Tokens that
-   * store shares and apply a multiplier get the raw value scaled up accordingly.
-   */
-  async function fund(token: Address, account: Address, amount: bigint) {
-    let keyOf = balanceSlots.get(token);
-    if (keyOf === undefined) {
-      keyOf = await findBalanceSlot(token);
-      balanceSlots.set(token, keyOf);
-    }
-    const read = () => publicClient.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [account] });
-    await networkHelpers.setStorageAt(token, keyOf(account), toHex(amount, { size: 32 }));
-    const balance = await read();
-    if (balance < amount) {
-      const raw = balance === 0n ? amount * 10n ** 18n : (amount * amount) / balance + 1n;
-      await networkHelpers.setStorageAt(token, keyOf(account), toHex(raw, { size: 32 }));
-    }
-    assert.ok((await read()) >= amount, `funding ${token}: balance below ${amount}`);
-  }
-
-  const balanceOf = (token: Address, account: Address) =>
-    publicClient.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [account] });
+  const { balanceOf, fund } = await storageFunding(connection);
 
   it("reports what each component is at this block", async () => {
     const rows = [];

@@ -22,6 +22,7 @@ must pass before a pull request is reviewed; CI runs it on every push and pull r
 | `contracts/GRETVault.sol` | `npm run test:deep`, `npm run pilot:rehearse` and, with `MAINNET_RPC_URL`, `npm run test:fork` |
 | `contracts/ChainlinkPriceGuard.sol` | `npm run test:deep` and, with `MAINNET_RPC_URL`, `npm run test:fork` |
 | `scripts/pilot/` | `npm run pilot:rehearse` |
+| A governance action on the deployed vault | `npm run test:deployed`, recording the new configuration in its configuration test |
 | Tests or documentation only | `npm run check` |
 
 Coverage (`npm run test:coverage`) rewrites the build artifacts: do not run it at the same

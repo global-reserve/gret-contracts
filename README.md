@@ -154,6 +154,7 @@ stands in for governance.
 | `npm run test:coverage` | Run the tests with coverage |
 | `npm run test:deep` | Long fuzz and invariant runs (about 7 minutes) |
 | `npm run test:fork` | Test the vault with the 11 real components on a mainnet fork |
+| `npm run test:deployed` | Attack the deployed vault on a mainnet fork: theft, rounding, donations, blocked exits and a stolen governance key |
 | `npm run pilot:rehearse` | Rehearse the pilot on a mainnet fork with the pilot wallet |
 | `npm run pilot:fork-node` | Local mainnet fork at `127.0.0.1:8545`, to rehearse with MetaMask |
 | `npm run pilot` | Local pilot page at `127.0.0.1:8787`, to sign with MetaMask |
@@ -168,6 +169,11 @@ and prints which one; pinning a block requires an RPC with historical state. For
 ```sh
 MAINNET_RPC_URL=https://ethereum-rpc.publicnode.com npm run test:fork
 ```
+
+`test:deployed` runs against the current deployment, with its real holder, balances and
+governance; it uses PublicNode unless `MAINNET_RPC_URL` is set, and `ATTACK_SEED` changes its
+random sequence. Its configuration test fails whenever governance proposes or makes a change,
+until the test records it.
 
 The October 27 pilot vault is recorded in [`docs/PILOT.md`](docs/PILOT.md).
 
@@ -280,6 +286,8 @@ test/helpers/basket.ts               Test basket shared by the vault tests
 test/helpers/GRETVaultCase.sol       Setup and adverse tokens shared by the Solidity cases
 test-fork/GRETVault.mainnet.ts       Vault, rebalancing and price guard with the real components and feeds on a mainnet fork
 test-fork/GRETVault.pilot.ts         Pilot rehearsal with the real wallet on a mainnet fork
+test-fork/GRETVault.deployed.ts      Attacks on the deployed vault, with its real state, on a mainnet fork
+test-fork/funding.ts                 Funds fork accounts with real tokens by writing their storage
 scripts/deploy-local.ts              Local deployment of 11 mocks and the vault
 scripts/pilot/config.ts              Mainnet pilot parameters
 scripts/pilot/plan.ts                Pilot transactions and checks
